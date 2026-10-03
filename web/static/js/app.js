@@ -483,8 +483,8 @@ document.addEventListener("DOMContentLoaded", () => {
           {
             label: "Close Price",
             data: [...closePrices, null],
-            borderColor: "#38bdf8",
-            backgroundColor: "rgba(56, 189, 248, 0.08)",
+            borderColor: "#ff9f43",
+            backgroundColor: "rgba(255, 159, 67, 0.08)",
             borderWidth: 2.5,
             tension: 0.15,
             pointRadius: 0,
@@ -502,7 +502,7 @@ document.addEventListener("DOMContentLoaded", () => {
           {
             label: "SMA 20",
             data: [...sma20, null],
-            borderColor: "#c59e00",
+            borderColor: "#ffb066",
             borderWidth: 2,
             pointRadius: 0,
           },

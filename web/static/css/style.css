@@ -1,24 +1,24 @@
 /* ==========================================================================
-   NIFTY 500 AI Terminal - Yellow Neo-Brutalist UI System
-   Dark Golden Amber Accent (#c59e00) | Hard Offset Shadows | High Contrast
-   Sharp Edges | Fluid Mobile Responsiveness (320px to 4K)
+   NIFTY 500 AI Terminal - Pale Orange & Signal Neo-Brutalist UI System
+   Pale Orange Accent (#ff9f43) | Bullish Green (#10b981) | Bearish Red (#f43f5e)
+   Hard Offset Shadows | High Contrast | Sharp Edges | Fluid Responsiveness
    ========================================================================== */
 
 :root {
-  /* Yellow Neo-Brutalist Palette (Dark Muted Amber / Golden Yellow) */
+  /* Pale Orange Brutalist Palette */
   --bg-primary: #0a0a0c;
   --bg-secondary: #121216;
   --bg-card: #141419;
   --bg-card-hover: #1a1a20;
   
-  --border-thick: 2px solid #c59e00;
-  --border-thin: 1px solid rgba(197, 158, 0, 0.3);
-  --border-dashed: 2px dashed #c59e00;
+  --border-thick: 2px solid #ff9f43;
+  --border-thin: 1px solid rgba(255, 159, 67, 0.3);
+  --border-dashed: 2px dashed #ff9f43;
   
-  --shadow-brutal: 4px 4px 0px #c59e00;
+  --shadow-brutal: 4px 4px 0px #ff9f43;
   --shadow-brutal-white: 4px 4px 0px #ffffff;
-  --shadow-brutal-hover: 6px 6px 0px #c59e00;
-  --shadow-brutal-active: 1px 1px 0px #c59e00;
+  --shadow-brutal-hover: 6px 6px 0px #ff9f43;
+  --shadow-brutal-active: 1px 1px 0px #ff9f43;
   
   /* Typography Colors */
   --text-main: #ffffff;
@@ -26,12 +26,13 @@
   --text-dim: #71717a;
   --text-inverse: #000000;
   
-  /* Brutalist Yellow Accents */
-  --accent-yellow: #c59e00;
+  /* Brutalist Accents: Pale Orange Main, Emerald Green & Rose Red Signals */
+  --accent-orange: #ff9f43;
+  --accent-yellow: #ff9f43;
   --accent-white: #ffffff;
   --accent-black: #000000;
-  --accent-bullish: #c59e00;
-  --accent-bearish: #a1a1aa;
+  --accent-bullish: #10b981;
+  --accent-bearish: #f43f5e;
   
   /* Fonts */
   --font-sans: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -48,8 +49,8 @@
 body {
   background-color: var(--bg-primary);
   background-image: 
-    radial-gradient(circle at 15% 15%, rgba(197, 158, 0, 0.04) 0%, transparent 45%),
-    radial-gradient(circle at 85% 85%, rgba(197, 158, 0, 0.04) 0%, transparent 45%);
+    radial-gradient(circle at 15% 15%, rgba(255, 159, 67, 0.04) 0%, transparent 45%),
+    radial-gradient(circle at 85% 85%, rgba(255, 159, 67, 0.04) 0%, transparent 45%);
   background-attachment: fixed;
   color: var(--text-main);
   font-family: var(--font-sans);
@@ -155,7 +156,7 @@ body {
   font-weight: 800;
   font-family: var(--font-mono);
   text-transform: uppercase;
-  box-shadow: 2px 2px 0px #c59e00;
+  box-shadow: 2px 2px 0px #ff9f43;
 }
 
 .status-dot {
@@ -184,13 +185,13 @@ body {
   font-size: 0.8rem;
   font-weight: 800;
   cursor: pointer;
-  box-shadow: 3px 3px 0px #c59e00;
+  box-shadow: 3px 3px 0px #ff9f43;
   transition: all 0.1s ease;
   text-decoration: none;
 }
 
 .chip-btn:hover {
-  background: var(--accent-yellow);
+  background: var(--accent-orange);
   color: #000000;
   transform: translate(-1px, -1px);
   box-shadow: 4px 4px 0px #ffffff;
@@ -198,7 +199,7 @@ body {
 
 .chip-btn:active {
   transform: translate(2px, 2px);
-  box-shadow: 1px 1px 0px #c59e00;
+  box-shadow: 1px 1px 0px #ff9f43;
 }
 
 /* Main Layout */
@@ -255,7 +256,7 @@ body {
   font-size: 1rem;
   font-weight: 800;
   text-transform: uppercase;
-  box-shadow: 3px 3px 0px #c59e00;
+  box-shadow: 3px 3px 0px #ff9f43;
 }
 
 .input-wrapper input:focus,
@@ -263,7 +264,7 @@ body {
 .form-select:focus {
   outline: none;
   background: #18181e;
-  box-shadow: 5px 5px 0px #c59e00;
+  box-shadow: 5px 5px 0px #ff9f43;
 }
 
 .mode-dropdown,
@@ -277,7 +278,7 @@ body {
   font-size: 0.9rem;
   font-weight: 800;
   cursor: pointer;
-  box-shadow: 3px 3px 0px #c59e00;
+  box-shadow: 3px 3px 0px #ff9f43;
 }
 
 .btn {
@@ -314,8 +315,8 @@ body {
 
 .btn-accent {
   background: #000000;
-  color: var(--accent-yellow);
-  box-shadow: 4px 4px 0px #c59e00;
+  color: var(--accent-orange);
+  box-shadow: 4px 4px 0px #ff9f43;
 }
 
 .btn-accent:hover {
@@ -390,7 +391,7 @@ body {
   border: var(--border-thick);
   padding: 16px;
   background: #000000;
-  box-shadow: 3px 3px 0px #c59e00;
+  box-shadow: 3px 3px 0px #ff9f43;
 }
 
 .progress-info-row {
@@ -508,17 +509,17 @@ body {
 }
 
 .trend-badge.bullish {
-  background: var(--accent-yellow);
+  background: var(--accent-bullish);
   color: #000000;
   border: 2px solid #ffffff;
-  box-shadow: 3px 3px 0px #ffffff;
+  box-shadow: 3px 3px 0px #10b981;
 }
 
 .trend-badge.bearish {
-  background: #000000;
+  background: var(--accent-bearish);
   color: #ffffff;
-  border: var(--border-dashed);
-  box-shadow: 3px 3px 0px #c59e00;
+  border: 2px solid #ffffff;
+  box-shadow: 3px 3px 0px #f43f5e;
 }
 
 .price-prediction-body {
@@ -566,11 +567,11 @@ body {
 }
 
 .price-delta.positive {
-  color: var(--accent-yellow);
+  color: var(--accent-bullish);
 }
 
 .price-delta.negative {
-  color: #a1a1aa;
+  color: var(--accent-bearish);
 }
 
 .forecast-meta {
@@ -831,7 +832,7 @@ body {
   background: #000000;
   border: var(--border-thick);
   padding: 16px;
-  box-shadow: 3px 3px 0px #c59e00;
+  box-shadow: 3px 3px 0px #ff9f43;
 }
 
 .chart-canvas-title {
@@ -1034,7 +1035,7 @@ tr:nth-child(even) td {
   border: var(--border-thick);
   padding: 14px;
   background: #000000;
-  box-shadow: 3px 3px 0px #c59e00;
+  box-shadow: 3px 3px 0px #ff9f43;
   cursor: pointer;
   transition: transform 0.15s;
 }
