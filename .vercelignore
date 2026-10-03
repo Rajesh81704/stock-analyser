@@ -1,0 +1,16 @@
+# Exclude virtual environment and git data
+.venv/
+.git/
+
+# Exclude notebook test files and evaluation assets
+*.ipynb
+scratch/
+test_system.ipynb
+test.ipynb
+evaluation_plot.png
+backtest_validation.py
+main.py
+
+# Exclude temporary database WAL files
+database/*.db-wal
+database/*.db-shm
