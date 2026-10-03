@@ -454,6 +454,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const labels = history.map((d) => d.date);
     const closePrices = history.map((d) => d.close);
+    const bbUpper = history.map((d) => d.bb_upper);
+    const bbLower = history.map((d) => d.bb_lower);
+    const sma20 = history.map((d) => d.sma_20);
+    const sma50 = history.map((d) => d.sma_50);
     const sma200 = history.map((d) => d.sma_200);
     const pivotR1 = history.map((d) => d.pivot_r1);
     const pivotS1 = history.map((d) => d.pivot_s1);
