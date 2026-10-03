@@ -38,17 +38,17 @@ def get_db_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
 def init_db(db_path: str = DB_PATH):
     """Initializes the database schema with indexes and constraints."""
     try:
-        with get_db_connection(db_path) as conn:
-            cursor = conn.cursor()
+        conn = get_db_connection(db_path)
+        cursor = conn.cursor()
 
-            # 1. stocks_meta
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS stocks_meta (
-                ticker TEXT PRIMARY KEY,
-                company_name TEXT,
-                sector TEXT,
-                industry TEXT,
-                market_cap REAL,
+        # 1. stocks_meta
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS stocks_meta (
+            ticker TEXT PRIMARY KEY,
+            company_name TEXT,
+            sector TEXT,
+            industry TEXT,
+            market_cap REAL,
             pe_ratio REAL,
             pb_ratio REAL,
             eps REAL,
@@ -139,10 +139,10 @@ def init_db(db_path: str = DB_PATH):
         """)
 
         conn.commit()
-    except Exception as e:
-        print(f"[DB] init_db skipped modification (read-only mode active): {e}")
-    else:
+        conn.close()
         print("[DB] SQLite database initialized successfully.")
+    except Exception as e:
+        print(f"[DB] init_db skipped schema modification (read-only mode active): {e}")
 
 
 # =====================================================================

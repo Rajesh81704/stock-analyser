@@ -51,18 +51,22 @@ def scheduled_daily_cron_job():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
-    scheduler.add_job(
-        scheduled_daily_cron_job,
-        trigger=CronTrigger(day_of_week="mon-fri", hour=16, minute=0, timezone="Asia/Kolkata"),
-        id="nifty500_daily_cron",
-        replace_existing=True,
-    )
     try:
-        scheduler.start()
-        print("[Server] APScheduler started. Scheduled daily NIFTY 500 cron for Mon-Fri 16:00 IST.")
+        init_db()
     except Exception as e:
-        print(f"[Server] APScheduler start skipped (serverless environment): {e}")
+        print(f"[Lifespan] init_db skipped: {e}")
+
+    try:
+        scheduler.add_job(
+            scheduled_daily_cron_job,
+            trigger=CronTrigger(day_of_week="mon-fri", hour=16, minute=0, timezone="Asia/Kolkata"),
+            id="nifty500_daily_cron",
+            replace_existing=True,
+        )
+        scheduler.start()
+        print("[Server] APScheduler started.")
+    except Exception as e:
+        print(f"[Server] APScheduler skipped on serverless: {e}")
     yield
     try:
         scheduler.shutdown(wait=False)
