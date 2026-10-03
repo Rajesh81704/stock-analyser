@@ -372,11 +372,20 @@ else:
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def serve_index():
-    index_path = os.path.join(BASE_DIR, "web", "templates", "index.html")
-    if not os.path.exists(index_path):
-        index_path = "web/templates/index.html"
-    with open(index_path, "r", encoding="utf-8") as f:
-        return HTMLResponse(content=f.read())
+    candidate_paths = [
+        os.path.join(BASE_DIR, "web", "templates", "index.html"),
+        os.path.join(os.getcwd(), "web", "templates", "index.html"),
+        "web/templates/index.html",
+        "/var/task/web/templates/index.html"
+    ]
+    for p in candidate_paths:
+        if os.path.exists(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    return HTMLResponse(content=f.read())
+            except Exception:
+                pass
+    return HTMLResponse(content="<h1>NIFTY 500 Quantitative AI Terminal</h1><p>API Server Active. Visit <a href='/docs'>/docs</a> for API documentation.</p>")
 
 
 # Convenient redirects so /DOCS, /swagger, /api-docs effortlessly route to Swagger UI
