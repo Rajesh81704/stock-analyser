@@ -1105,6 +1105,16 @@ tr:nth-child(even) td {
   gap: 20px;
 }
 
+.segment-content-grid > *,
+.scanner-grid > *,
+.hero-prediction-grid > *,
+.segment-stocks-card,
+.industry-radar-card {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
 .industry-radar-list {
   display: flex;
   flex-direction: column;
@@ -1160,7 +1170,6 @@ tr:nth-child(even) td {
 
 /* Global Table & Horizontal Scroll Wrappers */
 .table-responsive,
-.segment-table-wrapper,
 .directory-table-wrapper,
 .data-table-container {
   width: 100%;
@@ -1168,6 +1177,17 @@ tr:nth-child(even) td {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   margin-bottom: 12px;
+}
+
+.segment-table-wrapper {
+  width: 100%;
+  max-width: 100%;
+  max-height: 480px;
+  overflow-x: auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 12px;
+  border: var(--border-thick);
 }
 
 /* Horizontal scroll touch chips */
