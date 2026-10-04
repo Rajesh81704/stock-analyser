@@ -6,12 +6,17 @@ Provides fast training, Gradient Boosted tree model updates, and multi-timeframe
 
 import os
 from typing import Any, Dict, Optional, Tuple
+import warnings
 import joblib
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor, RandomForestClassifier
+from sklearn.exceptions import ConvergenceWarning
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import RobustScaler
+
+warnings.filterwarnings("ignore", category=ConvergenceWarning)
+warnings.filterwarnings("ignore", message=".*lbfgs failed to converge.*")
 
 from src.features import FeatureEngineer
 from src.indicators import add_all_indicators
@@ -32,7 +37,7 @@ class StockModelArtifact:
             n_estimators=60, max_depth=5, min_samples_leaf=5, random_state=42
         )
         self.lr_clf = LogisticRegression(
-            max_iter=200, C=1.0, random_state=42
+            max_iter=2000, C=1.0, random_state=42, solver="lbfgs"
         )
         self.scaler = RobustScaler()
         self.feature_columns: list = []
@@ -204,7 +209,7 @@ def train_and_predict_stock(
         if not hasattr(artifact, "rf_clf"):
             artifact.rf_clf = RandomForestClassifier(n_estimators=60, max_depth=5, min_samples_leaf=5, random_state=42)
         if not hasattr(artifact, "lr_clf"):
-            artifact.lr_clf = LogisticRegression(max_iter=200, C=1.0, random_state=42)
+            artifact.lr_clf = LogisticRegression(max_iter=2000, C=1.0, random_state=42, solver="lbfgs")
 
         # Fit Scaler & Ensembles
         X_scaled = artifact.scaler.fit_transform(X)

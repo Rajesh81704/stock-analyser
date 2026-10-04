@@ -7,11 +7,16 @@ Defines regression and classification model pipelines for stock price and trend 
 """
 
 from typing import Any, Dict, List, Optional, Tuple
+import warnings
 import joblib
 import numpy as np
 import pandas as pd
+from sklearn.exceptions import ConvergenceWarning
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+
+warnings.filterwarnings("ignore", category=ConvergenceWarning)
+warnings.filterwarnings("ignore", message=".*lbfgs failed to converge.*")
 try:
     import lightgbm as lgb
 except ImportError:
@@ -71,7 +76,8 @@ class StockPredictorModels:
         return {
             "LogisticRegression": LogisticRegression(
                 C=0.1,
-                max_iter=1000,
+                max_iter=2000,
+                solver="lbfgs",
                 class_weight="balanced",
                 random_state=42
             ),
