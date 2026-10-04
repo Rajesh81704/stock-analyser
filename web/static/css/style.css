@@ -1193,6 +1193,29 @@ html, body {
    STRICT MOBILE RESPONSIVENESS (320px to 1024px)
    ========================================================================== */
 
+/* Industry & Sentiment Matrix Mobile Responsiveness */
+.segment-filter-chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+  width: 100%;
+  max-width: 100%;
+}
+
+.chip-filter-label {
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.segment-stocks-table {
+  min-width: 700px;
+}
+
 @media (max-width: 1024px) {
   .hero-prediction-grid {
     grid-template-columns: 1fr;
@@ -1209,6 +1232,7 @@ html, body {
   .scanner-grid,
   .segment-content-grid {
     grid-template-columns: 1fr;
+    gap: 16px;
   }
 
   .next-hour-grid {
@@ -1217,6 +1241,10 @@ html, body {
 }
 
 @media (max-width: 768px) {
+  .segmentation-section {
+    padding: 14px 12px;
+  }
+
   .app-header {
     padding: 10px 14px;
   }
@@ -1308,7 +1336,44 @@ html, body {
 
   .sentiment-bands-grid {
     grid-template-columns: repeat(2, 1fr);
-    gap: 10px;
+    gap: 8px;
+  }
+
+  .sentiment-card {
+    padding: 10px;
+  }
+
+  .sent-title {
+    font-size: 0.72rem;
+  }
+
+  .sent-count {
+    font-size: 1.3rem;
+  }
+
+  .sent-desc {
+    font-size: 0.65rem;
+  }
+
+  .segment-filter-chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 6px;
+    margin-bottom: 14px;
+  }
+
+  .chip-filter-label {
+    flex: 0 0 100%;
+    margin-bottom: 4px;
+  }
+
+  .tier-chip {
+    flex: 0 0 auto;
+    width: auto;
+    white-space: nowrap;
+    padding: 6px 10px;
+    font-size: 0.75rem;
   }
 
   .indicators-grid {
@@ -1353,6 +1418,10 @@ html, body {
     font-size: 0.95rem;
     word-break: break-word;
   }
+
+  .industry-radar-list {
+    max-height: 280px;
+  }
 }
 
 @media (max-width: 480px) {
@@ -1364,9 +1433,10 @@ html, body {
   .table-card,
   .control-panel,
   .training-panel,
-  .chart-section {
+  .chart-section,
+  .segmentation-section {
     padding: 12px 10px;
-    margin-bottom: 16px;
+    margin-bottom: 14px;
   }
 
   .brand-title {
@@ -1391,7 +1461,7 @@ html, body {
     word-break: break-word;
     border-left-width: 4px;
     padding-left: 8px;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
   }
 
   .table-title,
@@ -1404,9 +1474,36 @@ html, body {
   }
 
   .forecast-meta,
-  .ohlcv-grid,
-  .sentiment-bands-grid {
+  .ohlcv-grid {
     grid-template-columns: 1fr;
+  }
+
+  .sentiment-bands-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+  }
+
+  .sentiment-card {
+    padding: 8px;
+  }
+
+  .sent-top {
+    flex-wrap: wrap;
+    gap: 2px;
+    margin-bottom: 4px;
+  }
+
+  .sent-title {
+    font-size: 0.68rem;
+  }
+
+  .sent-count {
+    font-size: 1.15rem;
+  }
+
+  .sent-desc {
+    font-size: 0.62rem;
+    line-height: 1.2;
   }
 
   .breadth-stats-row {
@@ -1432,9 +1529,15 @@ html, body {
   }
 
   .tier-chip {
-    padding: 6px 10px;
+    padding: 5px 9px;
     font-size: 0.72rem;
-    width: 100%;
+    flex: 0 0 auto;
+    width: auto;
     text-align: center;
+  }
+
+  .stocks-count-badge {
+    font-size: 0.7rem;
+    padding: 2px 6px;
   }
 }
