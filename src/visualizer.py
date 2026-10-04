@@ -8,8 +8,12 @@ Generates plots for:
 
 import os
 from typing import Any, Dict, List, Optional
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
+try:
+    import matplotlib.pyplot as plt
+    import matplotlib.dates as mdates
+except ImportError:
+    plt = None
+    mdates = None
 import numpy as np
 import pandas as pd
 

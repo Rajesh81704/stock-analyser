@@ -12,9 +12,15 @@ import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.preprocessing import RobustScaler
-import lightgbm as lgb
-import xgboost as xgb
+try:
+    import lightgbm as lgb
+except ImportError:
+    lgb = None
+
+try:
+    import xgboost as xgb
+except ImportError:
+    xgb = None
 
 
 class StockPredictorModels:
