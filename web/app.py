@@ -170,9 +170,21 @@ class ChartBarModel(BaseModel):
     volume: float = Field(..., example=8450000.0)
     sma_20: Optional[float] = Field(None, example=1180.20)
     sma_50: Optional[float] = Field(None, example=1210.40)
+    sma_200: Optional[float] = Field(None, example=1250.60)
+    ema_9: Optional[float] = Field(None, example=1172.50)
+    ema_21: Optional[float] = Field(None, example=1185.30)
     bb_upper: Optional[float] = Field(None, example=1220.40)
     bb_lower: Optional[float] = Field(None, example=1140.00)
     bb_middle: Optional[float] = Field(None, example=1180.20)
+    rsi_14: Optional[float] = Field(None, example=45.20)
+    macd: Optional[float] = Field(None, example=3.21)
+    macd_signal: Optional[float] = Field(None, example=2.88)
+    macd_hist: Optional[float] = Field(None, example=0.33)
+    pivot_p: Optional[float] = Field(None, example=1188.40)
+    pivot_r1: Optional[float] = Field(None, example=1195.10)
+    pivot_s1: Optional[float] = Field(None, example=1180.30)
+    atr_14: Optional[float] = Field(None, example=20.10)
+    adx_14: Optional[float] = Field(None, example=28.40)
 
 
 class StockDetailResponse(BaseModel):

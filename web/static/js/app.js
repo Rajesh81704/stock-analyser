@@ -452,6 +452,17 @@ document.addEventListener("DOMContentLoaded", () => {
   /**
    * Renders the interactive multi-graph technical analysis suite in Smooth Dark Mild Colors
    */
+  function calcSMA(prices, period) {
+    let sma = new Array(prices.length).fill(null);
+    if (prices.length < period) return sma;
+    for (let i = period - 1; i < prices.length; i++) {
+      let sum = 0;
+      for (let j = 0; j < period; j++) sum += (prices[i - j] || 0);
+      sma[i] = sum / period;
+    }
+    return sma;
+  }
+
   function calcEMA(prices, period) {
     const k = 2 / (period + 1);
     let ema = new Array(prices.length).fill(null);
@@ -467,6 +478,24 @@ document.addEventListener("DOMContentLoaded", () => {
     return ema;
   }
 
+  function calcBollinger(prices, period = 20, multiplier = 2) {
+    const sma = calcSMA(prices, period);
+    let upper = new Array(prices.length).fill(null);
+    let lower = new Array(prices.length).fill(null);
+    for (let i = period - 1; i < prices.length; i++) {
+      if (sma[i] === null) continue;
+      let sumSq = 0;
+      for (let j = 0; j < period; j++) {
+        const diff = (prices[i - j] || 0) - sma[i];
+        sumSq += diff * diff;
+      }
+      const stdDev = Math.sqrt(sumSq / period);
+      upper[i] = sma[i] + (multiplier * stdDev);
+      lower[i] = sma[i] - (multiplier * stdDev);
+    }
+    return { upper, lower };
+  }
+
   /**
    * Renders the single unified interactive technical analysis chart with overlapping indicators
    */
@@ -475,21 +504,29 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const labels = history.map((d) => d.date);
     const closePrices = history.map((d) => d.close);
-    const bbUpper = history.map((d) => d.bb_upper);
-    const bbLower = history.map((d) => d.bb_lower);
-    const sma20 = history.map((d) => d.sma_20);
-    const sma50 = history.map((d) => d.sma_50);
-    const sma200 = history.map((d) => d.sma_200);
-    const pivotR1 = history.map((d) => d.pivot_r1);
-    const pivotS1 = history.map((d) => d.pivot_s1);
 
-    const ema9 = calcEMA(closePrices, 9);
-    const ema21 = calcEMA(closePrices, 21);
+    const fallbackSma20 = calcSMA(closePrices, 20);
+    const fallbackSma50 = calcSMA(closePrices, 50);
+    const fallbackSma200 = calcSMA(closePrices, 200);
+    const fallbackBB = calcBollinger(closePrices, 20, 2);
 
-    const rsiList = history.map((d) => d.rsi_14 || 50.0);
-    const macdList = history.map((d) => d.macd || 0.0);
-    const macdSignalList = history.map((d) => d.macd_signal || 0.0);
-    const macdHistList = history.map((d) => d.macd_hist || 0.0);
+    const sma20 = history.map((d, i) => (d.sma_20 !== undefined && d.sma_20 !== null ? d.sma_20 : fallbackSma20[i]));
+    const sma50 = history.map((d, i) => (d.sma_50 !== undefined && d.sma_50 !== null ? d.sma_50 : fallbackSma50[i]));
+    const sma200 = history.map((d, i) => (d.sma_200 !== undefined && d.sma_200 !== null ? d.sma_200 : fallbackSma200[i]));
+
+    const bbUpper = history.map((d, i) => (d.bb_upper !== undefined && d.bb_upper !== null ? d.bb_upper : fallbackBB.upper[i]));
+    const bbLower = history.map((d, i) => (d.bb_lower !== undefined && d.bb_lower !== null ? d.bb_lower : fallbackBB.lower[i]));
+
+    const ema9 = history.map((d, i) => (d.ema_9 !== undefined && d.ema_9 !== null ? d.ema_9 : calcEMA(closePrices, 9)[i]));
+    const ema21 = history.map((d, i) => (d.ema_21 !== undefined && d.ema_21 !== null ? d.ema_21 : calcEMA(closePrices, 21)[i]));
+
+    const pivotR1 = history.map((d) => (d.pivot_r1 !== undefined && d.pivot_r1 !== null ? d.pivot_r1 : null));
+    const pivotS1 = history.map((d) => (d.pivot_s1 !== undefined && d.pivot_s1 !== null ? d.pivot_s1 : null));
+
+    const rsiList = history.map((d) => (d.rsi_14 !== undefined && d.rsi_14 !== null ? d.rsi_14 : 50.0));
+    const macdList = history.map((d) => (d.macd !== undefined && d.macd !== null ? d.macd : 0.0));
+    const macdSignalList = history.map((d) => (d.macd_signal !== undefined && d.macd_signal !== null ? d.macd_signal : 0.0));
+    const macdHistList = history.map((d) => (d.macd_hist !== undefined && d.macd_hist !== null ? d.macd_hist : 0.0));
     const volList = history.map((d) => d.volume || 0.0);
 
     const extendedLabels = [...labels, "Tomorrow"];
