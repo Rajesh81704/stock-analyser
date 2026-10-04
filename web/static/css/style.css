@@ -849,6 +849,12 @@ body {
   height: 340px;
 }
 
+.unified-canvas-container {
+  position: relative;
+  width: 100%;
+  height: 480px;
+}
+
 .canvas-container.sub-canvas {
   height: 200px;
 }

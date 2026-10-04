@@ -452,6 +452,24 @@ document.addEventListener("DOMContentLoaded", () => {
   /**
    * Renders the interactive multi-graph technical analysis suite in Smooth Dark Mild Colors
    */
+  function calcEMA(prices, period) {
+    const k = 2 / (period + 1);
+    let ema = new Array(prices.length).fill(null);
+    if (prices.length < period) return ema;
+    let sum = 0;
+    for (let i = 0; i < period; i++) sum += (prices[i] || 0);
+    ema[period - 1] = sum / period;
+    for (let i = period; i < prices.length; i++) {
+      if (prices[i] !== null && ema[i - 1] !== null) {
+        ema[i] = (prices[i] * k) + (ema[i - 1] * (1 - k));
+      }
+    }
+    return ema;
+  }
+
+  /**
+   * Renders the single unified interactive technical analysis chart with overlapping indicators
+   */
   function renderAllSubCharts(history, nextPredClose, cur) {
     if (!history || history.length === 0) return;
 
@@ -465,6 +483,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const pivotR1 = history.map((d) => d.pivot_r1);
     const pivotS1 = history.map((d) => d.pivot_s1);
 
+    const ema9 = calcEMA(closePrices, 9);
+    const ema21 = calcEMA(closePrices, 21);
+
     const rsiList = history.map((d) => d.rsi_14 || 50.0);
     const macdList = history.map((d) => d.macd || 0.0);
     const macdSignalList = history.map((d) => d.macd_signal || 0.0);
@@ -477,9 +498,12 @@ document.addEventListener("DOMContentLoaded", () => {
     forecastData.push(nextPredClose);
 
     const isBullishForecast = nextPredClose >= closePrices[closePrices.length - 1];
+    const macdHistColors = macdHistList.map((v) => (v >= 0 ? "rgba(16, 185, 129, 0.7)" : "rgba(244, 63, 94, 0.7)"));
 
-    // 1. Primary Price & Overlays Chart (Smooth Cyan & Emerald/Rose Forecast)
-    const priceCtx = document.getElementById("price-chart").getContext("2d");
+    const priceCanvas = document.getElementById("price-chart");
+    if (!priceCanvas) return;
+    const priceCtx = priceCanvas.getContext("2d");
+
     if (priceChartInstance) priceChartInstance.destroy();
 
     priceChartInstance = new Chart(priceCtx, {
@@ -487,6 +511,7 @@ document.addEventListener("DOMContentLoaded", () => {
       data: {
         labels: extendedLabels,
         datasets: [
+          // 0: Close Price
           {
             label: "Close Price",
             data: [...closePrices, null],
@@ -496,7 +521,9 @@ document.addEventListener("DOMContentLoaded", () => {
             tension: 0.15,
             pointRadius: 0,
             fill: true,
+            yAxisID: "y",
           },
+          // 1: ML Target Forecast
           {
             label: "ML Target Forecast",
             data: forecastData,
@@ -505,21 +532,38 @@ document.addEventListener("DOMContentLoaded", () => {
             borderWidth: 2.5,
             pointRadius: [0, 5],
             pointBackgroundColor: isBullishForecast ? "#10b981" : "#f43f5e",
+            yAxisID: "y",
           },
+          // 2: Trading Volume (Bar)
+          {
+            type: "bar",
+            label: "Volume",
+            data: [...volList, null],
+            backgroundColor: "rgba(56, 189, 248, 0.2)",
+            borderColor: "rgba(56, 189, 248, 0.4)",
+            borderWidth: 1,
+            yAxisID: "yVolume",
+            order: 10,
+          },
+          // 3: SMA 20
           {
             label: "SMA 20",
             data: [...sma20, null],
             borderColor: "#ffb066",
             borderWidth: 2,
             pointRadius: 0,
+            yAxisID: "y",
           },
+          // 4: SMA 50
           {
             label: "SMA 50",
             data: [...sma50, null],
             borderColor: "#a855f7",
             borderWidth: 2,
             pointRadius: 0,
+            yAxisID: "y",
           },
+          // 5: SMA 200
           {
             label: "SMA 200",
             data: [...sma200, null],
@@ -527,23 +571,89 @@ document.addEventListener("DOMContentLoaded", () => {
             borderWidth: 2,
             pointRadius: 0,
             hidden: true,
+            yAxisID: "y",
           },
+          // 6: EMA 9
+          {
+            label: "EMA 9",
+            data: [...ema9, null],
+            borderColor: "#38bdf8",
+            borderWidth: 1.8,
+            pointRadius: 0,
+            hidden: true,
+            yAxisID: "y",
+          },
+          // 7: EMA 21
+          {
+            label: "EMA 21",
+            data: [...ema21, null],
+            borderColor: "#f59e0b",
+            borderWidth: 1.8,
+            pointRadius: 0,
+            hidden: true,
+            yAxisID: "y",
+          },
+          // 8: Bollinger Upper
           {
             label: "Bollinger Upper",
             data: [...bbUpper, null],
-            borderColor: "rgba(255, 255, 255, 0.35)",
+            borderColor: "rgba(255, 255, 255, 0.4)",
             borderDash: [3, 3],
             borderWidth: 1.2,
             pointRadius: 0,
+            yAxisID: "y",
           },
+          // 9: Bollinger Lower
           {
             label: "Bollinger Lower",
             data: [...bbLower, null],
-            borderColor: "rgba(255, 255, 255, 0.35)",
+            borderColor: "rgba(255, 255, 255, 0.4)",
             borderDash: [3, 3],
             borderWidth: 1.2,
             pointRadius: 0,
+            yAxisID: "y",
           },
+          // 10: RSI (14)
+          {
+            label: "RSI (14)",
+            data: [...rsiList, null],
+            borderColor: "#c084fc",
+            borderWidth: 2,
+            pointRadius: 0,
+            tension: 0.1,
+            hidden: true,
+            yAxisID: "yRSI",
+          },
+          // 11: MACD Line
+          {
+            label: "MACD Line",
+            data: [...macdList, null],
+            borderColor: "#38bdf8",
+            borderWidth: 1.8,
+            pointRadius: 0,
+            hidden: true,
+            yAxisID: "yMACD",
+          },
+          // 12: MACD Signal Line
+          {
+            label: "MACD Signal",
+            data: [...macdSignalList, null],
+            borderColor: "#fbbf24",
+            borderWidth: 1.5,
+            pointRadius: 0,
+            hidden: true,
+            yAxisID: "yMACD",
+          },
+          // 13: MACD Histogram
+          {
+            type: "bar",
+            label: "MACD Hist",
+            data: [...macdHistList, null],
+            backgroundColor: [...macdHistColors, "transparent"],
+            hidden: true,
+            yAxisID: "yMACD",
+          },
+          // 14: Resistance R1
           {
             label: "Resistance R1",
             data: [...pivotR1, null],
@@ -552,7 +662,9 @@ document.addEventListener("DOMContentLoaded", () => {
             borderWidth: 1.5,
             pointRadius: 0,
             hidden: true,
+            yAxisID: "y",
           },
+          // 15: Support S1
           {
             label: "Support S1",
             data: [...pivotS1, null],
@@ -561,162 +673,98 @@ document.addEventListener("DOMContentLoaded", () => {
             borderWidth: 1.5,
             pointRadius: 0,
             hidden: true,
+            yAxisID: "y",
           }
         ]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        interaction: {
+          mode: "index",
+          intersect: false,
+        },
         scales: {
-          y: { grid: { color: "rgba(255, 255, 255, 0.05)" }, ticks: { color: "#94a3b8", font: { family: "JetBrains Mono" } } },
-          x: { grid: { color: "rgba(255, 255, 255, 0.05)" }, ticks: { color: "#94a3b8", font: { family: "JetBrains Mono" }, maxRotation: 45 } }
+          y: {
+            type: "linear",
+            position: "left",
+            grid: { color: "rgba(255, 255, 255, 0.05)" },
+            ticks: { color: "#94a3b8", font: { family: "JetBrains Mono" } }
+          },
+          yVolume: {
+            type: "linear",
+            position: "right",
+            grid: { drawOnChartArea: false },
+            ticks: { display: false },
+            max: Math.max(...volList, 1) * 4.5
+          },
+          yRSI: {
+            type: "linear",
+            position: "right",
+            min: 0,
+            max: 100,
+            display: false,
+            grid: { drawOnChartArea: false },
+            ticks: { color: "#c084fc", font: { family: "JetBrains Mono" } }
+          },
+          yMACD: {
+            type: "linear",
+            position: "right",
+            display: false,
+            grid: { drawOnChartArea: false },
+            ticks: { color: "#38bdf8", font: { family: "JetBrains Mono" } }
+          },
+          x: {
+            grid: { color: "rgba(255, 255, 255, 0.05)" },
+            ticks: { color: "#94a3b8", font: { family: "JetBrains Mono" }, maxRotation: 45 }
+          }
         },
         plugins: {
-          legend: { display: true, labels: { color: "#cbd5e1", font: { family: "Outfit", size: 11 } } }
+          legend: {
+            display: true,
+            position: "top",
+            labels: { color: "#cbd5e1", font: { family: "Outfit", size: 11 }, boxWidth: 12 }
+          }
         }
       }
     });
-
-    // 2. RSI Sub-Chart Graph
-    const rsiCanvas = document.getElementById("rsi-chart");
-    if (rsiCanvas) {
-      const rsiCtx = rsiCanvas.getContext("2d");
-      if (rsiChartInstance) rsiChartInstance.destroy();
-      rsiChartInstance = new Chart(rsiCtx, {
-        type: "line",
-        data: {
-          labels: labels,
-          datasets: [
-            {
-              label: "RSI (14)",
-              data: rsiList,
-              borderColor: "#c084fc",
-              borderWidth: 2,
-              pointRadius: 0,
-              tension: 0.1,
-            },
-            {
-              label: "Overbought (70)",
-              data: new Array(labels.length).fill(70),
-              borderColor: "rgba(244, 63, 94, 0.6)",
-              borderDash: [4, 4],
-              borderWidth: 1,
-              pointRadius: 0,
-            },
-            {
-              label: "Oversold (30)",
-              data: new Array(labels.length).fill(30),
-              borderColor: "rgba(16, 185, 129, 0.6)",
-              borderDash: [4, 4],
-              borderWidth: 1,
-              pointRadius: 0,
-            }
-          ]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            y: { min: 0, max: 100, grid: { color: "rgba(255, 255, 255, 0.05)" }, ticks: { color: "#94a3b8", font: { family: "JetBrains Mono" } } },
-            x: { grid: { color: "rgba(255, 255, 255, 0.05)" }, ticks: { color: "#94a3b8", font: { family: "JetBrains Mono" } } }
-          },
-          plugins: { legend: { display: true, labels: { color: "#cbd5e1", font: { family: "Outfit", size: 10 } } } }
-        }
-      });
-    }
-
-    // 3. MACD Sub-Chart Graph
-    const macdCanvas = document.getElementById("macd-chart");
-    if (macdCanvas) {
-      const macdCtx = macdCanvas.getContext("2d");
-      if (macdChartInstance) macdChartInstance.destroy();
-      const macdHistColors = macdHistList.map((v) => (v >= 0 ? "rgba(16, 185, 129, 0.7)" : "rgba(244, 63, 94, 0.7)"));
-
-      macdChartInstance = new Chart(macdCtx, {
-        data: {
-          labels: labels,
-          datasets: [
-            {
-              type: "bar",
-              label: "MACD Hist",
-              data: macdHistList,
-              backgroundColor: macdHistColors,
-            },
-            {
-              type: "line",
-              label: "MACD Line",
-              data: macdList,
-              borderColor: "#38bdf8",
-              borderWidth: 1.8,
-              pointRadius: 0,
-            },
-            {
-              type: "line",
-              label: "Signal Line",
-              data: macdSignalList,
-              borderColor: "#fbbf24",
-              borderWidth: 1.5,
-              pointRadius: 0,
-            }
-          ]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            y: { grid: { color: "rgba(255, 255, 255, 0.05)" }, ticks: { color: "#94a3b8", font: { family: "JetBrains Mono" } } },
-            x: { grid: { color: "rgba(255, 255, 255, 0.05)" }, ticks: { color: "#94a3b8", font: { family: "JetBrains Mono" } } }
-          },
-          plugins: { legend: { display: true, labels: { color: "#cbd5e1", font: { family: "Outfit", size: 10 } } } }
-        }
-      });
-    }
-
-    // 4. Volume Sub-Chart Graph
-    const volCanvas = document.getElementById("volume-chart");
-    if (volCanvas) {
-      const volCtx = volCanvas.getContext("2d");
-      if (volumeChartInstance) volumeChartInstance.destroy();
-      volumeChartInstance = new Chart(volCtx, {
-        type: "bar",
-        data: {
-          labels: labels,
-          datasets: [
-            {
-              label: "Volume",
-              data: volList,
-              backgroundColor: "rgba(56, 189, 248, 0.4)",
-              borderColor: "#38bdf8",
-              borderWidth: 1,
-            }
-          ]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            y: { grid: { color: "rgba(255, 255, 255, 0.05)" }, ticks: { color: "#94a3b8", font: { family: "JetBrains Mono" } } },
-            x: { grid: { color: "rgba(255, 255, 255, 0.05)" }, ticks: { color: "#94a3b8", font: { family: "JetBrains Mono" } } }
-          },
-          plugins: { legend: { display: false } }
-        }
-      });
-    }
   }
 
   function toggleChartDataset(type, isVisible) {
     if (!priceChartInstance) return;
-    if (type === "close") priceChartInstance.setDatasetVisibility(0, isVisible);
-    else if (type === "sma20") priceChartInstance.setDatasetVisibility(2, isVisible);
-    else if (type === "sma50") priceChartInstance.setDatasetVisibility(3, isVisible);
-    else if (type === "sma200") priceChartInstance.setDatasetVisibility(4, isVisible);
-    else if (type === "bb") {
+
+    if (type === "close") {
+      priceChartInstance.setDatasetVisibility(0, isVisible);
+    } else if (type === "forecast") {
+      priceChartInstance.setDatasetVisibility(1, isVisible);
+    } else if (type === "volume") {
+      priceChartInstance.setDatasetVisibility(2, isVisible);
+    } else if (type === "sma20") {
+      priceChartInstance.setDatasetVisibility(3, isVisible);
+    } else if (type === "sma50") {
+      priceChartInstance.setDatasetVisibility(4, isVisible);
+    } else if (type === "sma200") {
       priceChartInstance.setDatasetVisibility(5, isVisible);
+    } else if (type === "ema9") {
       priceChartInstance.setDatasetVisibility(6, isVisible);
-    } else if (type === "pivots") {
+    } else if (type === "ema21") {
       priceChartInstance.setDatasetVisibility(7, isVisible);
+    } else if (type === "bb") {
       priceChartInstance.setDatasetVisibility(8, isVisible);
+      priceChartInstance.setDatasetVisibility(9, isVisible);
+    } else if (type === "rsi") {
+      priceChartInstance.setDatasetVisibility(10, isVisible);
+      priceChartInstance.options.scales.yRSI.display = isVisible;
+    } else if (type === "macd") {
+      priceChartInstance.setDatasetVisibility(11, isVisible);
+      priceChartInstance.setDatasetVisibility(12, isVisible);
+      priceChartInstance.setDatasetVisibility(13, isVisible);
+      priceChartInstance.options.scales.yMACD.display = isVisible;
+    } else if (type === "pivots") {
+      priceChartInstance.setDatasetVisibility(14, isVisible);
+      priceChartInstance.setDatasetVisibility(15, isVisible);
     }
+
     priceChartInstance.update();
   }
 

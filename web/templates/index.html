@@ -439,55 +439,33 @@
         </div>
       </section>
 
-      <!-- Interactive Multi-Graph Technical Analysis Suite Section -->
+      <!-- Unified Interactive Technical Analysis Studio Section -->
       <section class="chart-section glass-card">
         <div class="chart-header">
           <div>
-            <h2 class="section-title">Technical Analysis Suite & Sub-Chart Graphs</h2>
-            <p class="chart-sub">Synchronized price action, RSI oscillator, MACD histogram, and volume dynamics over trailing 90 trading sessions</p>
+            <h2 class="section-title">Consolidated Technical Analysis & Indicator Suite</h2>
+            <p class="chart-sub">Select indicators below to overlap Price Action, Moving Averages, Bollinger Bands, RSI, MACD, Volume & Pivots on a single interactive chart</p>
           </div>
           <div class="chart-toggles">
             <button type="button" class="toggle-btn active" data-dataset="close">Close Price</button>
-            <button type="button" class="toggle-btn active" data-dataset="bb">Bollinger Bands</button>
+            <button type="button" class="toggle-btn active" data-dataset="forecast">ML Target</button>
+            <button type="button" class="toggle-btn active" data-dataset="volume">Volume</button>
             <button type="button" class="toggle-btn active" data-dataset="sma20">SMA 20</button>
             <button type="button" class="toggle-btn active" data-dataset="sma50">SMA 50</button>
             <button type="button" class="toggle-btn" data-dataset="sma200">SMA 200</button>
+            <button type="button" class="toggle-btn" data-dataset="ema9">EMA 9</button>
+            <button type="button" class="toggle-btn" data-dataset="ema21">EMA 21</button>
+            <button type="button" class="toggle-btn active" data-dataset="bb">Bollinger Bands</button>
+            <button type="button" class="toggle-btn" data-dataset="rsi">RSI (14)</button>
+            <button type="button" class="toggle-btn" data-dataset="macd">MACD & Signal</button>
             <button type="button" class="toggle-btn" data-dataset="pivots">Pivot S1 / R1</button>
           </div>
         </div>
 
-        <!-- Multi-Chart Canvas Grid -->
-        <div class="multi-chart-grid">
-          <!-- 1. Main Price & Overlays Canvas -->
-          <div class="canvas-box">
-            <h4 class="chart-canvas-title">📈 Price Action & Moving Average Overlays</h4>
-            <div class="canvas-container">
-              <canvas id="price-chart"></canvas>
-            </div>
-          </div>
-
-          <!-- 2. RSI Oscillator Sub-Chart Canvas -->
-          <div class="canvas-box">
-            <h4 class="chart-canvas-title">📊 RSI Relative Strength Oscillator (14-Day) & Overbought/Oversold Bands</h4>
-            <div class="canvas-container sub-canvas">
-              <canvas id="rsi-chart"></canvas>
-            </div>
-          </div>
-
-          <!-- 3. MACD Sub-Chart Canvas -->
-          <div class="canvas-box">
-            <h4 class="chart-canvas-title">⚡ MACD (12, 26, 9) Line, Signal Line & Histogram</h4>
-            <div class="canvas-container sub-canvas">
-              <canvas id="macd-chart"></canvas>
-            </div>
-          </div>
-
-          <!-- 4. Volume Sub-Chart Canvas -->
-          <div class="canvas-box">
-            <h4 class="chart-canvas-title">📊 Trading Volume Dynamics</h4>
-            <div class="canvas-container sub-canvas">
-              <canvas id="volume-chart"></canvas>
-            </div>
+        <!-- Single Unified Chart Canvas Box -->
+        <div class="canvas-box unified-canvas-box">
+          <div class="canvas-container unified-canvas-container">
+            <canvas id="price-chart"></canvas>
           </div>
         </div>
       </section>
