@@ -1158,6 +1158,37 @@ tr:nth-child(even) td {
   to { transform: rotate(360deg); }
 }
 
+/* Global Table & Horizontal Scroll Wrappers */
+.table-responsive,
+.segment-table-wrapper,
+.directory-table-wrapper,
+.data-table-container {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 12px;
+}
+
+/* Horizontal scroll touch chips */
+.ticker-chips,
+.segment-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
+}
+
+html, body {
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
 /* ==========================================================================
    STRICT MOBILE RESPONSIVENESS (320px to 1024px)
    ========================================================================== */
@@ -1179,40 +1210,105 @@ tr:nth-child(even) td {
   .segment-content-grid {
     grid-template-columns: 1fr;
   }
+
+  .next-hour-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 768px) {
+  .app-header {
+    padding: 10px 14px;
+  }
+
   .header-container {
     flex-direction: column;
-    align-items: flex-start;
+    align-items: stretch;
+    gap: 12px;
   }
   
-  .header-actions {
+  .brand {
     width: 100%;
     justify-content: flex-start;
   }
 
+  .brand-title {
+    font-size: 1.2rem;
+  }
+
+  .brand-subtitle {
+    font-size: 0.7rem;
+  }
+
+  .header-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .market-status-pill {
+    grid-column: span 2;
+    justify-content: center;
+    text-align: center;
+    padding: 6px 10px;
+    font-size: 0.75rem;
+  }
+
+  .chip-btn {
+    width: 100%;
+    justify-content: center;
+    padding: 8px 8px;
+    font-size: 0.75rem;
+  }
+
   .search-form {
     grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .training-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .training-actions {
+    width: 100%;
+  }
+
+  .training-actions .btn {
+    width: 100%;
+  }
+
+  .progress-info-row,
+  .progress-detail-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
   }
 
   .price-prediction-body {
     flex-direction: column;
     align-items: flex-start;
+    gap: 16px;
   }
 
   .prediction-arrow {
     transform: rotate(90deg);
-    margin: 8px 0;
+    align-self: center;
+    margin: 4px 0;
   }
 
   .forecast-meta,
   .ohlcv-grid {
     grid-template-columns: 1fr 1fr;
+    gap: 8px;
   }
 
   .sentiment-bands-grid {
     grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
   }
 
   .indicators-grid {
@@ -1221,6 +1317,20 @@ tr:nth-child(even) td {
 
   .breadth-stats-row {
     grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .card-head-flex,
+  .segmentation-header,
+  .next-hour-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .segmentation-controls,
+  .segmentation-controls select {
+    width: 100%;
   }
 
   .canvas-container {
@@ -1234,15 +1344,23 @@ tr:nth-child(even) td {
 
 @media (max-width: 480px) {
   .main-layout {
-    padding: 16px 12px;
+    padding: 12px 10px;
   }
 
   .brand-title {
-    font-size: 1.15rem;
+    font-size: 1.1rem;
+  }
+
+  .header-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .market-status-pill {
+    grid-column: span 1;
   }
 
   .price-val {
-    font-size: 1.75rem;
+    font-size: 1.5rem;
   }
 
   .forecast-meta,
@@ -1255,5 +1373,12 @@ tr:nth-child(even) td {
   .chip-btn, .btn {
     width: 100%;
     justify-content: center;
+  }
+
+  .tier-chip {
+    padding: 6px 10px;
+    font-size: 0.75rem;
+    width: 100%;
+    text-align: center;
   }
 }
