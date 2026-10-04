@@ -1340,15 +1340,37 @@ html, body {
   .canvas-container.sub-canvas {
     height: 160px;
   }
+
+  .section-title {
+    font-size: 1.05rem;
+    line-height: 1.35;
+    word-break: break-word;
+  }
+
+  .table-title,
+  .card-title,
+  .panel-title {
+    font-size: 0.95rem;
+    word-break: break-word;
+  }
 }
 
 @media (max-width: 480px) {
   .main-layout {
+    padding: 10px 8px;
+  }
+
+  .glass-card,
+  .table-card,
+  .control-panel,
+  .training-panel,
+  .chart-section {
     padding: 12px 10px;
+    margin-bottom: 16px;
   }
 
   .brand-title {
-    font-size: 1.1rem;
+    font-size: 1.05rem;
   }
 
   .header-actions {
@@ -1360,14 +1382,48 @@ html, body {
   }
 
   .price-val {
-    font-size: 1.5rem;
+    font-size: 1.4rem;
+  }
+
+  .section-title {
+    font-size: 0.92rem;
+    line-height: 1.3;
+    word-break: break-word;
+    border-left-width: 4px;
+    padding-left: 8px;
+    margin-bottom: 12px;
+  }
+
+  .table-title,
+  .card-title,
+  .panel-title,
+  .chart-canvas-title {
+    font-size: 0.88rem;
+    word-break: break-word;
+    line-height: 1.3;
   }
 
   .forecast-meta,
   .ohlcv-grid,
-  .sentiment-bands-grid,
-  .breadth-stats-row {
+  .sentiment-bands-grid {
     grid-template-columns: 1fr;
+  }
+
+  .breadth-stats-row {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+  }
+
+  .breadth-stat {
+    padding: 6px 4px;
+  }
+
+  .b-lbl {
+    font-size: 0.62rem;
+  }
+
+  .b-val {
+    font-size: 0.92rem;
   }
 
   .chip-btn, .btn {
@@ -1377,7 +1433,7 @@ html, body {
 
   .tier-chip {
     padding: 6px 10px;
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     width: 100%;
     text-align: center;
   }
