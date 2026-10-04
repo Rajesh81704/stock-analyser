@@ -644,6 +644,12 @@ async def initiate_all_models(
     all_tickers = get_all_tickers()
     total_target = len(all_tickers[:limit]) if limit else len(all_tickers)
 
+    batch_manager.set_running(
+        task_type="init_all_models",
+        total_stocks=total_target,
+        message=f"Initializing {total_target} Logistic Regression models in background..."
+    )
+
     background_tasks.add_task(run_init_all_models_sync, limit, period, max_workers)
 
     return {

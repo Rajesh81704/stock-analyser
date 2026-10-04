@@ -172,9 +172,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
       if (st === "running") {
         setTrainingBtnState(true, `Training (${pct.toFixed(0)}%)`);
-      } else if (st === "completed" || st === "idle" || st === "failed") {
+      } else if (st === "completed" || st === "failed") {
         setTrainingBtnState(false, "Initiate Training (All 500 Models)");
-        if (trainPollInterval && st !== "running") {
+        if (trainPollInterval) {
           clearInterval(trainPollInterval);
           trainPollInterval = null;
         }
@@ -182,6 +182,9 @@ document.addEventListener("DOMContentLoaded", () => {
           loadMarketAnalysis();
           loadMarketSegmentation();
         }
+      } else {
+        // Idle
+        setTrainingBtnState(false, "Initiate Training (All 500 Models)");
       }
     } catch (err) {
       console.log("Error polling training status:", err);
