@@ -147,6 +147,14 @@ async function runUniverseScreen(nodeId) {
   const percentText = document.getElementById('progress-percent');
   const statusText = document.getElementById('progress-text');
   const countText = document.getElementById('progress-count-text');
+  const runBtn = document.getElementById('btn-run-scan');
+
+  if (runBtn) {
+    runBtn.disabled = true;
+    runBtn.innerText = '[ ⌛ SCANNING... ]';
+    runBtn.style.opacity = '0.75';
+    runBtn.style.cursor = 'not-allowed';
+  }
 
   if (progressBarContainer) progressBarContainer.classList.remove('hidden');
   if (barFill) barFill.style.width = '10%';
@@ -181,17 +189,31 @@ async function runUniverseScreen(nodeId) {
     clearInterval(progressTimer);
     if (barFill) barFill.style.width = '100%';
     if (percentText) percentText.innerText = '100%';
-    if (countText) countText.innerText = (data.all_ranked_stocks ? data.all_ranked_stocks.length : 442) + ' / 500 stocks';
+    const totalFound = data.all_ranked_stocks ? data.all_ranked_stocks.length : 0;
+    if (countText) countText.innerText = totalFound + ' / 500 stocks processed';
+    if (statusText) statusText.innerText = `Scan complete! Found ${totalFound} matching stocks sorted by highest return.`;
 
     renderStocksTable(data.all_ranked_stocks);
 
     setTimeout(() => {
       if (progressBarContainer) progressBarContainer.classList.add('hidden');
-    }, 800);
+      if (runBtn) {
+        runBtn.disabled = false;
+        runBtn.innerText = '▶ Run Scan';
+        runBtn.style.opacity = '1';
+        runBtn.style.cursor = 'pointer';
+      }
+    }, 1200);
 
   } catch (err) {
     clearInterval(progressTimer);
     if (progressBarContainer) progressBarContainer.classList.add('hidden');
+    if (runBtn) {
+      runBtn.disabled = false;
+      runBtn.innerText = '▶ Run Scan';
+      runBtn.style.opacity = '1';
+      runBtn.style.cursor = 'pointer';
+    }
     alert('Error during scan: ' + err.message);
   }
 }

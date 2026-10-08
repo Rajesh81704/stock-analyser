@@ -398,3 +398,11 @@ def list_available_screener_nodes() -> List[Dict[str, Any]]:
             "rules_spec": FILTER_RULES_SPEC_NODE_2,
         },
     ]
+
+
+def get_screener_node_by_id(node_id: str, df: pd.DataFrame):
+    """Instantiates and returns the appropriate Screener Node instance by node_id."""
+    if node_id == "NODE_02_BULLISH_MOMENTUM":
+        return BullishMomentumScreenerNode(df)
+    return BullishTrendingScreenerNode(df)
+
