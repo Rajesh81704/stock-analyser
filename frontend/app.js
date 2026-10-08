@@ -229,7 +229,10 @@ async function runUniverseScreen(nodeId) {
       runBtn.style.opacity = '1';
       runBtn.style.cursor = 'pointer';
     }
-    alert('Error during scan: ' + err.message);
+    const msg = (err.message && (err.message === 'Failed to fetch' || err.message.includes('fetch')))
+      ? 'Backend server restarted. Please click "▶ Run Scan" to scan.'
+      : 'Error during scan: ' + (err.message || err);
+    console.warn(msg);
   }
 }
 
