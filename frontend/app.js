@@ -182,12 +182,7 @@ async function runUniverseScreen(nodeId) {
       progress += Math.floor(Math.random() * 12) + 5;
       if (progress > 90) progress = 90;
       
-      if (typeof anime !== 'undefined' && barFill) {
-        anime({ targets: barFill, width: progress + '%', duration: 300, easing: 'easeOutQuad' });
-      } else if (barFill) {
-        barFill.style.width = progress + '%';
-      }
-
+      if (barFill) barFill.style.width = progress + '%';
       if (percentText) percentText.innerText = progress + '%';
       if (countText) countText.innerText = Math.floor((progress / 100) * 442) + ' / 500 stocks';
     }
@@ -343,17 +338,8 @@ function renderStocksTable(items, page = 1) {
     tbody.appendChild(tr);
   });
 
-  // Animate table rows with anime.js
-  if (typeof anime !== 'undefined') {
-    anime({
-      targets: '#stocks-table-body tr',
-      opacity: [0, 1],
-      translateX: [-10, 0],
-      delay: anime.stagger(30),
-      duration: 400,
-      easing: 'easeOutCubic'
-    });
-  }
+  // Fast lightweight rendering without heavy DOM stagger timers
+
 
   // Update pagination info
   const pInfo = document.getElementById('pagination-info');
