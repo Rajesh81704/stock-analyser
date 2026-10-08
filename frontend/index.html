@@ -135,6 +135,44 @@
             <button class="term-btn" id="btn-next-page" onclick="changePage(1)" disabled>Next &gt;</button>
           </div>
         </div>
+
+        <!-- 26-Rule Technical Evaluation Inspector -->
+        <div class="rules-inspector-card" style="margin-top: 12px;">
+          <div class="rules-inspector-header">
+            <div>
+              <h4 style="font-size:13px; font-weight:800;">26-Rule Technical Evaluation</h4>
+            </div>
+            <div style="text-align:right;">
+              <span class="score-green" id="panel-rules-score">24 / 26</span>
+              <div style="font-size:10px; color:#555;">Rules Passed</div>
+            </div>
+          </div>
+
+          <div class="rule-filter-tabs">
+            <button class="rule-tab active" id="tab-rule-all" onclick="filterPanelRules('all')">[ All (26) ]</button>
+            <button class="rule-tab" id="tab-rule-passed" onclick="filterPanelRules('passed')">[ Passed ]</button>
+            <button class="rule-tab" id="tab-rule-failed" onclick="filterPanelRules('failed')">[ Failed ]</button>
+          </div>
+
+          <!-- Mini Rules Table -->
+          <table class="mini-rules-table">
+            <thead>
+              <tr>
+                <th style="width:25px;">#</th>
+                <th>Rule</th>
+                <th>Value</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="panel-rules-tbody">
+              <tr><td colspan="4" style="text-align:center; padding:16px;">Select a stock from the table to inspect.</td></tr>
+            </tbody>
+          </table>
+
+          <div style="text-align:center; margin-top:8px; font-size:11px;">
+            <a href="#" style="color:#0000aa;" onclick="toggleAllRulesSpec()">Show all 26 rules...</a>
+          </div>
+        </div>
       </div>
     </main>
 
@@ -188,44 +226,6 @@
         <div class="metric-cell">
           <div class="lbl">Market Cap</div>
           <div class="val" id="panel-mcap">₹16,432 Cr</div>
-        </div>
-      </div>
-
-      <!-- 26-Rule Technical Evaluation Inspector -->
-      <div class="rules-inspector-card">
-        <div class="rules-inspector-header">
-          <div>
-            <h4 style="font-size:13px; font-weight:800;">26-Rule Technical Evaluation</h4>
-          </div>
-          <div style="text-align:right;">
-            <span class="score-green" id="panel-rules-score">24 / 26</span>
-            <div style="font-size:10px; color:#555;">Rules Passed</div>
-          </div>
-        </div>
-
-        <div class="rule-filter-tabs">
-          <button class="rule-tab active" id="tab-rule-all" onclick="filterPanelRules('all')">[ All (26) ]</button>
-          <button class="rule-tab" id="tab-rule-passed" onclick="filterPanelRules('passed')">[ Passed ]</button>
-          <button class="rule-tab" id="tab-rule-failed" onclick="filterPanelRules('failed')">[ Failed ]</button>
-        </div>
-
-        <!-- Mini Rules Table -->
-        <table class="mini-rules-table">
-          <thead>
-            <tr>
-              <th style="width:25px;">#</th>
-              <th>Rule</th>
-              <th>Value</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody id="panel-rules-tbody">
-            <tr><td colspan="4" style="text-align:center; padding:16px;">Select a stock from the table to inspect.</td></tr>
-          </tbody>
-        </table>
-
-        <div style="text-align:center; margin-top:8px; font-size:11px;">
-          <a href="#" style="color:#0000aa;" onclick="toggleAllRulesSpec()">Show all 26 rules...</a>
         </div>
       </div>
 
