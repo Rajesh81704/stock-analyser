@@ -59,7 +59,7 @@ def fetch_stock_data(
         pass
 
     # If DB already has historical data, top-up with recent 5d bars; otherwise full 5y initial hydration
-    fetch_period = "5d" if latest_db_date and not start_date else period
+    fetch_period = period
 
     candidates = [resolved_ticker]
     if "." not in resolved_ticker and not resolved_ticker.startswith("^"):

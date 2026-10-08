@@ -418,7 +418,14 @@ function toggleSortDirection() {
 async function fetchAndInspectStock(ticker) {
   currentSelectedTicker = ticker;
   document.getElementById('panel-ticker').innerText = ticker;
-  document.getElementById('panel-company').innerText = 'Loading details...';
+  document.getElementById('panel-company').innerText = 'Loading chart data...';
+
+  // Instant local preview from active scan items
+  const localItem = currentStockItems.find(i => (i.ticker === ticker || (i.details && i.details.ticker === ticker)));
+  if (localItem) {
+    const res = localItem.details || localItem;
+    renderInspectorPanelFromScanResult(ticker, res);
+  }
 
   try {
     const resp = await fetch('/api/stock/' + encodeURIComponent(ticker) + '/evaluate');
@@ -428,62 +435,95 @@ async function fetchAndInspectStock(ticker) {
     currentEvaluationData = data;
     renderRightInspectorPanel(data);
   } catch (err) {
-    console.error('Error fetching stock inspection data:', err);
+    console.warn('Error fetching detailed stock inspection data:', err);
+  }
+}
+
+function renderInspectorPanelFromScanResult(ticker, res) {
+  const companyName = ticker.replace('.NS', '') + ' Ltd';
+  document.getElementById('panel-ticker').innerText = ticker;
+  document.getElementById('panel-company').innerText = companyName;
+
+  const lastBar = res.latest_bar || {};
+  const closeVal = (lastBar.close !== undefined && lastBar.close !== null) ? lastBar.close : res.latest_close || 0;
+  document.getElementById('panel-price').innerText = '₹' + Number(closeVal).toFixed(2);
+
+  const rawChange = getComputedChangePct(res);
+  const isUp = rawChange >= 0;
+  const changeEl = document.getElementById('panel-change');
+  changeEl.innerText = (isUp ? '+' : '') + rawChange.toFixed(2) + '%';
+  changeEl.className = isUp ? 'change-green' : 'change-red';
+
+  const retDayEl = document.getElementById('panel-ret-day');
+  retDayEl.innerText = (isUp ? '+' : '') + rawChange.toFixed(2) + '%';
+  retDayEl.className = 'val ' + (isUp ? 'green' : 'red');
+
+  const passedCount = res.passed_count || 0;
+  document.getElementById('panel-rules-score').innerText = passedCount + ' / 26';
+
+  const filterRes = res.filter_results || (typeof res.filter_details_json === 'string' ? JSON.parse(res.filter_details_json) : res.filter_details_json);
+  if (filterRes) {
+    renderMiniRulesTable(filterRes);
   }
 }
 
 function renderRightInspectorPanel(data) {
-  const f = data.fundamentals;
-  const r = data.returns;
+  const f = data.fundamentals || {};
+  const r = data.returns || {};
 
-  document.getElementById('panel-ticker').innerText = data.ticker;
-  document.getElementById('panel-company').innerText = f.company_name;
+  document.getElementById('panel-ticker').innerText = data.ticker || currentSelectedTicker;
+  document.getElementById('panel-company').innerText = f.company_name || (data.ticker ? data.ticker.replace('.NS', '') + ' Ltd' : 'Stock Details');
   
-  const retDay = r.last_day_return_pct;
-  const retWeek = r.last_week_return_pct;
+  const retDay = r.last_day_return_pct || 0;
+  const retWeek = r.last_week_return_pct || 0;
   const isUp = retDay >= 0;
+  const closeVal = data.latest_close || 0;
   
-  document.getElementById('panel-price').innerText = '₹' + data.latest_close.toFixed(2);
+  document.getElementById('panel-price').innerText = '₹' + Number(closeVal).toFixed(2);
   const changeEl = document.getElementById('panel-change');
-  changeEl.innerText = (isUp ? '+' : '') + r.last_day_change.toFixed(2) + ' (' + (isUp ? '+' : '') + retDay.toFixed(2) + '%)';
+  changeEl.innerText = (isUp ? '+' : '') + Number(r.last_day_change || 0).toFixed(2) + ' (' + (isUp ? '+' : '') + Number(retDay).toFixed(2) + '%)';
   changeEl.className = isUp ? 'change-green' : 'change-red';
 
   document.getElementById('panel-sector').innerText = (f.sector || 'Equities') + ' | ' + (f.industry || 'Cash Segment') + ' | NIFTY 500';
 
   const retDayEl = document.getElementById('panel-ret-day');
-  retDayEl.innerText = (retDay >= 0 ? '+' : '') + retDay.toFixed(2) + '%';
+  retDayEl.innerText = (retDay >= 0 ? '+' : '') + Number(retDay).toFixed(2) + '%';
   retDayEl.className = 'val ' + (retDay >= 0 ? 'green' : 'red');
 
   const retWeekEl = document.getElementById('panel-ret-week');
-  retWeekEl.innerText = (retWeek >= 0 ? '+' : '') + retWeek.toFixed(2) + '%';
+  retWeekEl.innerText = (retWeek >= 0 ? '+' : '') + Number(retWeek).toFixed(2) + '%';
   retWeekEl.className = 'val ' + (retWeek >= 0 ? 'green' : 'red');
 
   // Volume SMA & Market Cap
   const volSma = data.technicals ? data.technicals.vol_sma_20 : 0;
-  document.getElementById('panel-vol-sma').innerText = volSma ? Number(volSma).toLocaleString() : '25,119,916';
-  document.getElementById('panel-mcap').innerText = f.market_cap_cr ? '₹' + Number(f.market_cap_cr).toLocaleString() + ' Cr' : '₹16,432 Cr';
+  document.getElementById('panel-vol-sma').innerText = volSma ? Number(volSma).toLocaleString() : '--';
+  document.getElementById('panel-mcap').innerText = f.market_cap_cr ? '₹' + Number(f.market_cap_cr).toLocaleString() + ' Cr' : '--';
 
   // Render chart
-  renderPanelChartCanvas(data.chart_candles);
+  if (data.chart_candles) {
+    renderPanelChartCanvas(data.chart_candles);
+  }
 
   // Render Rules
-  const node1 = data.screener_nodes[0];
-  document.getElementById('panel-rules-score').innerText = node1.passed_count + ' / ' + node1.total_rules;
-
-  renderMiniRulesTable(node1.filter_results);
+  if (data.screener_nodes && data.screener_nodes.length > 0) {
+    const node1 = data.screener_nodes[0];
+    document.getElementById('panel-rules-score').innerText = node1.passed_count + ' / ' + node1.total_rules;
+    renderMiniRulesTable(node1.filter_results);
+  }
 
   // Anime.js elastic pop-in effect for inspector panel
   if (typeof anime !== 'undefined') {
     anime({
       targets: '.terminal-inspector-panel',
-      scale: [0.98, 1],
-      duration: 350,
+      scale: [0.99, 1],
+      duration: 300,
       easing: 'easeOutQuad'
     });
   }
 }
 
 function renderMiniRulesTable(filterResults) {
+  if (!filterResults || !Array.isArray(filterResults)) return;
   const tbody = document.getElementById('panel-rules-tbody');
   tbody.innerHTML = '';
 
@@ -496,19 +536,22 @@ function renderMiniRulesTable(filterResults) {
 
   filtered.forEach(f => {
     const tr = document.createElement('tr');
-    const ruleNum = String(f.rule_id).padStart(2, '0');
+    const ruleNum = String(f.rule_id || f.id || 0).padStart(2, '0');
     
     // Parse value snippet
-    let valSnippet = f.actual_value || '--';
+    let valSnippet = f.actual_value || f.actual || '--';
     if (valSnippet.length > 20) {
       valSnippet = valSnippet.split(',')[0];
     }
 
+    const ruleName = f.rule_name || f.name || ('Rule #' + ruleNum);
+    const passed = f.passed !== undefined ? f.passed : true;
+
     tr.innerHTML = `
       <td style="font-weight:700; color:#555;">${ruleNum}</td>
-      <td style="font-weight:600;">${f.rule_name}</td>
+      <td style="font-weight:600;">${ruleName}</td>
       <td style="font-family:var(--font-mono); font-size:11px;">${valSnippet}</td>
-      <td><span class="${f.passed ? 'status-passed' : 'status-failed'}">${f.passed ? 'PASSED' : 'FAILED'}</span></td>
+      <td><span class="${passed ? 'status-passed' : 'status-failed'}">${passed ? 'PASSED' : 'FAILED'}</span></td>
     `;
     tbody.appendChild(tr);
   });
@@ -526,12 +569,18 @@ function filterPanelRules(mode) {
 }
 
 function renderPanelChartCanvas(candles) {
-  const ctx = document.getElementById('panelStockChart').getContext('2d');
-  if (currentStockChart) currentStockChart.destroy();
+  if (!candles || !Array.isArray(candles) || candles.length === 0) return;
+  const canvasEl = document.getElementById('panelStockChart');
+  if (!canvasEl) return;
+  const ctx = canvasEl.getContext('2d');
 
-  const labels = candles.map(c => c.date.slice(5));
-  const closes = candles.map(c => c.close);
-  const sma20 = candles.map(c => c.sma_20);
+  if (currentStockChart) {
+    try { currentStockChart.destroy(); } catch (e) {}
+  }
+
+  const labels = candles.map(c => (c.date ? c.date.slice(5) : ''));
+  const closes = candles.map(c => c.close || 0);
+  const sma20 = candles.map(c => (c.sma_20 && !isNaN(c.sma_20)) ? c.sma_20 : null);
 
   currentStockChart = new Chart(ctx, {
     type: 'line',
@@ -539,31 +588,33 @@ function renderPanelChartCanvas(candles) {
       labels: labels,
       datasets: [
         {
-          label: 'Close Price',
+          label: 'Close Price (₹)',
           data: closes,
-          borderColor: '#000000',
-          backgroundColor: 'transparent',
-          borderWidth: 1.5,
+          borderColor: '#0000aa',
+          backgroundColor: 'rgba(0, 0, 170, 0.05)',
+          fill: true,
+          borderWidth: 1.8,
           pointRadius: 0,
           tension: 0.1
         },
         {
-          label: '20-Day EMA',
+          label: '20-Day SMA',
           data: sma20,
-          borderColor: '#0000aa',
+          borderColor: '#008000',
           borderWidth: 1.2,
           borderDash: [3, 3],
-          pointRadius: 0
+          pointRadius: 0,
+          spanGaps: true
         }
       ]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { display: true, position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } } },
+      plugins: { legend: { display: true, position: 'bottom', labels: { boxWidth: 8, font: { size: 9 } } } },
       scales: {
-        x: { grid: { color: '#e0e0e0' }, ticks: { font: { size: 9 }, maxTicksLimit: 6 } },
-        y: { grid: { color: '#e0e0e0' }, ticks: { font: { size: 9 } } }
+        x: { grid: { color: '#e5e5e5' }, ticks: { font: { size: 9 }, maxTicksLimit: 6 } },
+        y: { grid: { color: '#e5e5e5' }, ticks: { font: { size: 9 } } }
       }
     }
   });
