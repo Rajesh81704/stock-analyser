@@ -26,11 +26,18 @@
     </div>
   </header>
 
+  <!-- Mobile Quick Navigation Bar (Shown on Mobile screens) -->
+  <div class="mobile-view-tabs">
+    <button class="mobile-tab-btn active" id="mtab-screener" onclick="switchMobileTab('screener')">📊 Screener Table</button>
+    <button class="mobile-tab-btn" id="mtab-inspector" onclick="switchMobileTab('inspector')">📈 Chart &amp; Rules</button>
+    <button class="mobile-tab-btn" id="mtab-menu" onclick="switchMobileTab('menu')">📁 DB Nodes</button>
+  </div>
+
   <!-- 3-Column Workstation Layout Container -->
   <div class="terminal-workstation">
     
     <!-- Left Sidebar (Column 1) -->
-    <aside class="terminal-sidebar">
+    <aside id="panel-sidebar" class="terminal-sidebar">
       <div class="sidebar-header">&gt; Screener</div>
       <ul class="sidebar-menu">
         <li><a onclick="showView('scanner-view')" class="sidebar-link active">Charts</a></li>
@@ -42,7 +49,7 @@
     </aside>
 
     <!-- Center Main Screener Panel (Column 2) -->
-    <main class="terminal-main-panel">
+    <main id="panel-main" class="terminal-main-panel">
       
       <!-- DIRECTORY VIEW (Screeners Grid) -->
       <div id="directory-view">
@@ -133,7 +140,7 @@
     </main>
 
     <!-- Right Inspector Panel (Column 3) -->
-    <aside class="terminal-inspector-panel">
+    <aside id="panel-inspector" class="terminal-inspector-panel">
       
       <!-- Stock Summary Header -->
       <div class="inspector-header-box">

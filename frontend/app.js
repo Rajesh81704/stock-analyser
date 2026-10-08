@@ -18,6 +18,21 @@ function showView(viewId) {
   }
 }
 
+function switchMobileTab(tab) {
+  document.querySelectorAll('.mobile-tab-btn').forEach(b => b.classList.remove('active'));
+  const activeBtn = document.getElementById('mtab-' + tab);
+  if (activeBtn) activeBtn.classList.add('active');
+
+  let targetId = 'panel-main';
+  if (tab === 'inspector') targetId = 'panel-inspector';
+  if (tab === 'menu') targetId = 'panel-sidebar';
+
+  const el = document.getElementById(targetId);
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
 async function loadLatestScanFromDB(node_id) {
   try {
     const resp = await fetch('/api/screener/history?node_id=' + encodeURIComponent(node_id) + '&limit=500');
@@ -368,15 +383,19 @@ function renderStocksTable(items, page = 1) {
   if (pageItems.length > 0) {
     const topSymbol = pageItems[0].ticker || pageItems[0].details.ticker;
     const topTr = tbody.querySelector('tr');
-    selectStockRow(topSymbol, topTr);
+    selectStockRow(topSymbol, topTr, false);
   }
 }
 
-function selectStockRow(symbol, trElement) {
+function selectStockRow(symbol, trElement, autoScrollMobile = true) {
   document.querySelectorAll('#stocks-table-body tr').forEach(r => r.classList.remove('selected'));
   if (trElement) trElement.classList.add('selected');
   
   fetchAndInspectStock(symbol);
+
+  if (autoScrollMobile && window.innerWidth <= 768) {
+    switchMobileTab('inspector');
+  }
 }
 
 function changePage(delta) {
