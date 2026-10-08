@@ -31,12 +31,27 @@ KITE_API_KEY = os.getenv("KITE_API_KEY", "zgktuz1hr11f8scf")
 KITE_ACCESS_TOKEN = os.getenv("KITE_ACCESS_TOKEN", "e02iio4s7sc4nptcp8picsdy0i14brq5")
 KITE_INSTRUMENTS_CACHE = None
 
+TOKEN_FILE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".kite_token")
+if os.path.exists(TOKEN_FILE_PATH):
+    try:
+        with open(TOKEN_FILE_PATH, "r") as tf:
+            cached_token = tf.read().strip()
+            if cached_token:
+                KITE_ACCESS_TOKEN = cached_token
+    except Exception:
+        pass
+
 
 def set_active_kite_access_token(token: str) -> None:
     """Dynamically sets/updates the active Zerodha KiteConnect access token for live API data pulling."""
     global KITE_ACCESS_TOKEN
     KITE_ACCESS_TOKEN = token.strip()
     os.environ["KITE_ACCESS_TOKEN"] = KITE_ACCESS_TOKEN
+    try:
+        with open(TOKEN_FILE_PATH, "w") as f:
+            f.write(KITE_ACCESS_TOKEN)
+    except Exception:
+        pass
     print(f"[DataLoader] Updated active Zerodha KiteConnect access token: {KITE_ACCESS_TOKEN[:10]}...")
 
 
