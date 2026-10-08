@@ -125,16 +125,7 @@ async function loadDBNodesAndRenderDirectory() {
 
     container.innerHTML = html;
 
-    if (typeof anime !== 'undefined') {
-      anime({
-        targets: '.category-card',
-        opacity: [0, 1],
-        translateY: [20, 0],
-        delay: anime.stagger(80),
-        duration: 600,
-        easing: 'easeOutCubic'
-      });
-    }
+
   } catch (err) {
     container.innerHTML = '<div style="padding: 24px; text-align: center; color: var(--accent-red);">Error loading nodes: ' + err.message + '</div>';
   }
@@ -143,16 +134,7 @@ async function loadDBNodesAndRenderDirectory() {
 window.onload = function() {
   loadDBNodesAndRenderDirectory();
 
-  if (typeof anime !== 'undefined') {
-    anime({
-      targets: '.brand-title, .top-link',
-      opacity: [0, 1],
-      translateY: [-10, 0],
-      delay: anime.stagger(50),
-      duration: 600,
-      easing: 'easeOutExpo'
-    });
-  }
+
 };
 
 async function runUniverseScreen(nodeId) {
@@ -480,15 +462,7 @@ function renderRightInspectorPanel(data) {
     renderMiniRulesTable(node1.filter_results);
   }
 
-  // Anime.js elastic pop-in effect for inspector panel
-  if (typeof anime !== 'undefined') {
-    anime({
-      targets: '.terminal-inspector-panel',
-      scale: [0.99, 1],
-      duration: 300,
-      easing: 'easeOutQuad'
-    });
-  }
+
 }
 
 function renderMiniRulesTable(filterResults) {
