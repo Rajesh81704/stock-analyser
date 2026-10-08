@@ -28,7 +28,7 @@
   <!-- Mobile Quick Navigation Bar (Shown on Mobile screens) -->
   <div class="mobile-view-tabs">
     <button class="mobile-tab-btn active" id="mtab-screener" onclick="switchMobileTab('screener')">📊 Screener Table</button>
-    <button class="mobile-tab-btn" id="mtab-inspector" onclick="switchMobileTab('inspector')">📈 Chart &amp; Rules</button>
+    <button class="mobile-tab-btn" id="mtab-inspector" onclick="switchMobileTab('inspector')">📈 Stock Metrics</button>
     <button class="mobile-tab-btn" id="mtab-menu" onclick="switchMobileTab('menu')">📁 DB Nodes</button>
   </div>
 
@@ -192,21 +192,6 @@
         <div style="font-size:11px; color:#555; margin-top:3px;" id="panel-sector">
           Consumer Cyclical | Textile Manufacturing | NIFTY 500
         </div>
-      </div>
-
-      <!-- Timeframe Selector Tabs -->
-      <div class="timeframe-tabs-bar">
-        <button class="time-tab" onclick="updateChartPeriod(this, '1d')">[ 1D ]</button>
-        <button class="time-tab" onclick="updateChartPeriod(this, '1w')">[ 1W ]</button>
-        <button class="time-tab" onclick="updateChartPeriod(this, '1m')">[ 1M ]</button>
-        <button class="time-tab active" onclick="updateChartPeriod(this, '3m')">[ 3M ]</button>
-        <button class="time-tab" onclick="updateChartPeriod(this, '1y')">[ 1Y ]</button>
-        <button class="time-tab" onclick="updateChartPeriod(this, '5y')">[ 5Y ]</button>
-      </div>
-
-      <!-- Chart Canvas Box -->
-      <div class="panel-chart-box">
-        <canvas id="panelStockChart"></canvas>
       </div>
 
       <!-- Key Metrics Grid -->
