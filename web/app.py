@@ -11,7 +11,7 @@ Endpoints:
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 from typing import Any, Dict, List, Optional
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Path, Query, status
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Path, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -368,6 +368,25 @@ async def trigger_automated_scan():
         return res
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get(
+    "/callback",
+    summary="Zerodha Kite Connect Auth Callback Handler",
+    tags=["Kite Connect Integration"],
+)
+async def kite_callback(request: Request):
+    """Callback route for Zerodha Kite Connect login flow. Captures request_token and params."""
+    params = dict(request.query_params)
+    print("\n" + "="*60)
+    print("ZERODHA KITE CONNECT CALLBACK RECEIVED:")
+    print(params)
+    print("="*60 + "\n")
+    return {
+        "status": "success",
+        "message": "Zerodha Kite Connect login callback received.",
+        "params": params
+    }
 
 
 # =====================================================================
