@@ -376,12 +376,35 @@ async def trigger_automated_scan():
     tags=["Kite Connect Integration"],
 )
 async def kite_callback(request: Request):
-    """Callback route for Zerodha Kite Connect login flow. Captures request_token and params."""
+    """Callback route for Zerodha Kite Connect login flow. Automatically exchanges request_token for active access_token."""
     params = dict(request.query_params)
     print("\n" + "="*60)
     print("ZERODHA KITE CONNECT CALLBACK RECEIVED:")
     print(params)
     print("="*60 + "\n")
+
+    req_token = params.get("request_token")
+    if req_token:
+        try:
+            from kiteconnect import KiteConnect
+            from src.data_loader import set_active_kite_access_token
+            kite = KiteConnect(api_key="zgktuz1hr11f8scf")
+            data = kite.generate_session(req_token, api_secret="pt7gvrbxi23sssa1duvhd6n6bufj8ztj")
+            acc_token = data.get("access_token")
+            if acc_token:
+                set_active_kite_access_token(acc_token)
+                print(f"[Kite AutoAuth] 🎉 AUTOMATICALLY GENERATED & ACTIVATED KITE ACCESS TOKEN: {acc_token}")
+                return {
+                    "status": "success",
+                    "message": "🎉 Zerodha Kite Connect Session Activated Successfully! Live market data active.",
+                    "access_token": acc_token,
+                    "user_name": data.get("user_name"),
+                    "user_id": data.get("user_id"),
+                    "params": params
+                }
+        except Exception as err:
+            print(f"[Kite AutoAuth Error] {err}")
+
     return {
         "status": "success",
         "message": "Zerodha Kite Connect login callback received.",
