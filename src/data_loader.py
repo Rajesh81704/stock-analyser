@@ -23,6 +23,100 @@ COMMON_INDIAN_INDICES = {
 }
 
 
+import os
+from datetime import datetime, timedelta
+
+# Global Zerodha Kite Connect Configuration & Instrument Master Cache
+KITE_API_KEY = os.getenv("KITE_API_KEY", "zgktuz1hr11f8scf")
+KITE_ACCESS_TOKEN = os.getenv("KITE_ACCESS_TOKEN", "e02iio4s7sc4nptcp8picsdy0i14brq5")
+KITE_INSTRUMENTS_CACHE = None
+
+
+def get_kite_instrument_token(kite, symbol: str, exchange: str = "NSE") -> Optional[int]:
+    """Looks up Zerodha's integer instrument_token for a trading symbol (e.g. RELIANCE)."""
+    global KITE_INSTRUMENTS_CACHE
+    clean_sym = symbol.strip().upper().replace(".NS", "").replace("NSE:", "")
+    try:
+        if KITE_INSTRUMENTS_CACHE is None:
+            KITE_INSTRUMENTS_CACHE = kite.instruments(exchange)
+        for inst in KITE_INSTRUMENTS_CACHE:
+            if inst.get("tradingsymbol") == clean_sym:
+                return inst.get("instrument_token")
+    except Exception as e:
+        print(f"[DataLoader] Kite instrument lookup warning: {e}")
+    return None
+
+
+def fetch_from_kiteconnect(
+    symbol: str,
+    period: str = "6mo",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    api_key: Optional[str] = None,
+    access_token: Optional[str] = None
+) -> Optional[pd.DataFrame]:
+    """
+    Fetches historical OHLCV data using Zerodha's official KiteConnect API.
+    Returns cleaned pandas DataFrame or None if unavailable/expired session.
+    """
+    key = api_key or KITE_API_KEY
+    token_str = access_token or KITE_ACCESS_TOKEN
+    if not key or not token_str:
+        return None
+
+    try:
+        from kiteconnect import KiteConnect
+        kite = KiteConnect(api_key=key)
+        kite.set_access_token(token_str)
+
+        inst_token = get_kite_instrument_token(kite, symbol)
+        if not inst_token:
+            return None
+
+        to_dt = datetime.now() if not end_date else datetime.strptime(end_date, "%Y-%m-%d")
+        if start_date:
+            from_dt = datetime.strptime(start_date, "%Y-%m-%d")
+        else:
+            days_map = {"1d": 5, "1w": 14, "1m": 35, "3m": 90, "6m": 180, "1y": 365, "5y": 1825}
+            days = days_map.get(period.lower().strip(), 180)
+            from_dt = to_dt - timedelta(days=days)
+
+        print(f"[DataLoader] Fetching historical OHLCV from Zerodha KiteConnect for {symbol} (Token: {inst_token})...")
+        records = kite.historical_data(
+            instrument_token=inst_token,
+            from_date=from_dt.strftime("%Y-%m-%d"),
+            to_date=to_dt.strftime("%Y-%m-%d"),
+            interval="day",
+            continuous=False,
+            oi=False
+        )
+
+        if not records:
+            return None
+
+        df = pd.DataFrame(records)
+        df.rename(columns={
+            "date": "Date",
+            "open": "Open",
+            "high": "High",
+            "low": "Low",
+            "close": "Close",
+            "volume": "Volume"
+        }, inplace=True)
+
+        df["Date"] = pd.to_datetime(df["Date"])
+        if df["Date"].dt.tz is not None:
+            df["Date"] = df["Date"].dt.tz_localize(None)
+
+        df.set_index("Date", inplace=True)
+        required = ["Open", "High", "Low", "Close", "Volume"]
+        return df[required].copy()
+
+    except Exception as err:
+        print(f"[DataLoader] Zerodha KiteConnect notice: {err} (Falling back to Yahoo Finance/SQLite DB)")
+        return None
+
+
 def resolve_ticker(ticker: str) -> str:
     """Resolves common ticker aliases to standard Indian NSE symbols (.NS)."""
     t = ticker.strip().upper()
@@ -41,14 +135,30 @@ def fetch_stock_data(
     auto_adjust: bool = True
 ) -> pd.DataFrame:
     """
-    Downloads historical daily stock data from Yahoo Finance.
-    Automatically handles Indian stock symbols (.NS / .BO) and index aliases.
+    Downloads historical daily stock data using Zerodha KiteConnect as primary engine,
+    with automatic fallback to Yahoo Finance & SQLite DB cache.
 
     Returns:
         pd.DataFrame: Cleaned DataFrame with standard columns ['Open', 'High', 'Low', 'Close', 'Volume'].
     """
     original_ticker = ticker.strip().upper()
     resolved_ticker = resolve_ticker(original_ticker)
+
+    # 0. Primary Fetch: Try Zerodha KiteConnect
+    kite_df = fetch_from_kiteconnect(resolved_ticker, period=period, start_date=start_date, end_date=end_date)
+    if kite_df is not None and not kite_df.empty and len(kite_df) >= 5:
+        print(f"[DataLoader] Successfully loaded {len(kite_df)} bars via Zerodha KiteConnect for {resolved_ticker}")
+        kite_df.attrs["ticker"] = resolved_ticker
+        try:
+            from src.database import save_ohlcv_to_db, load_ohlcv_from_db
+            save_ohlcv_to_db(resolved_ticker, kite_df)
+            full_df = load_ohlcv_from_db(resolved_ticker)
+            if full_df is not None and not full_df.empty:
+                full_df.attrs["ticker"] = resolved_ticker
+                return full_df
+        except Exception:
+            pass
+        return kite_df
 
     # Check if stock has trailing OHLCV history stored in SQLite DB
     latest_db_date = None
