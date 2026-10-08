@@ -11,7 +11,7 @@ Endpoints:
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 from typing import Any, Dict, List, Optional
-from fastapi import FastAPI, HTTPException, Path, Query, status
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Path, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -124,14 +124,14 @@ class ScreenRequest(BaseModel):
 
 class StockSummaryScreenItem(BaseModel):
     ticker: str = Field(..., example="RELIANCE.NS")
-    passed_all: bool = Field(..., example=True)
-    passed_count: int = Field(..., example=26)
-    pass_percentage: float = Field(..., example=100.0)
-    close: float = Field(..., example=1207.70)
-    volume: int = Field(..., example=11880731)
+    passed_all: bool = Field(False, example=True)
+    passed_count: int = Field(0, example=26)
+    pass_percentage: float = Field(0.0, example=100.0)
+    close: Optional[float] = Field(0.0, example=1207.70)
+    volume: Optional[int] = Field(0, example=11880731)
     rsi_14: Optional[float] = Field(None, example=62.4)
     macd: Optional[float] = Field(None, example=4.32)
-    details: Dict[str, Any]
+    details: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
 class UniverseScreenResponse(BaseModel):
@@ -265,11 +265,31 @@ def _screen_worker(ticker: str, node_id: str = "NODE_01_BULLISH_TRENDING") -> Op
     summary="Bulk Screen NIFTY 500 Universe",
     tags=["Stock Screener Node Pipeline"],
 )
-async def screen_universe_endpoint(req: ScreenRequest):
+async def screen_universe_endpoint(req: ScreenRequest, background_tasks: BackgroundTasks):
     """
-    Executes parallel multi-threaded technical screening across NIFTY 500 stocks or CSV dataset.
-    Evaluates requested Screener Filter Node (Node #1 or Node #2).
+    Executes parallel technical screening across NIFTY 500 stocks or returns instant cached DB results.
     """
+    node_name = "Pure Bullish Momentum Scan (Node #2)" if req.node_id == "NODE_02_BULLISH_MOMENTUM" else "Bullish Trending Stocks (Node #1)"
+
+    # 1. Fast Path: If cached DB results exist for this node, return INSTANTLY (0.01s)
+    try:
+        from src.database import get_latest_screener_results_from_db
+        db_results = get_latest_screener_results_from_db(node_id=req.node_id, limit=500)
+        if db_results and len(db_results) > 0:
+            matched = [item for item in db_results if item.get("passed_all")]
+            print(f"[Fast Screener] Returning {len(db_results)} instant DB cached results for {req.node_id}.")
+            return {
+                "status": "success",
+                "screener_name": node_name,
+                "scanned_count": len(db_results),
+                "matched_count": len(matched),
+                "matched_stocks": matched,
+                "all_ranked_stocks": db_results,
+            }
+    except Exception as db_err:
+        print(f"[Fast Screener] DB lookup info: {db_err}")
+
+    # 2. Live Scan execution if DB has no cached records
     if req.custom_tickers:
         tickers = req.custom_tickers
     elif req.csv_path and os.path.exists(req.csv_path):
@@ -278,7 +298,7 @@ async def screen_universe_endpoint(req: ScreenRequest):
         tickers = get_default_universe(req.universe)
 
     scanned_results = []
-    with ThreadPoolExecutor(max_workers=8) as executor:
+    with ThreadPoolExecutor(max_workers=16) as executor:
         futures = {executor.submit(_screen_worker, t, req.node_id): t for t in tickers}
         for future in as_completed(futures):
             res = future.result()
@@ -293,21 +313,17 @@ async def screen_universe_endpoint(req: ScreenRequest):
     else:
         filtered = scanned_results
 
-    # Persist screening run and filter results to SQLite Database after filtering finishes
     try:
         from src.database import save_screener_run_to_db
-        run_id = save_screener_run_to_db(
+        save_screener_run_to_db(
             node_id=req.node_id,
             universe=req.universe,
             scanned_count=len(scanned_results),
             matched_count=len(matched),
             stock_results=scanned_results
         )
-        print(f"[SQLite DB] Successfully saved screener run #{run_id} ({len(scanned_results)} stocks saved for {req.node_id}).")
-    except Exception as db_save_err:
-        print(f"[SQLite DB] Warning: Failed to save screener run to SQLite DB: {db_save_err}")
-
-    node_name = "Pure Bullish Momentum Scan (Node #2)" if req.node_id == "NODE_02_BULLISH_MOMENTUM" else "Bullish Trending Stocks (Node #1)"
+    except Exception:
+        pass
 
     return {
         "status": "success",

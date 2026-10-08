@@ -263,7 +263,7 @@ def save_screener_run_to_db(
             """, result_rows)
 
         conn.commit()
-def get_latest_screener_results_from_db(node_id: str = "NODE_01_BULLISH_TRENDING", limit: int = 100) -> List[Dict[str, Any]]:
+def get_latest_screener_results_from_db(node_id: str = "NODE_01_BULLISH_TRENDING", limit: int = 500) -> List[Dict[str, Any]]:
     """
     Retrieves the latest screened stock results for a given node from SQLite.
     """
@@ -273,13 +273,31 @@ def get_latest_screener_results_from_db(node_id: str = "NODE_01_BULLISH_TRENDING
             SELECT r.*, sr.run_timestamp, sr.node_id, sr.universe
             FROM screener_results r
             JOIN screener_runs sr ON r.run_id = sr.id
-            WHERE sr.node_id = ?
-            ORDER BY r.run_id DESC, r.pass_percentage DESC
+            WHERE r.run_id = (
+                SELECT id FROM screener_runs WHERE node_id = ? ORDER BY id DESC LIMIT 1
+            )
+            ORDER BY r.pass_percentage DESC, r.change_pct DESC
             LIMIT ?
         """, (node_id, limit))
         rows = cursor.fetchall()
 
-    return [dict(row) for row in rows]
+    results = []
+    for row in rows:
+        d = dict(row)
+        d["close"] = d.get("latest_close", 0.0)
+        d["volume"] = d.get("latest_volume", 0)
+        d["details"] = {
+            "ticker": d.get("ticker"),
+            "latest_close": d.get("latest_close"),
+            "latest_volume": d.get("latest_volume"),
+            "change_pct": d.get("change_pct"),
+            "rsi_14": d.get("rsi_14"),
+            "passed_count": d.get("passed_count"),
+            "filter_details_json": d.get("filter_details_json")
+        }
+        results.append(d)
+
+    return results
 
 
 def save_screener_node_to_db(
