@@ -200,7 +200,8 @@ def fetch_stock_data(
 def fetch_stock_fundamentals(ticker: str) -> Dict[str, Any]:
     """
     Fetches fundamental financial parameters from Yahoo Finance:
-    Market Cap (₹ Cr), P/E Ratio, P/B Ratio, EPS (₹), Dividend Yield (%), ROE (%), 52W High/Low.
+    Market Cap (₹ Cr), P/E Ratio, P/B Ratio, EPS (₹), Dividend Yield (%), ROE (%), 52W High/Low,
+    Quarterly Financials (Revenue, Net Profit, QoQ/YoY Growth) and Annual Financials.
     """
     resolved = resolve_ticker(ticker)
     try:
@@ -228,6 +229,80 @@ def fetch_stock_fundamentals(ticker: str) -> Dict[str, Any]:
         high_52w = info.get("fiftyTwoWeekHigh")
         low_52w = info.get("fiftyTwoWeekLow")
 
+        # Extract Quarterly & Annual Income Statement (Revenue, Net Profit, Growth)
+        q_data = {}
+        a_data = {}
+        try:
+            q_stmt = getattr(t, "quarterly_income_stmt", None)
+            if q_stmt is None or getattr(q_stmt, "empty", True):
+                q_stmt = getattr(t, "quarterly_financials", None)
+
+            a_stmt = getattr(t, "income_stmt", None)
+            if a_stmt is None or getattr(a_stmt, "empty", True):
+                a_stmt = getattr(t, "financials", None)
+
+            if q_stmt is not None and not q_stmt.empty:
+                cols = sorted(list(q_stmt.columns))
+                rev_row = q_stmt.loc["Total Revenue"] if "Total Revenue" in q_stmt.index else (q_stmt.loc["Operating Revenue"] if "Operating Revenue" in q_stmt.index else None)
+                ni_row = q_stmt.loc["Net Income"] if "Net Income" in q_stmt.index else (q_stmt.loc["Net Income Common Stockholders"] if "Net Income Common Stockholders" in q_stmt.index else None)
+
+                if len(cols) >= 1:
+                    q_curr = cols[-1]
+                    q_prev = cols[-2] if len(cols) >= 2 else None
+                    q_yoy = cols[-5] if len(cols) >= 5 else None
+
+                    curr_rev = float(rev_row[q_curr]) / 1e7 if rev_row is not None and q_curr in rev_row and pd.notna(rev_row[q_curr]) else None
+                    prev_rev = float(rev_row[q_prev]) / 1e7 if rev_row is not None and q_prev and q_prev in rev_row and pd.notna(rev_row[q_prev]) else None
+                    yoy_rev = float(rev_row[q_yoy]) / 1e7 if rev_row is not None and q_yoy and q_yoy in rev_row and pd.notna(rev_row[q_yoy]) else None
+
+                    curr_ni = float(ni_row[q_curr]) / 1e7 if ni_row is not None and q_curr in ni_row and pd.notna(ni_row[q_curr]) else None
+                    prev_ni = float(ni_row[q_prev]) / 1e7 if ni_row is not None and q_prev and q_prev in ni_row and pd.notna(ni_row[q_prev]) else None
+                    yoy_ni = float(ni_row[q_yoy]) / 1e7 if ni_row is not None and q_yoy and q_yoy in ni_row and pd.notna(ni_row[q_yoy]) else None
+
+                    rev_qoq = round(((curr_rev - prev_rev) / abs(prev_rev)) * 100, 2) if curr_rev and prev_rev else None
+                    rev_yoy = round(((curr_rev - yoy_rev) / abs(yoy_rev)) * 100, 2) if curr_rev and yoy_rev else None
+
+                    ni_qoq = round(((curr_ni - prev_ni) / abs(prev_ni)) * 100, 2) if (curr_ni is not None and prev_ni is not None and prev_ni != 0) else None
+                    ni_yoy = round(((curr_ni - yoy_ni) / abs(yoy_ni)) * 100, 2) if (curr_ni is not None and yoy_ni is not None and yoy_ni != 0) else None
+
+                    q_data = {
+                        "period": str(q_curr.date()) if hasattr(q_curr, "date") else str(q_curr),
+                        "revenue_cr": round(curr_rev, 2) if curr_rev is not None else None,
+                        "net_profit_cr": round(curr_ni, 2) if curr_ni is not None else None,
+                        "rev_growth_qoq_pct": rev_qoq,
+                        "rev_growth_yoy_pct": rev_yoy,
+                        "profit_growth_qoq_pct": ni_qoq,
+                        "profit_growth_yoy_pct": ni_yoy,
+                    }
+
+            if a_stmt is not None and not a_stmt.empty:
+                cols = sorted(list(a_stmt.columns))
+                rev_row = a_stmt.loc["Total Revenue"] if "Total Revenue" in a_stmt.index else (a_stmt.loc["Operating Revenue"] if "Operating Revenue" in a_stmt.index else None)
+                ni_row = a_stmt.loc["Net Income"] if "Net Income" in a_stmt.index else (a_stmt.loc["Net Income Common Stockholders"] if "Net Income Common Stockholders" in a_stmt.index else None)
+
+                if len(cols) >= 1:
+                    a_curr = cols[-1]
+                    a_prev = cols[-2] if len(cols) >= 2 else None
+
+                    curr_rev = float(rev_row[a_curr]) / 1e7 if rev_row is not None and a_curr in rev_row and pd.notna(rev_row[a_curr]) else None
+                    prev_rev = float(rev_row[a_prev]) / 1e7 if rev_row is not None and a_prev and a_prev in rev_row and pd.notna(rev_row[a_prev]) else None
+
+                    curr_ni = float(ni_row[a_curr]) / 1e7 if ni_row is not None and a_curr in ni_row and pd.notna(ni_row[a_curr]) else None
+                    prev_ni = float(ni_row[a_prev]) / 1e7 if ni_row is not None and a_prev and a_prev in ni_row and pd.notna(ni_row[a_prev]) else None
+
+                    rev_yoy = round(((curr_rev - prev_rev) / abs(prev_rev)) * 100, 2) if curr_rev and prev_rev else None
+                    ni_yoy = round(((curr_ni - prev_ni) / abs(prev_ni)) * 100, 2) if (curr_ni is not None and prev_ni is not None and prev_ni != 0) else None
+
+                    a_data = {
+                        "year": str(a_curr.date())[:4] if hasattr(a_curr, "date") else str(a_curr)[:4],
+                        "revenue_cr": round(curr_rev, 2) if curr_rev is not None else None,
+                        "net_profit_cr": round(curr_ni, 2) if curr_ni is not None else None,
+                        "rev_growth_yoy_pct": rev_yoy,
+                        "profit_growth_yoy_pct": ni_yoy,
+                    }
+        except Exception as fin_err:
+            print(f"[DataLoader] Detailed financials extraction error: {fin_err}")
+
         return {
             "ticker": resolved,
             "company_name": info.get("longName") or info.get("shortName") or resolved.replace(".NS", ""),
@@ -241,6 +316,8 @@ def fetch_stock_fundamentals(ticker: str) -> Dict[str, Any]:
             "roe": roe,
             "fifty_two_week_high": round(float(high_52w), 2) if high_52w else None,
             "fifty_two_week_low": round(float(low_52w), 2) if low_52w else None,
+            "quarterly_financials": q_data,
+            "annual_financials": a_data,
         }
     except Exception as e:
         print(f"[DataLoader] Fundamental fetch error for {ticker}: {e}")
@@ -257,6 +334,8 @@ def fetch_stock_fundamentals(ticker: str) -> Dict[str, Any]:
             "roe": None,
             "fifty_two_week_high": None,
             "fifty_two_week_low": None,
+            "quarterly_financials": {},
+            "annual_financials": {},
         }
 
 

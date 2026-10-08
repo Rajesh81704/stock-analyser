@@ -510,6 +510,84 @@ function renderRightInspectorPanel(data) {
   document.getElementById('panel-vol-sma').innerText = volSma ? Number(volSma).toLocaleString() : '--';
   document.getElementById('panel-mcap').innerText = f.market_cap_cr ? '₹' + Number(f.market_cap_cr).toLocaleString() + ' Cr' : '--';
 
+  // Render Quarterly Financials
+  const q = f.quarterly_financials || {};
+  if (q.period) {
+    document.getElementById('panel-q-period').innerText = q.period;
+  } else {
+    document.getElementById('panel-q-period').innerText = 'Last Quarter';
+  }
+  document.getElementById('panel-q-rev').innerText = q.revenue_cr !== undefined && q.revenue_cr !== null ? '₹' + Number(q.revenue_cr).toLocaleString() + ' Cr' : '--';
+  
+  const qProfitEl = document.getElementById('panel-q-profit');
+  if (q.net_profit_cr !== undefined && q.net_profit_cr !== null) {
+    const pVal = Number(q.net_profit_cr);
+    qProfitEl.innerText = (pVal >= 0 ? '₹' : '-₹') + Math.abs(pVal).toLocaleString() + ' Cr';
+    qProfitEl.className = 'val ' + (pVal >= 0 ? 'green' : 'red');
+  } else {
+    qProfitEl.innerText = '--';
+    qProfitEl.className = 'val';
+  }
+
+  const qQoqEl = document.getElementById('panel-q-profit-qoq');
+  if (q.profit_growth_qoq_pct !== undefined && q.profit_growth_qoq_pct !== null) {
+    const val = Number(q.profit_growth_qoq_pct);
+    qQoqEl.innerText = (val >= 0 ? '+' : '') + val.toFixed(2) + '%';
+    qQoqEl.className = 'val ' + (val >= 0 ? 'green' : 'red');
+  } else {
+    qQoqEl.innerText = '--';
+    qQoqEl.className = 'val';
+  }
+
+  const qYoyEl = document.getElementById('panel-q-profit-yoy');
+  if (q.profit_growth_yoy_pct !== undefined && q.profit_growth_yoy_pct !== null) {
+    const val = Number(q.profit_growth_yoy_pct);
+    qYoyEl.innerText = (val >= 0 ? '+' : '') + val.toFixed(2) + '%';
+    qYoyEl.className = 'val ' + (val >= 0 ? 'green' : 'red');
+  } else {
+    qYoyEl.innerText = '--';
+    qYoyEl.className = 'val';
+  }
+
+  // Render Annual Financials
+  const a = f.annual_financials || {};
+  if (a.year) {
+    document.getElementById('panel-a-year').innerText = 'FY ' + a.year;
+  } else {
+    document.getElementById('panel-a-year').innerText = 'Full Year';
+  }
+  document.getElementById('panel-a-rev').innerText = a.revenue_cr !== undefined && a.revenue_cr !== null ? '₹' + Number(a.revenue_cr).toLocaleString() + ' Cr' : '--';
+
+  const aProfitEl = document.getElementById('panel-a-profit');
+  if (a.net_profit_cr !== undefined && a.net_profit_cr !== null) {
+    const pVal = Number(a.net_profit_cr);
+    aProfitEl.innerText = (pVal >= 0 ? '₹' : '-₹') + Math.abs(pVal).toLocaleString() + ' Cr';
+    aProfitEl.className = 'val ' + (pVal >= 0 ? 'green' : 'red');
+  } else {
+    aProfitEl.innerText = '--';
+    aProfitEl.className = 'val';
+  }
+
+  const aRevYoyEl = document.getElementById('panel-a-rev-yoy');
+  if (a.rev_growth_yoy_pct !== undefined && a.rev_growth_yoy_pct !== null) {
+    const val = Number(a.rev_growth_yoy_pct);
+    aRevYoyEl.innerText = (val >= 0 ? '+' : '') + val.toFixed(2) + '%';
+    aRevYoyEl.className = 'val ' + (val >= 0 ? 'green' : 'red');
+  } else {
+    aRevYoyEl.innerText = '--';
+    aRevYoyEl.className = 'val';
+  }
+
+  const aProfitYoyEl = document.getElementById('panel-a-profit-yoy');
+  if (a.profit_growth_yoy_pct !== undefined && a.profit_growth_yoy_pct !== null) {
+    const val = Number(a.profit_growth_yoy_pct);
+    aProfitYoyEl.innerText = (val >= 0 ? '+' : '') + val.toFixed(2) + '%';
+    aProfitYoyEl.className = 'val ' + (val >= 0 ? 'green' : 'red');
+  } else {
+    aProfitYoyEl.innerText = '--';
+    aProfitYoyEl.className = 'val';
+  }
+
   // Render chart
   if (data.chart_candles) {
     renderPanelChartCanvas(data.chart_candles);
@@ -521,8 +599,6 @@ function renderRightInspectorPanel(data) {
     document.getElementById('panel-rules-score').innerText = node1.passed_count + ' / ' + node1.total_rules;
     renderMiniRulesTable(node1.filter_results);
   }
-
-
 }
 
 function renderMiniRulesTable(filterResults) {
