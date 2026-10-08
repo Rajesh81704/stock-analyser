@@ -413,7 +413,15 @@ function toggleSortDirection() {
   renderStocksTable(null, 1);
 }
 
-async function fetchAndInspectStock(ticker) {
+let inspectFetchAbortController = null;
+
+async function fetchAndInspectStock(ticker, period = '6mo') {
+  if (inspectFetchAbortController) {
+    try { inspectFetchAbortController.abort(); } catch (e) {}
+  }
+  inspectFetchAbortController = new AbortController();
+  const signal = inspectFetchAbortController.signal;
+
   currentSelectedTicker = ticker;
   document.getElementById('panel-ticker').innerText = ticker;
   document.getElementById('panel-company').innerText = 'Loading chart data...';
@@ -426,14 +434,19 @@ async function fetchAndInspectStock(ticker) {
   }
 
   try {
-    const resp = await fetch('/api/stock/' + encodeURIComponent(ticker) + '/evaluate');
+    const resp = await fetch(`/api/stock/${encodeURIComponent(ticker)}/evaluate?period=${encodeURIComponent(period)}`, { signal });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.detail || 'Evaluation failed');
 
-    currentEvaluationData = data;
-    renderRightInspectorPanel(data);
+    // Only render chart if ticker is still selected
+    if (currentSelectedTicker === ticker) {
+      currentEvaluationData = data;
+      renderRightInspectorPanel(data);
+    }
   } catch (err) {
-    console.warn('Error fetching detailed stock inspection data:', err);
+    if (err.name !== 'AbortError') {
+      console.warn('Error fetching stock chart data:', err);
+    }
   }
 }
 
@@ -610,12 +623,12 @@ function renderPanelChartCanvas(candles) {
   });
 }
 
-function updateChartPeriod(period) {
-  document.querySelectorAll('.time-tab').forEach(t => t.classList.remove('active'));
-  if (event && event.target) event.target.classList.add('active');
+function updateChartPeriod(btnElement, period) {
+  document.querySelectorAll('.timeframe-tabs-bar .time-tab').forEach(t => t.classList.remove('active'));
+  if (btnElement) btnElement.classList.add('active');
 
   if (currentSelectedTicker) {
-    fetchAndInspectStock(currentSelectedTicker);
+    fetchAndInspectStock(currentSelectedTicker, period);
   }
 }
 
