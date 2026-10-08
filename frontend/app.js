@@ -333,12 +333,59 @@ function renderStocksTable(items, page = 1) {
   const sortInd = document.getElementById('sort-indicator');
   if (sortInd) sortInd.innerText = sortAscending ? '↑' : '↓';
 
-  // Automatically inspect top stock in right panel
-  if (pageItems.length > 0) {
-    const topSymbol = pageItems[0].ticker || pageItems[0].details.ticker;
+  // Highlight currently selected stock if present on this page, or auto-inspect initial top stock ONCE
+  let foundSelectedRow = null;
+  pageItems.forEach((item, index) => {
+    const symbol = item.ticker || (item.details && item.details.ticker);
+    if (currentSelectedTicker && symbol === currentSelectedTicker) {
+      foundSelectedRow = tbody.children[index];
+    }
+  });
+
+  if (foundSelectedRow) {
+    foundSelectedRow.classList.add('selected');
+  } else if (!currentSelectedTicker && pageItems.length > 0) {
+    const topSymbol = pageItems[0].ticker || (pageItems[0].details && pageItems[0].details.ticker);
     const topTr = tbody.querySelector('tr');
     selectStockRow(topSymbol, topTr, false);
   }
+}
+
+function filterTagClick(btnElement, mode) {
+  document.querySelectorAll('.filter-tags-bar .tag-btn').forEach(b => b.classList.remove('active'));
+  if (btnElement) btnElement.classList.add('active');
+
+  if (mode === 'all') {
+    renderStocksTable(currentStockItems, 1);
+    return;
+  }
+
+  let filtered = currentStockItems;
+  if (mode === 'bullish') {
+    filtered = currentStockItems.filter(i => (i.passed_all || (i.details && i.details.passed_all)));
+  } else if (mode === 'volume') {
+    filtered = currentStockItems.filter(i => {
+      const v = i.volume || (i.details && i.details.latest_volume) || 0;
+      return v >= 1000000;
+    });
+  } else if (mode === 'breakout' || mode === 'uptrend') {
+    filtered = currentStockItems.filter(i => {
+      const pct = i.pass_percentage || (i.details && i.details.pass_percentage) || 0;
+      return pct >= 80.0;
+    });
+  } else if (mode === 'ichimoku') {
+    filtered = currentStockItems.filter(i => {
+      const cnt = i.passed_count || (i.details && i.details.passed_count) || 0;
+      return cnt >= 20;
+    });
+  } else if (mode === 'macd') {
+    filtered = currentStockItems.filter(i => {
+      const m = i.macd || (i.details && i.details.macd) || 0;
+      return m > 0;
+    });
+  }
+
+  renderStocksTable(filtered, 1);
 }
 
 function selectStockRow(symbol, trElement, autoScrollMobile = true) {

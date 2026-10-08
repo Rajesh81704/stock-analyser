@@ -91,14 +91,14 @@
 
         <!-- Filter Tags Bar -->
         <div class="filter-tags-bar">
-          <button class="tag-btn active" onclick="runUniverseScreen()">[ Top Stocks (<span id="results-count">0</span>) ]</button>
-          <button class="tag-btn" onclick="runUniverseScreen()">[ Bullish Only ]</button>
-          <button class="tag-btn" onclick="runUniverseScreen()">[ High Volume ]</button>
-          <button class="tag-btn" onclick="runUniverseScreen()">[ Breakout ]</button>
-          <button class="tag-btn" onclick="runUniverseScreen()">[ Uptrend ]</button>
-          <button class="tag-btn" onclick="runUniverseScreen()">[ Ichimoku ]</button>
-          <button class="tag-btn" onclick="runUniverseScreen()">[ MACD ]</button>
-          <button class="tag-btn" onclick="runUniverseScreen()">[ Custom ]</button>
+          <button class="tag-btn active" onclick="filterTagClick(this, 'all')">[ Top Stocks (<span id="results-count">0</span>) ]</button>
+          <button class="tag-btn" onclick="filterTagClick(this, 'bullish')">[ Bullish Only ]</button>
+          <button class="tag-btn" onclick="filterTagClick(this, 'volume')">[ High Volume ]</button>
+          <button class="tag-btn" onclick="filterTagClick(this, 'breakout')">[ Breakout ]</button>
+          <button class="tag-btn" onclick="filterTagClick(this, 'uptrend')">[ Uptrend ]</button>
+          <button class="tag-btn" onclick="filterTagClick(this, 'ichimoku')">[ Ichimoku ]</button>
+          <button class="tag-btn" onclick="filterTagClick(this, 'macd')">[ MACD ]</button>
+          <button class="tag-btn" onclick="filterTagClick(this, 'all')">[ Custom ]</button>
           <button id="btn-run-scan" class="term-btn-green" style="margin-left:auto;" onclick="runUniverseScreen()">▶ Run Scan</button>
         </div>
 
