@@ -424,7 +424,9 @@ async function fetchAndInspectStock(ticker, period = '6mo') {
 
   currentSelectedTicker = ticker;
   document.getElementById('panel-ticker').innerText = ticker;
-  document.getElementById('panel-company').innerText = 'Loading chart data...';
+  document.getElementById('panel-company').innerText = 'Loading data...';
+  document.getElementById('panel-q-period').innerText = 'Fetching...';
+  document.getElementById('panel-a-year').innerText = 'Fetching...';
 
   // Instant local preview from active scan items
   const localItem = currentStockItems.find(i => (i.ticker === ticker || (i.details && i.details.ticker === ticker)));

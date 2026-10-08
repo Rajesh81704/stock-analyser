@@ -87,6 +87,8 @@ class FundamentalsModel(BaseModel):
     roe: Optional[float] = Field(None, example=12.4)
     fifty_two_week_high: Optional[float] = Field(None, example=1608.0)
     fifty_two_week_low: Optional[float] = Field(None, example=1150.0)
+    quarterly_financials: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    annual_financials: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
 class ChartCandleItem(BaseModel):
