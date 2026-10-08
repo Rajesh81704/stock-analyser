@@ -51,8 +51,23 @@ def evaluate_individual_stock(ticker: str, period: str = "6mo") -> Dict[str, Any
     # 3. Fundamentals
     fundamentals = fetch_stock_fundamentals(resolved)
 
-    # 4. Daily Candle Payload for Graph (Trailing 90 trading sessions)
-    history_slice = df_ind.tail(90)
+    # 4. Dynamic Candle Payload for Graph based on timeframe period
+    p_lower = period.lower().strip()
+    if p_lower == "1d":
+        history_slice = df_ind.tail(5)
+    elif p_lower == "1w":
+        history_slice = df_ind.tail(10)
+    elif p_lower == "1m":
+        history_slice = df_ind.tail(22)
+    elif p_lower == "3m":
+        history_slice = df_ind.tail(65)
+    elif p_lower == "1y":
+        history_slice = df_ind.tail(252)
+    elif p_lower == "5y":
+        history_slice = df_ind
+    else:
+        history_slice = df_ind.tail(65)
+
     chart_candles = []
     for d, row in history_slice.iterrows():
         chart_candles.append({

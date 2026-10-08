@@ -58,8 +58,16 @@ def fetch_stock_data(
     except Exception:
         pass
 
-    # If DB already has historical data, top-up with recent 5d bars; otherwise full 5y initial hydration
-    fetch_period = period
+    YF_PERIOD_MAP = {
+        "1d": "5d",
+        "1w": "1mo",
+        "1m": "1mo",
+        "3m": "3mo",
+        "6m": "6mo",
+        "1y": "1y",
+        "5y": "5y",
+    }
+    fetch_period = YF_PERIOD_MAP.get(period.lower().strip(), period)
 
     candidates = [resolved_ticker]
     if "." not in resolved_ticker and not resolved_ticker.startswith("^"):
