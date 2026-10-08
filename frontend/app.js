@@ -172,21 +172,9 @@ async function runUniverseScreen(nodeId) {
   }
 
   if (progressBarContainer) progressBarContainer.classList.remove('hidden');
-  if (barFill) barFill.style.width = '10%';
-  if (percentText) percentText.innerText = '10%';
-  if (statusText) statusText.innerText = 'Connecting & analyzing NIFTY 500 trailing price history...';
-
-  let progress = 10;
-  const progressTimer = setInterval(() => {
-    if (progress < 90) {
-      progress += Math.floor(Math.random() * 12) + 5;
-      if (progress > 90) progress = 90;
-      
-      if (barFill) barFill.style.width = progress + '%';
-      if (percentText) percentText.innerText = progress + '%';
-      if (countText) countText.innerText = Math.floor((progress / 100) * 442) + ' / 500 stocks';
-    }
-  }, 350);
+  if (barFill) barFill.style.width = '40%';
+  if (percentText) percentText.innerText = '40%';
+  if (statusText) statusText.innerText = 'Evaluating quantitative technical rules...';
 
   try {
     const resp = await fetch('/api/screen/bullish-trending', {
@@ -196,12 +184,11 @@ async function runUniverseScreen(nodeId) {
     });
     const data = await resp.json();
     
-    clearInterval(progressTimer);
     if (barFill) barFill.style.width = '100%';
     if (percentText) percentText.innerText = '100%';
     const totalFound = data.all_ranked_stocks ? data.all_ranked_stocks.length : 0;
     if (countText) countText.innerText = totalFound + ' / 500 stocks processed';
-    if (statusText) statusText.innerText = `Scan complete! Found ${totalFound} matching stocks sorted by highest return.`;
+    if (statusText) statusText.innerText = `Scan complete! Found ${totalFound} matching stocks.`;
 
     renderStocksTable(data.all_ranked_stocks);
 
@@ -213,10 +200,9 @@ async function runUniverseScreen(nodeId) {
         runBtn.style.opacity = '1';
         runBtn.style.cursor = 'pointer';
       }
-    }, 1200);
+    }, 500);
 
   } catch (err) {
-    clearInterval(progressTimer);
     if (progressBarContainer) progressBarContainer.classList.add('hidden');
     if (runBtn) {
       runBtn.disabled = false;
@@ -224,10 +210,7 @@ async function runUniverseScreen(nodeId) {
       runBtn.style.opacity = '1';
       runBtn.style.cursor = 'pointer';
     }
-    const msg = (err.message && (err.message === 'Failed to fetch' || err.message.includes('fetch')))
-      ? 'Backend server restarted. Please click "▶ Run Scan" to scan.'
-      : 'Error during scan: ' + (err.message || err);
-    console.warn(msg);
+    console.warn('Scan info:', err);
   }
 }
 
