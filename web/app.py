@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from src.data_loader import fetch_stock_data, fetch_stock_fundamentals, resolve_ticker
-from src.screener import FILTER_RULES_SPEC, BullishTrendingScreenerNode, BullishMomentumScreenerNode, list_available_screener_nodes
+from src.screener import FILTER_RULES_SPEC, BullishTrendingScreenerNode, BullishMomentumScreenerNode, list_available_screener_nodes, get_screener_node_by_id
 from src.stock_evaluator import evaluate_individual_stock
 from src.universe import get_default_universe, load_tickers_from_csv
 from src.scheduler import start_automated_scheduler, run_automatic_scheduled_scan
@@ -238,10 +238,7 @@ def _screen_worker(ticker: str, node_id: str = "NODE_01_BULLISH_TRENDING") -> Op
     try:
         resolved = resolve_ticker(ticker)
         df = fetch_stock_data(resolved, period="6mo")
-        if node_id == "NODE_02_BULLISH_MOMENTUM":
-            screener = BullishMomentumScreenerNode(df)
-        else:
-            screener = BullishTrendingScreenerNode(df)
+        screener = get_screener_node_by_id(node_id, df)
         res = screener.evaluate_latest()
 
         latest_bar = res.get("latest_bar", {})

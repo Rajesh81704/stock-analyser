@@ -348,8 +348,8 @@ def get_all_screener_nodes_from_db() -> List[Dict[str, Any]]:
 
 
 def seed_default_screener_nodes() -> None:
-    """Seeds Node #1 'Bullish Trending Stocks' and Node #2 'Pure Bullish Momentum Scan' into SQLite DB."""
-    from src.screener import FILTER_RULES_SPEC_NODE_1, FILTER_RULES_SPEC_NODE_2
+    """Seeds default quantitative screener nodes (Node #1, Node #2, Node #3) into SQLite DB."""
+    from src.screener import FILTER_RULES_SPEC_NODE_1, FILTER_RULES_SPEC_NODE_2, FILTER_RULES_SPEC_NODE_3
     
     save_screener_node_to_db(
         node_id="NODE_01_BULLISH_TRENDING",
@@ -367,6 +367,15 @@ def seed_default_screener_nodes() -> None:
         description="26-Rule Algorithmic Technical Filter Engine for Cash Segment Stocks",
         rule_count=len(FILTER_RULES_SPEC_NODE_2),
         rules_spec=FILTER_RULES_SPEC_NODE_2
+    )
+
+    save_screener_node_to_db(
+        node_id="NODE_03_PROFIT_JUMP_200",
+        node_name="Profit Jump by 200%",
+        category="Fundamental & Growth Scan",
+        description="Algorithmic Fundamental & Growth Filter Engine: Net Profit increased by 100%+ (2x) YoY with positive volume & technical trend.",
+        rule_count=len(FILTER_RULES_SPEC_NODE_3),
+        rules_spec=FILTER_RULES_SPEC_NODE_3
     )
 
 

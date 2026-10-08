@@ -373,6 +373,168 @@ class BullishMomentumScreenerNode:
         }
 
 
+FILTER_RULES_SPEC_NODE_3 = [
+    {"id": 1, "name": "Yearly/Quarterly Net Profit Jump >= 100%", "desc": "Net profit increased by at least 100% (2x) YoY"},
+    {"id": 2, "name": "Current Annual Net Profit > 0", "desc": "Company is currently profitable (Net Profit > 0)"},
+    {"id": 3, "name": "Latest Quarter Net Profit > 0", "desc": "Latest quarter net income is positive"},
+    {"id": 4, "name": "Quarterly Revenue Growth (YoY) >= 0%", "desc": "Top-line revenue expanding YoY"},
+    {"id": 5, "name": "Daily Volume SMA(20) >= 50,000", "desc": "20-day Volume SMA is at least 50,000"},
+    {"id": 6, "name": "Daily Close >= EMA(close,20)", "desc": "Price trading above 20-day EMA (Bullish Trend)"},
+    {"id": 7, "name": "Daily RSI(14) >= 45", "desc": "14-day RSI >= 45 (Bullish momentum)"},
+    {"id": 8, "name": "Daily Close > Open", "desc": "Green daily candle body"},
+]
+
+
+class ProfitJump200ScreenerNode:
+    """
+    Screener Node #3: 'Profit Jump by 200%' Filter Node.
+    Algorithm based on Chartink Screener:
+    - Annual or Quarterly Net profit increased by 100%+ (2x jump) compared to previous period.
+    - Positive net profit baseline & positive quarterly earnings.
+    - Bullish technical trend & volume filter.
+    """
+
+    node_id: str = "NODE_03_PROFIT_JUMP_200"
+    node_name: str = "Profit Jump by 200%"
+    description: str = "Algorithmic Fundamental & Growth Filter Engine: Net Profit increased by 100%+ (2x) YoY with positive volume & technical trend."
+
+    def __init__(self, df: pd.DataFrame, fundamentals: Optional[Dict[str, Any]] = None):
+        self.raw_df = df.copy()
+        self.df_ind = add_screener_indicators(self.raw_df)
+        self.fundamentals = fundamentals
+
+    def evaluate_latest(self) -> Dict[str, Any]:
+        if self.df_ind.empty or len(self.df_ind) < 5:
+            return {
+                "node_id": self.node_id,
+                "node_name": self.node_name,
+                "passed_all": False,
+                "passed_count": 0,
+                "total_rules": len(FILTER_RULES_SPEC_NODE_3),
+                "pass_percentage": 0.0,
+                "filter_results": [],
+                "latest_bar": {},
+            }
+
+        latest = self.df_ind.iloc[-1]
+        close = float(latest["Close"])
+        open_p = float(latest["Open"])
+        high = float(latest["High"])
+        low = float(latest["Low"])
+        volume = float(latest["Volume"])
+
+        ema_20 = float(latest.get("ema_20", close))
+        vol_sma_20 = float(latest.get("vol_sma_20", volume))
+        rsi_14 = float(latest.get("rsi_14", 50.0))
+
+        # Fetch or use fundamentals
+        ticker = self.raw_df.attrs.get("ticker", "")
+        f = self.fundamentals
+        if f is None and ticker:
+            try:
+                from src.data_loader import fetch_stock_fundamentals
+                f = fetch_stock_fundamentals(ticker)
+            except Exception:
+                f = {}
+        if f is None:
+            f = {}
+
+        q = f.get("quarterly_financials") or {}
+        a = f.get("annual_financials") or {}
+
+        a_growth = a.get("profit_growth_yoy_pct")
+        q_growth = q.get("profit_growth_yoy_pct")
+        a_profit = a.get("net_profit_cr")
+        q_profit = q.get("net_profit_cr")
+        q_rev_growth = q.get("rev_growth_yoy_pct")
+
+        # 1. Profit jump rule (Annual or Quarterly profit growth >= 100%)
+        has_2x_jump = bool((a_growth is not None and a_growth >= 100.0) or (q_growth is not None and q_growth >= 100.0))
+        
+        # 2. Annual Net Profit > 0
+        a_profit_positive = bool(a_profit is not None and a_profit > 0)
+
+        # 3. Latest Quarter Net Profit > 0
+        q_profit_positive = bool(q_profit is not None and q_profit > 0)
+
+        # 4. Quarterly Revenue Growth >= 0%
+        q_rev_positive = bool(q_rev_growth is None or q_rev_growth >= 0.0)
+
+        # 5. Volume SMA >= 50,000
+        vol_ok = bool(vol_sma_20 >= 50000.0 or volume >= 50000.0)
+
+        # 6. Close >= EMA(20)
+        close_above_ema20 = bool(close >= ema_20)
+
+        # 7. RSI(14) >= 45
+        rsi_ok = bool(rsi_14 >= 45.0)
+
+        # 8. Close > Open
+        green_candle = bool(close >= open_p)
+
+        a_growth_str = f"{a_growth:.1f}%" if a_growth is not None else "--"
+        q_growth_str = f"{q_growth:.1f}%" if q_growth is not None else "--"
+        a_profit_str = f"₹{a_profit:.2f} Cr" if a_profit is not None else "--"
+        q_profit_str = f"₹{q_profit:.2f} Cr" if q_profit is not None else "--"
+        q_rev_str = f"{q_rev_growth:.1f}%" if q_rev_growth is not None else "--"
+
+        rule_evals = [
+            {"id": 1, "passed": has_2x_jump, "actual": f"Annual Growth = {a_growth_str}, Q Growth = {q_growth_str}", "target": "Growth >= 100.0% (2x Jump)"},
+            {"id": 2, "passed": a_profit_positive, "actual": f"Annual Net Profit = {a_profit_str}", "target": "Net Profit > 0"},
+            {"id": 3, "passed": q_profit_positive, "actual": f"Quarter Net Profit = {q_profit_str}", "target": "Quarter Net Profit > 0"},
+            {"id": 4, "passed": q_rev_positive, "actual": f"Q Revenue Growth = {q_rev_str}", "target": "Q Revenue Growth >= 0.0%"},
+            {"id": 5, "passed": vol_ok, "actual": f"Vol SMA(20) = {vol_sma_20:,.0f}", "target": ">= 50,000"},
+            {"id": 6, "passed": close_above_ema20, "actual": f"Close = {close:.2f}, EMA(20) = {ema_20:.2f}", "target": "Close >= EMA(20)"},
+            {"id": 7, "passed": rsi_ok, "actual": f"RSI(14) = {rsi_14:.1f}", "target": ">= 45.0"},
+            {"id": 8, "passed": green_candle, "actual": f"Close = {close:.2f}, Open = {open_p:.2f}", "target": "Close >= Open"},
+        ]
+
+        filter_results = []
+        passed_count = 0
+        for spec, res in zip(FILTER_RULES_SPEC_NODE_3, rule_evals):
+            is_pass = res["passed"]
+            if is_pass:
+                passed_count += 1
+            filter_results.append({
+                "rule_id": spec["id"],
+                "rule_name": spec["name"],
+                "description": spec["desc"],
+                "passed": is_pass,
+                "actual_value": res["actual"],
+                "target_threshold": res["target"],
+            })
+
+        total_rules = len(FILTER_RULES_SPEC_NODE_3)
+        pass_pct = round((passed_count / total_rules) * 100.0, 1)
+        passed_all = (passed_count == total_rules)
+
+        last_date = self.df_ind.index[-1].strftime("%Y-%m-%d")
+        prev_close = float(self.df_ind["Close"].iloc[-2]) if len(self.df_ind) >= 2 else open_p
+        change_pct = round(((close - prev_close) / prev_close) * 100.0, 2) if prev_close > 0 else 0.0
+
+        return {
+            "node_id": self.node_id,
+            "node_name": self.node_name,
+            "date": last_date,
+            "passed_all": passed_all,
+            "passed_count": passed_count,
+            "total_rules": total_rules,
+            "pass_percentage": pass_pct,
+            "filter_results": filter_results,
+            "latest_bar": {
+                "date": last_date,
+                "open": round(open_p, 2),
+                "high": round(high, 2),
+                "low": round(low, 2),
+                "close": round(close, 2),
+                "volume": int(volume),
+                "change_pct": change_pct,
+                "rsi_14": round(rsi_14, 1),
+                "ema_20": round(ema_20, 2),
+            },
+        }
+
+
 # Alias for backwards compatibility
 BullishTrendingScreener = BullishTrendingScreenerNode
 FILTER_RULES_SPEC = FILTER_RULES_SPEC_NODE_1
@@ -397,12 +559,22 @@ def list_available_screener_nodes() -> List[Dict[str, Any]]:
             "description": "26-Rule Algorithmic Momentum Filter Node for Cash Segment Equities",
             "rules_spec": FILTER_RULES_SPEC_NODE_2,
         },
+        {
+            "node_id": "NODE_03_PROFIT_JUMP_200",
+            "node_name": "Profit Jump by 200%",
+            "category": "Fundamental & Growth Scan",
+            "rule_count": 8,
+            "description": "Algorithmic Fundamental & Growth Filter Engine: Net Profit increased by 100%+ (2x) YoY with positive volume & technical trend",
+            "rules_spec": FILTER_RULES_SPEC_NODE_3,
+        },
     ]
 
 
-def get_screener_node_by_id(node_id: str, df: pd.DataFrame):
+def get_screener_node_by_id(node_id: str, df: pd.DataFrame, fundamentals: Optional[Dict[str, Any]] = None):
     """Instantiates and returns the appropriate Screener Node instance by node_id."""
     if node_id == "NODE_02_BULLISH_MOMENTUM":
         return BullishMomentumScreenerNode(df)
+    elif node_id == "NODE_03_PROFIT_JUMP_200":
+        return ProfitJump200ScreenerNode(df, fundamentals=fundamentals)
     return BullishTrendingScreenerNode(df)
 

@@ -57,6 +57,9 @@ async function openNodeScan(scanId) {
   if (currentActiveNodeId === 'NODE_02_BULLISH_MOMENTUM') {
     if (titleEl) titleEl.innerText = 'Pure Bullish Momentum Scan';
     if (subTitleEl) subTitleEl.innerText = '26-Rule Algorithmic Technical Filter Engine for Cash Segment (NIFTY 500)';
+  } else if (currentActiveNodeId === 'NODE_03_PROFIT_JUMP_200') {
+    if (titleEl) titleEl.innerText = 'Profit Jump by 200%';
+    if (subTitleEl) subTitleEl.innerText = 'Algorithmic Fundamental & Growth Filter Engine: Net Profit increased by 100%+ (2x) YoY';
   } else {
     if (titleEl) titleEl.innerText = 'Bullish Trend Stocks';
     if (subTitleEl) subTitleEl.innerText = '26-Rule Algorithmic Technical Filter Engine for Cash Segment (NIFTY 500)';
