@@ -1,144 +1,137 @@
 """
-Main CLI Application
-Step-by-step stock price and trend prediction pipeline runner.
+"Bullish Trending Stocks" & NIFTY 500 Stock Evaluator CLI
+Runs comprehensive individual stock evaluations (Fundamentals, Technicals, 1-Day & 1-Week Returns, Filter Nodes)
+or screens the NIFTY 500 stock universe.
+
 Usage:
-    python main.py --ticker AAPL --mode next_day
-    python main.py --ticker NVDA --mode same_day --save-chart
+    python main.py --ticker RELIANCE.NS
+    python main.py --scan-nifty500
+    python main.py --serve
 """
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import os
 import sys
-from src.pipeline import StockPipeline
-from src.predictor import LivePredictor
-from src.visualizer import plot_pipeline_results
+
+from src.data_loader import fetch_stock_data, resolve_ticker
+from src.screener import BullishTrendingScreenerNode
+from src.stock_evaluator import evaluate_individual_stock
+from src.universe import get_default_universe, load_tickers_from_csv
 
 
 def print_banner():
     print("""
 ========================================================================
-     QUANTITATIVE STOCK MARKET PREDICTOR & TREND FORECASTER
-  5-Year Daily OHLCV | Multi-Indicator Feature Engine | ML Ensembles
+                      FastDesk MarketX
+     NIFTY 500 QUANTITATIVE SCREENER & STOCK EVALUATOR ENGINE
 ========================================================================
 """)
 
 
-def print_table(title: str, headers: list, rows: list):
-    print(f"\n>>> {title}")
-    col_widths = [len(h) for h in headers]
-    for row in rows:
-        for i, val in enumerate(row):
-            col_widths[i] = max(col_widths[i], len(str(val)))
-
-    sep = "+-" + "-+-".join(["-" * w for w in col_widths]) + "-+"
-    header_str = "| " + " | ".join([f"{h:<{col_widths[i]}}" for i, h in enumerate(headers)]) + " |"
-
-    print(sep)
-    print(header_str)
-    print(sep)
-    for row in rows:
-        row_str = "| " + " | ".join([f"{str(v):<{col_widths[i]}}" for i, v in enumerate(row)]) + " |"
-        print(row_str)
-    print(sep)
+def _screen_worker(ticker: str):
+    try:
+        resolved = resolve_ticker(ticker)
+        df = fetch_stock_data(resolved, period="6mo")
+        screener = BullishTrendingScreenerNode(df)
+        res = screener.evaluate_latest()
+        return {
+            "ticker": ticker,
+            "passed_all": res["passed_all"],
+            "passed_count": res["passed_count"],
+            "pass_percentage": res["pass_percentage"],
+            "close": res["latest_bar"].get("close", 0.0),
+            "volume": res["latest_bar"].get("volume", 0),
+            "rsi_14": res["latest_bar"].get("rsi_14", 0.0),
+        }
+    except Exception:
+        return None
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Stock Market Price and Trend Prediction Engine")
-    parser.add_argument("--ticker", type=str, default="AAPL", help="Stock ticker symbol (e.g. AAPL, MSFT, NVDA, TSLA)")
-    parser.add_argument("--mode", type=str, choices=["next_day", "same_day"], default="next_day",
-                        help="Prediction mode: 'next_day' (predicts tomorrow's close) or 'same_day' (predicts today's close from open)")
-    parser.add_argument("--split", type=float, default=0.8, help="Train/Test chronological split ratio (default: 0.8)")
-    parser.add_argument("--save-chart", action="store_true", default=True, help="Save evaluation plot as PNG")
-    parser.add_argument("--chart-path", type=str, default="evaluation_plot.png", help="Path to save evaluation chart")
+    parser = argparse.ArgumentParser(description="NIFTY 500 Individual Stock Evaluator & Screener Node Pipeline")
+    parser.add_argument("--ticker", type=str, default="RELIANCE.NS", help="NSE stock ticker symbol (e.g. RELIANCE.NS, TCS.NS, INFY.NS)")
+    parser.add_argument("--scan-nifty500", action="store_true", help="Scan full NIFTY 500 stock universe")
+    parser.add_argument("--csv", type=str, default=None, help="Path to a custom CSV file containing tickers")
+    parser.add_argument("--period", type=str, default="6mo", help="Historical data period (default: 6mo)")
+    parser.add_argument("--serve", action="store_true", help="Launch FastAPI web server on http://localhost:8000")
+    parser.add_argument("--port", type=int, default=8000, help="Port to run FastAPI server on")
 
     args = parser.parse_args()
+
+    if args.serve:
+        print_banner()
+        print(f"Starting FastAPI Web Server & API on http://localhost:{args.port}...")
+        import uvicorn
+        uvicorn.run("web.app:app", host="0.0.0.0", port=args.port, reload=True)
+        return
+
+    if args.scan_nifty500 or args.csv:
+        print_banner()
+        csv_file = args.csv if args.csv and os.path.exists(args.csv) else os.path.abspath(os.path.join(os.path.dirname(__file__), "data", "nifty500.csv"))
+        tickers = load_tickers_from_csv(csv_file)
+        print(f"[CLI] Loaded {len(tickers)} tickers for NIFTY 500 screening: {csv_file}")
+        print(f"[CLI] Screening tickers using Screener Node #1 (26 Rules)...\n")
+
+        scanned = []
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = {executor.submit(_screen_worker, t): t for t in tickers}
+            for future in as_completed(futures):
+                res = future.result()
+                if res:
+                    scanned.append(res)
+                    if res["passed_all"]:
+                        print(f"  🟢 100% MATCH: {res['ticker']} (Close: ₹{res['close']:.2f}, Volume: {res['volume']:,})")
+
+        scanned.sort(key=lambda x: x["pass_percentage"], reverse=True)
+        matched = [s for s in scanned if s["passed_all"]]
+
+        print("\n" + "=" * 80)
+        print(f"  NIFTY 500 SCREENING SUMMARY: {len(matched)} / {len(scanned)} STOCKS PASSED ALL 26 RULES")
+        print("=" * 80)
+        print(f"{'RANK':<5} | {'TICKER':<15} | {'PASS RATIO':<12} | {'CLOSE PRICE':<12} | {'RSI (14)':<10}")
+        print("-" * 80)
+        for i, item in enumerate(scanned[:25]):
+            match_mark = " [100% MATCH]" if item["passed_all"] else ""
+            print(f"{i+1:<5} | {item['ticker']:<15} | {item['passed_count']}/26 ({item['pass_percentage']}%) | ₹{item['close']:<11.2f} | {item['rsi_14']:<10.1f}{match_mark}")
+        print("=" * 80)
+        return
+
+    # Single Stock Evaluation
     print_banner()
+    ticker = args.ticker.strip().upper()
+    print(f"[CLI] Running Comprehensive Evaluation for {ticker}...\n")
 
-    ticker = args.ticker.upper()
-    mode = args.mode
+    try:
+        eval_data = evaluate_individual_stock(ticker, period=args.period)
+        f = eval_data["fundamentals"]
+        r = eval_data["returns"]
+        node1 = eval_data["screener_nodes"][0]
 
-    # 1. Run Pipeline
-    pipeline = StockPipeline(ticker=ticker, mode=mode, train_split=args.split)
-    summary = pipeline.run()
+        print("=" * 75)
+        print(f"  STOCK EVALUATION FOR {eval_data['ticker']}")
+        print(f"  Company: {f['company_name']} | Sector: {f['sector']} / {f['industry']}")
+        print("=" * 75)
+        print(f"  LATEST CLOSE PRICE:     ₹{eval_data['latest_close']:.2f}  (As-of: {eval_data['as_of_date']})")
+        print(f"  LAST DAY RETURN:        {r['last_day_return_pct']:+.2f}%  ({r['last_day_change']:+.2f} ₹)")
+        print(f"  LAST WEEK RETURN (5D):  {r['last_week_return_pct']:+.2f}%  ({r['last_week_change']:+.2f} ₹)")
+        print("-" * 75)
+        print("  FUNDAMENTAL FINANCIAL PARAMETERS:")
+        print(f"  - Market Cap:           ₹ {f['market_cap_cr'] or 'N/A'} Cr")
+        print(f"  - Trailing P/E Ratio:   {f['pe_ratio'] or 'N/A'}")
+        print(f"  - Price-to-Book (P/B):  {f['pb_ratio'] or 'N/A'}")
+        print(f"  - Trailing EPS (TTM):   ₹ {f['eps'] or 'N/A'}")
+        print(f"  - Dividend Yield:       {f['dividend_yield'] or 'N/A'}%")
+        print(f"  - Return on Equity:     {f['roe'] or 'N/A'}%")
+        print(f"  - 52-Week Range:        High: ₹{f['fifty_two_week_high'] or 'N/A'} | Low: ₹{f['fifty_two_week_low'] or 'N/A'}")
+        print("-" * 75)
+        print("  SCREENER FILTER NODES STATUS:")
+        print(f"  - Node #1 (Bullish Trending): {node1['passed_count']}/26 Rules Passed ({node1['pass_percentage']}%) -> {'100% MATCH' if node1['passed_all'] else 'PARTIAL MATCH'}")
+        print("=" * 75)
 
-    # Detect currency
-    actual_ticker = summary["ticker"]
-    is_indian = (
-        ticker.endswith(".NS")
-        or ticker.endswith(".BO")
-        or ticker in ["^NSEI", "^NSEBANK", "^BSESN", "NIFTY", "NIFTY50", "BANKNIFTY", "SENSEX"]
-        or actual_ticker.endswith(".NS")
-        or actual_ticker.endswith(".BO")
-    )
-    cur = "₹" if is_indian else "$"
-
-    # 2. Print Regression Benchmarks
-    reg_headers = ["Model", f"RMSE ({cur})", f"MAE ({cur})", "MAPE (%)", "R2 Score", "Directional Acc (%)"]
-    reg_rows = []
-    for model_name, metrics in summary["regression_metrics"].items():
-        is_champ = " (Champion)" if model_name == summary["best_reg_model"] else ""
-        reg_rows.append([
-            f"{model_name}{is_champ}",
-            f"{metrics['RMSE']:.2f}",
-            f"{metrics['MAE']:.2f}",
-            f"{metrics['MAPE_%']:.2f}%",
-            f"{metrics['R2']:.4f}",
-            f"{metrics['Directional_Accuracy_%']:.1f}%",
-        ])
-    print_table("REGRESSION BENCHMARKS (CLOSE PRICE)", reg_headers, reg_rows)
-
-    # 3. Print Classification Benchmarks
-    clf_headers = ["Model", "Accuracy (%)", "Precision (%)", "Recall (%)", "F1 Score (%)", "ROC-AUC (%)"]
-    clf_rows = []
-    for model_name, metrics in summary["classification_metrics"].items():
-        is_champ = " (Champion)" if model_name == summary["best_clf_model"] else ""
-        clf_rows.append([
-            f"{model_name}{is_champ}",
-            f"{metrics['Accuracy_%']:.1f}%",
-            f"{metrics['Precision_%']:.1f}%",
-            f"{metrics['Recall_%']:.1f}%",
-            f"{metrics['F1_Score_%']:.1f}%",
-            f"{metrics['ROC_AUC_%']:.1f}%",
-        ])
-    print_table("CLASSIFICATION BENCHMARKS (BULLISH / BEARISH TREND)", clf_headers, clf_rows)
-
-    # 4. Top Features Table
-    top_feats = summary["top_features"][:10]
-    if top_feats:
-        feat_headers = ["Rank", "Technical Feature", "Relative Importance (%)"]
-        feat_rows = [[i + 1, item["feature"], f"{item['importance']:.2f}%"] for i, item in enumerate(top_feats)]
-        print_table("TOP 10 INFLUENTIAL TECHNICAL INDICATORS", feat_headers, feat_rows)
-
-    # 5. Live Forward Prediction
-    predictor = LivePredictor(actual_ticker, pipeline.feature_engineer, pipeline.models_manager, pipeline.raw_df)
-    live_pred = predictor.predict_forward()
-
-    pred_info = live_pred["prediction"]
-    ind_info = live_pred["key_indicators"]
-    ohlcv = live_pred["last_ohlcv"]
-
-    print("\n" + "=" * 72)
-    print(f"  LIVE FORWARD FORECAST FOR {actual_ticker}")
-    print(f"  Mode: {mode.replace('_', ' ').title()} | As-Of Date: {live_pred['as_of_date']}")
-    print("=" * 72)
-    print(f"  Reference Base Price:       {cur}{live_pred['reference_price']:.2f}")
-    print(f"  PREDICTED CLOSE:            {cur}{pred_info['predicted_close']:.2f}")
-    print(f"  Expected Price Delta:       {pred_info['expected_price_change']:+.2f} ({pred_info['expected_pct_change']:+.2f}%)")
-    print(f"  Expected Trading Range:     {cur}{pred_info['expected_trading_range']['low']:.2f} to {cur}{pred_info['expected_trading_range']['high']:.2f}")
-    print(f"  TREND SIGNAL:               {pred_info['trend']} (Confidence: {pred_info['confidence_%']}%)")
-    print(f"  Trend Probability Split:    Bullish {pred_info['bullish_probability_%']}% | Bearish {pred_info['bearish_probability_%']}%")
-    print("-" * 72)
-    print("  KEY TECHNICAL INDICATOR SNAPSHOT:")
-    print(f"  - RSI (14-day):             {ind_info['rsi_14']} {'[Overbought]' if ind_info['rsi_14']>=70 else '[Oversold]' if ind_info['rsi_14']<=30 else '[Neutral]'}")
-    print(f"  - MACD / Signal:            {ind_info['macd']} / {ind_info['macd_signal']} (Hist: {ind_info['macd_hist']:+.3f})")
-    print(f"  - Bollinger Bands:          Lower: {cur}{ind_info['bb_lower']:.2f} | Mid: {cur}{ind_info['bb_middle']:.2f} | Upper: {cur}{ind_info['bb_upper']:.2f}")
-    print(f"  - Moving Averages:          SMA20: {cur}{ind_info['sma_20']:.2f} | SMA50: {cur}{ind_info['sma_50']:.2f} | SMA200: {cur}{ind_info['sma_200']:.2f}")
-    print(f"  - Pivot & Levels:           Pivot: {cur}{ind_info['pivot']:.2f} | R1: {cur}{ind_info['resistance_r1']:.2f} | S1: {cur}{ind_info['support_s1']:.2f}")
-    print(f"  - Volatility (ATR 14):      {cur}{ind_info['atr_14']:.2f} | ADX (Trend Strength): {ind_info['adx_14']}")
-    print("=" * 72)
-
-    # 6. Save chart
-    if args.save_chart and pipeline.test_predictions is not None:
-        plot_pipeline_results(ticker, pipeline.test_predictions, summary["top_features"], args.chart_path)
+    except Exception as e:
+        print(f"[Error] Evaluation failed for {ticker}: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

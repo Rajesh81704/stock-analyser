@@ -24,3 +24,5 @@ scratch/
 .pytest_cache/
 database/*.db-wal
 database/*.db-shm
+data/*.db
+*.db

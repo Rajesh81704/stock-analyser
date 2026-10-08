@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FastDesk MarketX — Quantitative Stock Screener</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+  <!-- Top Navbar -->
+  <nav class="navbar">
+    <div class="nav-brand" onclick="showView('directory-view')">
+      <div class="brand-logo">FastDesk <span>MarketX</span></div>
+      <span style="font-size:12px; font-weight:700; background:#f3e8ff; color:var(--accent-purple); padding:2px 8px; border-radius:12px;">NIFTY 500 ANALYSER</span>
+    </div>
+    <div class="nav-links">
+      <a class="nav-item active" onclick="showView('directory-view')">Screens</a>
+      <a class="nav-item" onclick="openNodeScan('pure-bullish-trend-stocks')">Bullish Trending Scan</a>
+      <a class="nav-item" onclick="alert('Charts Module Active for NIFTY 500 Equities.')">Charts</a>
+      <a class="nav-item" onclick="showView('directory-view')">Dashboard</a>
+    </div>
+  </nav>
+
+  <div class="container">
+    
+    <!-- VIEW 1: All Stocks Screeners & Scans Directory -->
+    <div id="directory-view">
+      
+      <!-- Search Screeners Bar -->
+      <div class="search-box-card">
+        <div class="search-title">Search Screeners</div>
+        <div class="search-row">
+          <input type="text" id="screener-search-input" placeholder="search term eg: RSI, Breakout, Uptrend, Short term, pure bullish trend..." onkeyup="filterScreenerCards()">
+          <button class="btn" onclick="filterScreenerCards()">Search</button>
+        </div>
+      </div>
+
+      <!-- Categories Grid (Populated strictly from SQLite DB Screener Nodes) -->
+      <div class="categories-grid" id="categories-grid">
+        <div style="grid-column: 1 / -1; padding: 36px; text-align: center; color: var(--text-secondary);">
+          Fetching registered screener nodes from database...
+        </div>
+      </div>
+    </div>
+
+
+    <!-- VIEW 2: Screener Detail Scan Page (Chartink style) -->
+    <div id="scanner-view" class="hidden">
+      
+      <div class="screener-header-card">
+        <div class="screener-title-row">
+          <div>
+            <h2>pure bullish trend stocks</h2>
+            <p style="font-size:13px; color:var(--text-secondary); margin-top:2px;">Technical Analysis Scanner • 26 Quantitative Filters • Cash Segment NIFTY 500</p>
+          </div>
+          <div style="display:flex; gap:10px;">
+            <button class="btn btn-green" onclick="runUniverseScreen()">▶ Run Scan</button>
+            <button class="btn btn-outline" onclick="showView('directory-view')">← All Screeners</button>
+          </div>
+        </div>
+
+        <!-- Active Filter Rules List -->
+        <div class="filters-box">
+          <div style="font-size:12px; font-weight:800; color:var(--text-secondary); text-transform:uppercase; margin-bottom:10px;">Active Technical Clauses (26 Rules)</div>
+          
+          <div class="filter-clause">
+            <span class="clause-text">Daily Close > Daily Open</span>
+            <span class="clause-pass">Bullish Green Candle</span>
+          </div>
+          <div class="filter-clause">
+            <span class="clause-text">Daily Volume >= Number 100000</span>
+            <span class="clause-pass">Liquid Cash Volume</span>
+          </div>
+          <div class="filter-clause">
+            <span class="clause-text">Daily EMA (close, 20) > 20</span>
+            <span class="clause-pass">Uptrend EMA</span>
+          </div>
+          <div class="filter-clause">
+            <span class="clause-text">Daily Ichimoku Conversion Line (3,7,14) >= Base Line (3,7,14)</span>
+            <span class="clause-pass">Ichimoku Fast Cross</span>
+          </div>
+          <div class="filter-clause">
+            <span class="clause-text">Daily Close >= Parabolic SAR (0.02, 0.02, 0.2)</span>
+            <span class="clause-pass">Bullish SAR</span>
+          </div>
+          <div class="filter-clause">
+            <span class="clause-text">Daily MACD Line (14,5,3) >= Signal Line (14,5,3)</span>
+            <span class="clause-pass">MACD Momentum</span>
+          </div>
+          <div style="text-align:center; font-size:12px; color:var(--text-secondary); margin-top:8px; cursor:pointer;" onclick="toggleAllRulesSpec()">
+            Show all 26 quantitative technical rule specifications ↓
+          </div>
+        </div>
+      </div>
+
+      <!-- Progress Loading Bar (Shown during screening scan) -->
+      <div id="scan-progress-container" class="progress-box hidden">
+        <div class="progress-status-row">
+          <span id="progress-text">Scanning NIFTY 500 Equities across 26 technical criteria...</span>
+          <span id="progress-percent" style="font-weight:700; font-family:'JetBrains Mono'; color:var(--accent-purple);">0%</span>
+        </div>
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill" id="progress-bar-fill"></div>
+        </div>
+      </div>
+
+      <!-- Stocks Results Table (Chartink layout) -->
+      <div class="table-card">
+        <div class="table-header-tools">
+          <div>
+            <h3 style="display:inline-block;">TOP 10 STOCKS (<span id="results-count">0</span> matching stocks found)</h3>
+            <span id="db-status-badge" class="db-status-badge" style="margin-left:12px;">Loaded from SQLite DB</span>
+          </div>
+          <div style="display:flex; gap:10px;">
+            <button class="btn btn-outline" style="padding:6px 12px; font-size:12px;" onclick="exportCSV()">CSV</button>
+            <button class="btn btn-outline" style="padding:6px 12px; font-size:12px;" onclick="exportCSV()">Excel</button>
+          </div>
+        </div>
+
+        <table class="stocks-table">
+          <thead>
+            <tr>
+              <th style="width:50px;">Sr</th>
+              <th>Stock Name</th>
+              <th>Symbol</th>
+              <th>Close</th>
+              <th style="cursor:pointer;" onclick="toggleSortDirection()" title="Click to toggle sort order">
+                % Change <span id="sort-indicator">↓</span>
+              </th>
+              <th>Volume</th>
+              <th>Match Ratio</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="stocks-table-body">
+            <tr><td colspan="8" style="text-align:center; color:var(--text-secondary); padding:36px;">Click "▶ Run Scan" to evaluate NIFTY 500 universe.</td></tr>
+          </tbody>
+        </table>
+
+        <!-- Pagination Controls -->
+        <div id="pagination-container" class="pagination-container" style="display:flex; justify-content:space-between; align-items:center; padding:14px 20px; border-top:1px solid var(--border-color); background:#fafafa;">
+          <div style="font-size:13px; color:var(--text-secondary);" id="pagination-info">Showing 0 stocks</div>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <button class="btn btn-outline" id="btn-prev-page" style="padding:4px 10px; font-size:12px;" onclick="changePage(-1)" disabled>&laquo; Prev</button>
+            <div id="page-numbers-container" style="display:flex; gap:4px;"></div>
+            <button class="btn btn-outline" id="btn-next-page" style="padding:4px 10px; font-size:12px;" onclick="changePage(1)" disabled>Next &raquo;</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- VIEW 3: Stock Detail & Interactive Chart Modal -->
+  <div id="chart-modal" class="modal-overlay hidden">
+    <div class="modal-content-lg">
+      <div class="modal-header">
+        <div class="stock-modal-title">
+          <h2 id="modal-stock-name">Reliance Industries Ltd (RELIANCE.NS)</h2>
+          <p id="modal-stock-sector">Energy / Oil & Gas Refining • NIFTY 500 Cash Segment</p>
+        </div>
+        <div class="returns-bar">
+          <div class="ret-card">
+            <div class="lbl">Last Day Return</div>
+            <div class="val" id="modal-ret-day">--%</div>
+          </div>
+          <div class="ret-card">
+            <div class="lbl">Last Week Return</div>
+            <div class="val" id="modal-ret-week">--%</div>
+          </div>
+          <button onclick="closeModal('chart-modal')" style="background:none; border:none; font-size:28px; color:var(--text-secondary); cursor:pointer; margin-left:12px;">&times;</button>
+        </div>
+      </div>
+
+      <div style="font-size:14px; font-weight:700; color:var(--text-primary); margin-bottom:10px;">Daily Candlestick & Indicator Chart</div>
+      <div class="chart-container-box">
+        <canvas id="modalStockChart"></canvas>
+      </div>
+
+      <!-- Rule Inspector list -->
+      <div style="font-size:15px; font-weight:700; color:var(--text-primary); margin-bottom:12px;">26-Rule Technical Evaluation Breakout</div>
+      <div id="modal-rules-container"></div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
