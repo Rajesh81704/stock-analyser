@@ -32,6 +32,14 @@ KITE_ACCESS_TOKEN = os.getenv("KITE_ACCESS_TOKEN", "e02iio4s7sc4nptcp8picsdy0i14
 KITE_INSTRUMENTS_CACHE = None
 
 
+def set_active_kite_access_token(token: str) -> None:
+    """Dynamically sets/updates the active Zerodha KiteConnect access token for live API data pulling."""
+    global KITE_ACCESS_TOKEN
+    KITE_ACCESS_TOKEN = token.strip()
+    os.environ["KITE_ACCESS_TOKEN"] = KITE_ACCESS_TOKEN
+    print(f"[DataLoader] Updated active Zerodha KiteConnect access token: {KITE_ACCESS_TOKEN[:10]}...")
+
+
 def get_kite_instrument_token(kite, symbol: str, exchange: str = "NSE") -> Optional[int]:
     """Looks up Zerodha's integer instrument_token for a trading symbol (e.g. RELIANCE)."""
     global KITE_INSTRUMENTS_CACHE
