@@ -529,6 +529,166 @@ class ProfitJump200ScreenerNode:
                 "close": round(close, 2),
                 "volume": int(volume),
                 "change_pct": change_pct,
+            },
+        }
+
+
+FILTER_RULES_SPEC_NODE_4 = [
+    {"id": 1, "name": "Quarterly Sales Growth (QoQ) >= 20%", "desc": "Quarterly revenue/sales expanded by at least 20% compared to previous quarter"},
+    {"id": 2, "name": "Quarterly Sales Growth (YoY) >= 20%", "desc": "Quarterly revenue/sales expanded by at least 20% compared to same quarter last year"},
+    {"id": 3, "name": "Annual Sales Growth (YoY) >= 15%", "desc": "Annual revenue/sales grew by at least 15% YoY"},
+    {"id": 4, "name": "Quarterly Revenue & Net Profit > 0", "desc": "Positive quarterly top-line revenue and bottom-line net profit"},
+    {"id": 5, "name": "Daily Volume SMA(20) >= 50,000", "desc": "20-day Volume SMA is at least 50,000"},
+    {"id": 6, "name": "Daily Close >= EMA(close,20)", "desc": "Price trading above 20-day EMA (Bullish Trend)"},
+    {"id": 7, "name": "Daily RSI(14) >= 45", "desc": "14-day RSI >= 45 (Bullish momentum)"},
+    {"id": 8, "name": "Daily Close >= Open", "desc": "Green daily candle body"},
+]
+
+
+class HighSalesGrowthScreenerNode:
+    """
+    Screener Node #4: 'High Sales Growth (QoQ & YoY)' Filter Node.
+    Algorithm for tracking stocks with high sales expansion:
+    - Quarterly sales growth (QoQ or YoY) >= 20%.
+    - Annual sales growth (YoY) >= 15%.
+    - Positive top-line revenue & positive bottom-line net profit.
+    - Positive technical trend & volume filter.
+    """
+
+    node_id: str = "NODE_04_HIGH_SALES_GROWTH"
+    node_name: str = "High Sales Growth (QoQ & YoY)"
+    description: str = "Algorithmic Fundamental & Top-Line Growth Filter Engine: Tracks stocks with significant sales expansion compared to previous quarter (QoQ) and same quarter last year (YoY)."
+
+    def __init__(self, df: pd.DataFrame, fundamentals: Optional[Dict[str, Any]] = None):
+        self.raw_df = df.copy()
+        self.df_ind = add_screener_indicators(self.raw_df)
+        self.fundamentals = fundamentals
+
+    def evaluate_latest(self) -> Dict[str, Any]:
+        if self.df_ind.empty or len(self.df_ind) < 5:
+            return {
+                "node_id": self.node_id,
+                "node_name": self.node_name,
+                "passed_all": False,
+                "passed_count": 0,
+                "total_rules": len(FILTER_RULES_SPEC_NODE_4),
+                "pass_percentage": 0.0,
+                "filter_results": [],
+                "latest_bar": {}
+            }
+
+        latest_row = self.df_ind.iloc[-1]
+        close = float(latest_row.get("Close", 0.0))
+        open_p = float(latest_row.get("Open", 0.0))
+        high = float(latest_row.get("High", 0.0))
+        low = float(latest_row.get("Low", 0.0))
+        volume = float(latest_row.get("Volume", 0.0))
+        ema_20 = float(latest_row.get("EMA_20", close))
+        rsi_14 = float(latest_row.get("RSI_14", 50.0))
+        vol_sma_20 = float(latest_row.get("VOL_SMA_20", volume))
+
+        # Fetch or use fundamentals
+        ticker = self.raw_df.attrs.get("ticker", "")
+        f = self.fundamentals
+        if f is None and ticker:
+            try:
+                from src.data_loader import fetch_stock_fundamentals
+                f = fetch_stock_fundamentals(ticker)
+            except Exception:
+                f = {}
+        if f is None:
+            f = {}
+
+        q = f.get("quarterly_financials") or {}
+        a = f.get("annual_financials") or {}
+
+        q_rev_qoq = q.get("rev_growth_qoq_pct")
+        q_rev_yoy = q.get("rev_growth_yoy_pct")
+        a_rev_yoy = a.get("rev_growth_yoy_pct")
+        q_rev = q.get("revenue_cr")
+        q_profit = q.get("net_profit_cr")
+
+        # 1. Quarterly Sales Growth QoQ >= 20% (or YoY >= 20%)
+        has_qoq_sales = bool(q_rev_qoq is not None and q_rev_qoq >= 20.0)
+        
+        # 2. Quarterly Sales Growth YoY >= 20%
+        has_yoy_sales = bool(q_rev_yoy is not None and q_rev_yoy >= 20.0)
+
+        # 3. Annual Sales Growth YoY >= 15%
+        has_annual_sales = bool(a_rev_yoy is not None and a_rev_yoy >= 15.0)
+
+        # 4. Revenue & Profit > 0
+        positive_fin = bool((q_rev is not None and q_rev > 0) and (q_profit is not None and q_profit > 0))
+
+        # 5. Volume SMA >= 50,000
+        vol_ok = bool(vol_sma_20 >= 50000.0 or volume >= 50000.0)
+
+        # 6. Close >= EMA(20)
+        close_above_ema20 = bool(close >= ema_20)
+
+        # 7. RSI(14) >= 45
+        rsi_ok = bool(rsi_14 >= 45.0)
+
+        # 8. Close >= Open
+        green_candle = bool(close >= open_p)
+
+        q_qoq_str = f"{q_rev_qoq:.1f}%" if q_rev_qoq is not None else "--"
+        q_yoy_str = f"{q_rev_yoy:.1f}%" if q_rev_yoy is not None else "--"
+        a_yoy_str = f"{a_rev_yoy:.1f}%" if a_rev_yoy is not None else "--"
+        q_rev_str = f"₹{q_rev:.2f} Cr" if q_rev is not None else "--"
+        q_profit_str = f"₹{q_profit:.2f} Cr" if q_profit is not None else "--"
+
+        rule_evals = [
+            {"id": 1, "passed": has_qoq_sales, "actual": f"Quarterly QoQ Sales Growth = {q_qoq_str}", "target": "QoQ Sales Growth >= 20.0%"},
+            {"id": 2, "passed": has_yoy_sales, "actual": f"Quarterly YoY Sales Growth = {q_yoy_str}", "target": "YoY Sales Growth >= 20.0%"},
+            {"id": 3, "passed": has_annual_sales, "actual": f"Annual YoY Sales Growth = {a_yoy_str}", "target": "Annual YoY Sales Growth >= 15.0%"},
+            {"id": 4, "passed": positive_fin, "actual": f"Q Revenue = {q_rev_str}, Net Profit = {q_profit_str}", "target": "Revenue > 0 & Net Profit > 0"},
+            {"id": 5, "passed": vol_ok, "actual": f"Vol SMA(20) = {vol_sma_20:,.0f}", "target": ">= 50,000"},
+            {"id": 6, "passed": close_above_ema20, "actual": f"Close = {close:.2f}, EMA(20) = {ema_20:.2f}", "target": "Close >= EMA(20)"},
+            {"id": 7, "passed": rsi_ok, "actual": f"RSI(14) = {rsi_14:.1f}", "target": ">= 45.0"},
+            {"id": 8, "passed": green_candle, "actual": f"Close = {close:.2f}, Open = {open_p:.2f}", "target": "Close >= Open"},
+        ]
+
+        filter_results = []
+        passed_count = 0
+        for spec, res in zip(FILTER_RULES_SPEC_NODE_4, rule_evals):
+            is_pass = res["passed"]
+            if is_pass:
+                passed_count += 1
+            filter_results.append({
+                "rule_id": spec["id"],
+                "rule_name": spec["name"],
+                "description": spec["desc"],
+                "passed": is_pass,
+                "actual_value": res["actual"],
+                "target_threshold": res["target"],
+            })
+
+        total_rules = len(FILTER_RULES_SPEC_NODE_4)
+        pass_pct = round((passed_count / total_rules) * 100.0, 1)
+        passed_all = (passed_count == total_rules)
+
+        last_date = self.df_ind.index[-1].strftime("%Y-%m-%d")
+        prev_close = float(self.df_ind["Close"].iloc[-2]) if len(self.df_ind) >= 2 else open_p
+        change_pct = round(((close - prev_close) / prev_close) * 100.0, 2) if prev_close > 0 else 0.0
+
+        return {
+            "node_id": self.node_id,
+            "node_name": self.node_name,
+            "date": last_date,
+            "passed_all": passed_all,
+            "passed_count": passed_count,
+            "total_rules": total_rules,
+            "pass_percentage": pass_pct,
+            "filter_results": filter_results,
+            "latest_bar": {
+                "date": last_date,
+                "open": round(open_p, 2),
+                "high": round(high, 2),
+                "low": round(low, 2),
+                "close": round(close, 2),
+                "volume": int(volume),
+                "change_pct": change_pct,
                 "rsi_14": round(rsi_14, 1),
                 "ema_20": round(ema_20, 2),
             },
@@ -567,6 +727,14 @@ def list_available_screener_nodes() -> List[Dict[str, Any]]:
             "description": "Algorithmic Fundamental & Growth Filter Engine: Net Profit increased by 100%+ (2x) YoY with positive volume & technical trend",
             "rules_spec": FILTER_RULES_SPEC_NODE_3,
         },
+        {
+            "node_id": "NODE_04_HIGH_SALES_GROWTH",
+            "node_name": "High Sales Growth (QoQ & YoY)",
+            "category": "Fundamental & Growth Scan",
+            "rule_count": 8,
+            "description": "Algorithmic Fundamental & Top-Line Growth Filter Engine: Tracks stocks with significant sales expansion compared to previous quarter (QoQ) and same quarter last year (YoY)",
+            "rules_spec": FILTER_RULES_SPEC_NODE_4,
+        },
     ]
 
 
@@ -576,5 +744,7 @@ def get_screener_node_by_id(node_id: str, df: pd.DataFrame, fundamentals: Option
         return BullishMomentumScreenerNode(df)
     elif node_id == "NODE_03_PROFIT_JUMP_200":
         return ProfitJump200ScreenerNode(df, fundamentals=fundamentals)
+    elif node_id == "NODE_04_HIGH_SALES_GROWTH":
+        return HighSalesGrowthScreenerNode(df, fundamentals=fundamentals)
     return BullishTrendingScreenerNode(df)
 

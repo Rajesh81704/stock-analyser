@@ -381,10 +381,13 @@ def _screen_worker(ticker: str, node_id: str = "NODE_01_BULLISH_TRENDING") -> Op
     tags=["Stock Screener Node Pipeline"],
 )
 async def screen_universe_endpoint(req: ScreenRequest, background_tasks: BackgroundTasks):
-    """
-    Executes parallel technical screening across NIFTY 500 stocks or returns instant cached DB results.
-    """
-    node_name = "Pure Bullish Momentum Scan (Node #2)" if req.node_id == "NODE_02_BULLISH_MOMENTUM" else "Bullish Trending Stocks (Node #1)"
+    node_names = {
+        "NODE_01_BULLISH_TRENDING": "Bullish Trending Stocks (Node #1)",
+        "NODE_02_BULLISH_MOMENTUM": "Pure Bullish Momentum Scan (Node #2)",
+        "NODE_03_PROFIT_JUMP_200": "Profit Jump by 200% (Node #3)",
+        "NODE_04_HIGH_SALES_GROWTH": "High Sales Growth (QoQ & YoY) (Node #4)",
+    }
+    node_name = node_names.get(req.node_id, "Bullish Trending Stocks (Node #1)")
 
     # 1. Fast Path: If cached DB results exist for this node, return INSTANTLY (0.01s)
     try:

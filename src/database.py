@@ -402,8 +402,8 @@ def get_all_screener_nodes_from_db() -> List[Dict[str, Any]]:
 
 
 def seed_default_screener_nodes() -> None:
-    """Seeds default quantitative screener nodes (Node #1, Node #2, Node #3) into SQLite DB."""
-    from src.screener import FILTER_RULES_SPEC_NODE_1, FILTER_RULES_SPEC_NODE_2, FILTER_RULES_SPEC_NODE_3
+    """Seeds default quantitative screener nodes (Node #1, Node #2, Node #3, Node #4) into SQLite DB."""
+    from src.screener import FILTER_RULES_SPEC_NODE_1, FILTER_RULES_SPEC_NODE_2, FILTER_RULES_SPEC_NODE_3, FILTER_RULES_SPEC_NODE_4
     
     save_screener_node_to_db(
         node_id="NODE_01_BULLISH_TRENDING",
@@ -430,6 +430,15 @@ def seed_default_screener_nodes() -> None:
         description="Algorithmic Fundamental & Growth Filter Engine: Net Profit increased by 100%+ (2x) YoY with positive volume & technical trend.",
         rule_count=len(FILTER_RULES_SPEC_NODE_3),
         rules_spec=FILTER_RULES_SPEC_NODE_3
+    )
+
+    save_screener_node_to_db(
+        node_id="NODE_04_HIGH_SALES_GROWTH",
+        node_name="High Sales Growth (QoQ & YoY)",
+        category="Fundamental & Growth Scan",
+        description="Algorithmic Fundamental & Top-Line Growth Filter Engine: Tracks stocks with significant sales expansion compared to previous quarter (QoQ) and same quarter last year (YoY).",
+        rule_count=len(FILTER_RULES_SPEC_NODE_4),
+        rules_spec=FILTER_RULES_SPEC_NODE_4
     )
 
 
