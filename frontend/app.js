@@ -134,9 +134,23 @@ async function loadDBNodesAndRenderDirectory() {
   }
 }
 
-window.onload = function() {
+window.onload = async function() {
   loadDBNodesAndRenderDirectory();
-  fetchAndInspectStock('ALOKINDS.NS');
+
+  // Dynamically load the #1 top bullish stock from SQLite DB quantitative analysis
+  try {
+    const resp = await fetch('/api/screener/history?node_id=NODE_01_BULLISH_TRENDING&limit=1');
+    const data = await resp.json();
+    if (data.results && data.results.length > 0) {
+      const topBullishTicker = data.results[0].ticker;
+      fetchAndInspectStock(topBullishTicker);
+      return;
+    }
+  } catch (err) {
+    console.warn('Could not fetch top bullish stock from DB:', err);
+  }
+
+  fetchAndInspectStock('KARURVYSYA.NS');
 };
 
 async function runUniverseScreen(nodeId) {
