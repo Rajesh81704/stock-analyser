@@ -386,6 +386,7 @@ async def screen_universe_endpoint(req: ScreenRequest, background_tasks: Backgro
         "NODE_02_BULLISH_MOMENTUM": "Pure Bullish Momentum Scan (Node #2)",
         "NODE_03_PROFIT_JUMP_200": "Profit Jump by 200% (Node #3)",
         "NODE_04_HIGH_SALES_GROWTH": "High Sales Growth (QoQ & YoY) (Node #4)",
+        "NODE_05_BEARISH_TRENDING": "Bearish Trending Stocks (Node #5)",
     }
     node_name = node_names.get(req.node_id, "Bullish Trending Stocks (Node #1)")
 

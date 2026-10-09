@@ -402,8 +402,8 @@ def get_all_screener_nodes_from_db() -> List[Dict[str, Any]]:
 
 
 def seed_default_screener_nodes() -> None:
-    """Seeds default quantitative screener nodes (Node #1, Node #2, Node #3, Node #4) into SQLite DB."""
-    from src.screener import FILTER_RULES_SPEC_NODE_1, FILTER_RULES_SPEC_NODE_2, FILTER_RULES_SPEC_NODE_3, FILTER_RULES_SPEC_NODE_4
+    """Seeds default quantitative screener nodes (Node #1, Node #2, Node #3, Node #4, Node #5) into SQLite DB."""
+    from src.screener import FILTER_RULES_SPEC_NODE_1, FILTER_RULES_SPEC_NODE_2, FILTER_RULES_SPEC_NODE_3, FILTER_RULES_SPEC_NODE_4, FILTER_RULES_SPEC_NODE_5
     
     save_screener_node_to_db(
         node_id="NODE_01_BULLISH_TRENDING",
@@ -439,6 +439,15 @@ def seed_default_screener_nodes() -> None:
         description="Algorithmic Fundamental & Top-Line Growth Filter Engine: Tracks stocks with significant sales expansion compared to previous quarter (QoQ) and same quarter last year (YoY).",
         rule_count=len(FILTER_RULES_SPEC_NODE_4),
         rules_spec=FILTER_RULES_SPEC_NODE_4
+    )
+
+    save_screener_node_to_db(
+        node_id="NODE_05_BEARISH_TRENDING",
+        node_name="Bearish Trending Stocks",
+        category="Bearish Scan",
+        description="26-Rule Algorithmic Bearish Technical Filter Engine for Shorting/Bearish Cash Segment Equities (Ichimoku, Parabolic SAR, RSI, MACD, Stoch, Aroon, Bollinger Bands).",
+        rule_count=len(FILTER_RULES_SPEC_NODE_5),
+        rules_spec=FILTER_RULES_SPEC_NODE_5
     )
 
 
