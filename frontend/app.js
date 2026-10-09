@@ -136,8 +136,7 @@ async function loadDBNodesAndRenderDirectory() {
 
 window.onload = function() {
   loadDBNodesAndRenderDirectory();
-
-
+  fetchAndInspectStock('ALOKINDS.NS');
 };
 
 async function runUniverseScreen(nodeId) {
@@ -456,6 +455,12 @@ async function fetchAndInspectStock(ticker, period = '6mo') {
 }
 
 function renderInspectorPanelFromScanResult(ticker, res) {
+  const payload = res.details || res;
+  if (payload.fundamentals) {
+    renderRightInspectorPanel(payload);
+    return;
+  }
+
   const companyName = ticker.replace('.NS', '') + ' Ltd';
   document.getElementById('panel-ticker').innerText = ticker;
   document.getElementById('panel-company').innerText = companyName;

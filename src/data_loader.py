@@ -374,10 +374,26 @@ def fetch_stock_fundamentals(ticker: str) -> Dict[str, Any]:
             if a_stmt is None or getattr(a_stmt, "empty", True):
                 a_stmt = getattr(t, "financials", None)
 
+            def _find_row(stmt, candidates):
+                if stmt is None or getattr(stmt, "empty", True):
+                    return None
+                for cand in candidates:
+                    if cand in stmt.index:
+                        return stmt.loc[cand]
+                for idx in stmt.index:
+                    idx_s = str(idx).strip().lower()
+                    for cand in candidates:
+                        if cand.lower() in idx_s:
+                            return stmt.loc[idx]
+                return None
+
+            rev_cands = ["Total Revenue", "Operating Revenue", "TotalRevenue", "Revenue"]
+            ni_cands = ["Net Income", "Net Income Common Stockholders", "NetIncome", "Net Income Continuous Operations", "Normalized Income"]
+
             if q_stmt is not None and not q_stmt.empty:
                 cols = sorted(list(q_stmt.columns))
-                rev_row = q_stmt.loc["Total Revenue"] if "Total Revenue" in q_stmt.index else (q_stmt.loc["Operating Revenue"] if "Operating Revenue" in q_stmt.index else None)
-                ni_row = q_stmt.loc["Net Income"] if "Net Income" in q_stmt.index else (q_stmt.loc["Net Income Common Stockholders"] if "Net Income Common Stockholders" in q_stmt.index else None)
+                rev_row = _find_row(q_stmt, rev_cands)
+                ni_row = _find_row(q_stmt, ni_cands)
 
                 if len(cols) >= 1:
                     q_curr = cols[-1]
@@ -410,8 +426,8 @@ def fetch_stock_fundamentals(ticker: str) -> Dict[str, Any]:
 
             if a_stmt is not None and not a_stmt.empty:
                 cols = sorted(list(a_stmt.columns))
-                rev_row = a_stmt.loc["Total Revenue"] if "Total Revenue" in a_stmt.index else (a_stmt.loc["Operating Revenue"] if "Operating Revenue" in a_stmt.index else None)
-                ni_row = a_stmt.loc["Net Income"] if "Net Income" in a_stmt.index else (a_stmt.loc["Net Income Common Stockholders"] if "Net Income Common Stockholders" in a_stmt.index else None)
+                rev_row = _find_row(a_stmt, rev_cands)
+                ni_row = _find_row(a_stmt, ni_cands)
 
                 if len(cols) >= 1:
                     a_curr = cols[-1]
