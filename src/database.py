@@ -5,6 +5,7 @@ Maintains persistent SQLite storage for:
 2. Screener Node execution logs and individual stock filter results.
 """
 
+from datetime import datetime, time, timedelta
 import json
 import os
 import sqlite3
@@ -298,6 +299,59 @@ def get_latest_screener_results_from_db(node_id: str = "NODE_01_BULLISH_TRENDING
         results.append(d)
 
     return results
+
+
+def get_expected_market_date() -> str:
+    """
+    Returns the target market date string (YYYY-MM-DD) for screening data:
+    - If today is Saturday/Sunday, target is Friday.
+    - If today is weekday & time is after 15:30 IST (3:30 PM), target is today.
+    - If today is weekday & time is before 15:30 IST, target is previous trading day.
+    """
+    now = datetime.now()
+    market_close = time(15, 30)
+
+    if now.weekday() == 5:  # Saturday
+        target = now - timedelta(days=1)
+    elif now.weekday() == 6:  # Sunday
+        target = now - timedelta(days=2)
+    else:  # Monday - Friday
+        if now.time() >= market_close:
+            target = now
+        else:
+            if now.weekday() == 0:  # Monday morning -> Friday
+                target = now - timedelta(days=3)
+            else:
+                target = now - timedelta(days=1)
+
+    return target.strftime("%Y-%m-%d")
+
+
+def get_latest_screener_run_timestamp(node_id: str = "NODE_01_BULLISH_TRENDING") -> Optional[str]:
+    """Retrieves the timestamp of the latest screener run for a node from SQLite DB."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT run_timestamp FROM screener_runs WHERE node_id = ? ORDER BY id DESC LIMIT 1", (node_id,))
+        res = cursor.fetchone()
+        if res and res[0]:
+            return str(res[0])
+    return None
+
+
+def is_db_screener_updated_for_date(node_id: str = "NODE_01_BULLISH_TRENDING", target_date_str: Optional[str] = None) -> bool:
+    """
+    Checks if SQLite DB contains a screener run for node_id matching or newer than target_date_str.
+    Defaults to get_expected_market_date() if target_date_str is None.
+    """
+    if not target_date_str:
+        target_date_str = get_expected_market_date()
+
+    latest_ts = get_latest_screener_run_timestamp(node_id)
+    if not latest_ts:
+        return False
+
+    run_date = latest_ts.split(" ")[0]
+    return run_date >= target_date_str
 
 
 def save_screener_node_to_db(

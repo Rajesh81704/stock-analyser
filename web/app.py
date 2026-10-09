@@ -21,6 +21,7 @@ from src.data_loader import fetch_stock_data, fetch_stock_fundamentals, resolve_
 from src.screener import FILTER_RULES_SPEC, BullishTrendingScreenerNode, BullishMomentumScreenerNode, list_available_screener_nodes, get_screener_node_by_id
 from src.stock_evaluator import evaluate_individual_stock
 from src.universe import get_default_universe, load_tickers_from_csv
+from src.database import get_expected_market_date, is_db_screener_updated_for_date
 from src.scheduler import start_automated_scheduler, run_automatic_scheduled_scan
 
 
@@ -41,11 +42,32 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def on_startup():
-    """Starts the background automated stock data puller & 30-min / EOD screener scheduler on application start."""
+    """
+    On server startup:
+    1. Starts background automated scheduler (30-min intraday & daily EOD jobs).
+    2. Verifies if SQLite DB contains latest bullish stock analysis for expected market date.
+    3. If DB is missing/stale for expected market date, automatically runs bulk analysis and persists results into DB.
+    """
     try:
         start_automated_scheduler()
     except Exception as e:
         print(f"[Startup] Error starting automated scheduler: {e}")
+
+    try:
+        target_date = get_expected_market_date()
+        is_updated = is_db_screener_updated_for_date("NODE_01_BULLISH_TRENDING", target_date)
+
+        if is_updated:
+            print(f"[Startup] ✅ SQLite DB contains up-to-date bullish stock analysis for market date '{target_date}'.")
+        else:
+            print("\n" + "=" * 75)
+            print(f"[Startup] ⚠️  SQLite DB is not updated for target market date '{target_date}'.")
+            print(f"[Startup] ⚡ Running automatic NIFTY 500 bulk scan & analysis to update database...")
+            print("=" * 75 + "\n")
+            res = run_automatic_scheduled_scan(trigger_name="SERVER_STARTUP_SYNC")
+            print(f"\n[Startup] 🎉 Startup sync complete! Processed {res.get('scanned_count')} stocks ({res.get('matched_count')} 100% matched) for {target_date}.\n")
+    except Exception as sync_err:
+        print(f"[Startup] Warning during startup DB sync: {sync_err}")
 
 
 # =====================================================================
