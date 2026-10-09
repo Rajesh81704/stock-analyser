@@ -229,6 +229,100 @@ async def evaluate_stock(
 
 
 @app.get(
+    "/api/stock/{ticker}/fundamentals",
+    summary="Fetch Fundamental Financials & Inspector Panel Data",
+    tags=["Individual Stock Evaluator"],
+)
+@app.get(
+    "/api/stock/{ticker}/summary",
+    summary="Fetch Fundamental Financials & Key Metric Summary (Alias)",
+    tags=["Individual Stock Evaluator"],
+)
+async def get_stock_fundamentals_endpoint(
+    ticker: str = Path(..., description="Stock ticker symbol (e.g. ALOKINDS.NS, TATAMOTORS.NS, RELIANCE.NS)"),
+):
+    """
+    Fetches fundamental financial parameters, quarterly/annual income statements,
+    percentage returns, 20D SMA volume, and market cap specifically for the inspector card.
+    """
+    try:
+        resolved = resolve_ticker(ticker)
+        fundamentals = fetch_stock_fundamentals(resolved)
+
+        df = fetch_stock_data(resolved, period="1m")
+        latest_price = 0.0
+        last_day_change = 0.0
+        last_day_return = 0.0
+        last_week_return = 0.0
+        vol_sma_20 = 0
+
+        if df is not None and not df.empty:
+            latest_price = round(float(df["Close"].iloc[-1]), 2)
+            if len(df) >= 2:
+                prev_close = float(df["Close"].iloc[-2])
+                last_day_change = round(latest_price - prev_close, 2)
+                last_day_return = round(((latest_price - prev_close) / prev_close) * 100.0, 2)
+            if len(df) >= 5:
+                w_close = float(df["Close"].iloc[-5])
+                last_week_return = round(((latest_price - w_close) / w_close) * 100.0, 2)
+            if len(df) >= 20:
+                vol_sma_20 = int(df["Volume"].tail(20).mean())
+            else:
+                vol_sma_20 = int(df["Volume"].mean())
+
+        q = fundamentals.get("quarterly_financials", {})
+        a = fundamentals.get("annual_financials", {})
+
+        return {
+            "status": "success",
+            "ticker": ticker.upper(),
+            "resolved_ticker": resolved,
+            "company_name": fundamentals.get("company_name", ticker.replace(".NS", "")),
+            "latest_price": latest_price,
+            "currency_symbol": "₹",
+            "last_day_change": last_day_change,
+            "last_day_return_pct": last_day_return,
+            "sector": fundamentals.get("sector", "Equities"),
+            "industry": fundamentals.get("industry", "Cash Segment"),
+            "exchange_universe": "NIFTY 500",
+            "returns": {
+                "last_day_return_pct": last_day_return,
+                "last_week_return_pct": last_week_return,
+                "last_day_change": last_day_change,
+            },
+            "key_metrics": {
+                "volume_sma_20": vol_sma_20,
+                "market_cap_cr": fundamentals.get("market_cap_cr"),
+                "pe_ratio": fundamentals.get("pe_ratio"),
+                "pb_ratio": fundamentals.get("pb_ratio"),
+                "eps": fundamentals.get("eps"),
+                "dividend_yield_pct": fundamentals.get("dividend_yield"),
+                "roe_pct": fundamentals.get("roe"),
+                "fifty_two_week_high": fundamentals.get("fifty_two_week_high"),
+                "fifty_two_week_low": fundamentals.get("fifty_two_week_low"),
+            },
+            "quarterly_financials": {
+                "period": q.get("period", "Last Quarter"),
+                "quarter_revenue_cr": q.get("revenue_cr"),
+                "net_profit_cr": q.get("net_profit_cr"),
+                "rev_growth_qoq_pct": q.get("rev_growth_qoq_pct"),
+                "rev_growth_yoy_pct": q.get("rev_growth_yoy_pct"),
+                "profit_growth_qoq_pct": q.get("profit_growth_qoq_pct"),
+                "profit_growth_yoy_pct": q.get("profit_growth_yoy_pct"),
+            },
+            "annual_financials": {
+                "year": a.get("year", "Full Year"),
+                "annual_revenue_cr": a.get("revenue_cr"),
+                "annual_net_profit_cr": a.get("net_profit_cr"),
+                "rev_growth_yoy_pct": a.get("rev_growth_yoy_pct"),
+                "profit_growth_yoy_pct": a.get("profit_growth_yoy_pct"),
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to fetch fundamental details for '{ticker}': {str(e)}")
+
+
+@app.get(
     "/api/stock/{ticker}/screen",
     summary="Evaluate Single Stock on Screener Node #1",
     tags=["Individual Stock Evaluator"],
