@@ -24,13 +24,13 @@ def main():
     print(f"  • Interactive API Docs:     http://localhost:{args.port}/docs")
     print(f"  • Zerodha Auth Callback:    http://localhost:{args.port}/callback")
     print("=" * 70)
-    print(f"Starting uvicorn server on {args.host}:{args.port} (Auto-reload: {not args.no-reload})...\n")
+    print(f"Starting uvicorn server on {args.host}:{args.port} (Auto-reload: {not args.no_reload})...\n")
 
     uvicorn.run(
         "web.app:app",
         host=args.host,
         port=args.port,
-        reload=not args.no-reload
+        reload=not args.no_reload
     )
 
 
