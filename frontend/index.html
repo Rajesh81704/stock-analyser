@@ -1,62 +1,76 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>FastDesk MarketX — Quantitative Stock Screener Workstation</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,600;0,700;0,800;1,400&family=Libre+Baskerville:wght@700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/style.css">
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,600;0,700;0,800;1,400&family=Libre+Baskerville:wght@700&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="/style.css?v=8">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://unpkg.com/lightweight-charts@4.2.1/dist/lightweight-charts.standalone.production.js"></script>
 </head>
+
 <body>
 
   <!-- Top Navbar Header -->
   <header class="terminal-navbar">
-    <div class="brand-title" onclick="showView('directory-view')">
+    <div class="brand-title" onclick="goHome()" title="FastDesk MarketX Home">
       FastDesk <span class="brand-blue">MarketX</span>
+    </div>
+    <div id="kite-auth-badge-container" class="kite-auth-container">
+      <!-- Injected by checkKiteSessionStatus() -->
     </div>
   </header>
 
   <!-- Mobile Quick Navigation Bar (Shown on Mobile screens) -->
   <div class="mobile-view-tabs">
-    <button class="mobile-tab-btn active" id="mtab-screener" onclick="switchMobileTab('screener')">📊 Screener Table</button>
-    <button class="mobile-tab-btn" id="mtab-inspector" onclick="switchMobileTab('inspector')">📈 Stock Metrics</button>
-    <button class="mobile-tab-btn" id="mtab-menu" onclick="switchMobileTab('menu')">📁 DB Nodes</button>
+    <button class="mobile-tab-btn active" id="mtab-home" onclick="switchMobileTab('home')">🏠 Home</button>
   </div>
 
   <!-- 3-Column Workstation Layout Container -->
   <div class="terminal-workstation">
-    
+
     <!-- Left Sidebar (Column 1) -->
     <aside id="panel-sidebar" class="terminal-sidebar">
-      <div class="sidebar-header">&gt; Screener</div>
+      <div class="sidebar-header">&gt; Bloomberg Home</div>
       <ul class="sidebar-menu">
-        <li><a onclick="showView('scanner-view')" class="sidebar-link active">Charts</a></li>
-        <li><a onclick="showView('directory-view')" class="sidebar-link">Saved Screens</a></li>
-        <li><a onclick="alert('Watchlist Active for NIFTY 500 Equities.')" class="sidebar-link">Watchlist</a></li>
-        <li><a onclick="alert('Quantitative Reports Engine Active.')" class="sidebar-link">Reports</a></li>
-        <li><a onclick="alert('Database & Scheduler Settings Active.')" class="sidebar-link">Settings</a></li>
+        <li><a onclick="goHome()" id="sb-home" class="sidebar-link active">Home / Screeners</a></li>
       </ul>
+
+      <!-- Live Market News Headlines Wire -->
+      <div class="sidebar-news-container">
+        <div class="sidebar-news-header">
+          <div class="news-header-title">
+            <span class="news-live-dot"></span>
+            <span>&gt; Market Wire [LIVE]</span>
+          </div>
+          <button class="news-refresh-btn" onclick="loadMarketNews(true)" title="Refresh Breaking News">⟳</button>
+        </div>
+        <div id="sidebar-news-list" class="sidebar-news-list">
+          <div class="news-loading-msg">Fetching latest market headlines...</div>
+        </div>
+      </div>
     </aside>
 
     <!-- Center Main Screener Panel (Column 2) -->
     <main id="panel-main" class="terminal-main-panel">
-      
-      <!-- DIRECTORY VIEW (Screeners Grid) -->
+
+      <!-- DIRECTORY VIEW (Screeners Grid - Default Home Page) -->
       <div id="directory-view">
-        <div class="panel-header-banner">
-          <h2>Registered Screener Directory &amp; DB Nodes</h2>
-          <p>Active Quantitative Technical Filter Nodes Persisted in SQLite Database</p>
-        </div>
-        
+
         <div class="search-bar-box">
-          <input type="text" id="screener-search-input" placeholder="Search screeners (e.g. Bullish, Momentum, RSI, Breakout)..." onkeyup="filterScreenerCards()">
+          <input type="text" id="screener-search-input"
+            placeholder="Search screeners (e.g. Bullish, Momentum, RSI, Breakout)..." onkeyup="filterScreenerCards()">
           <button class="term-btn" onclick="filterScreenerCards()">[ Search ]</button>
         </div>
 
         <div class="categories-grid" id="categories-grid">
-          <div style="padding: 24px; text-align: center; color: #555;">Fetching registered screener nodes from database...</div>
+          <div style="padding: 24px; text-align: center; color: #555;">Fetching registered screener nodes from
+            database...</div>
         </div>
       </div>
 
@@ -67,103 +81,127 @@
           <p id="active-scan-subtitle">26-Rule Algorithmic Technical Filter Engine for Cash Segment (NIFTY 500)</p>
         </div>
 
-        <!-- Scan Progress Container -->
-        <div id="scan-progress-container" class="terminal-progress-box hidden">
-          <div class="progress-info-row">
-            <span id="progress-text">Scanning NIFTY 500 stocks...</span>
-            <span id="progress-percent" style="font-weight:800;">0%</span>
-          </div>
-          <div class="term-progress-bg">
-            <div class="term-progress-fill" id="progress-bar-fill"></div>
-          </div>
-          <div class="progress-sub-info">
-            <span>Evaluating 26 quantitative technical rules...</span>
-            <span id="progress-count-text">NIFTY 500 Universe</span>
-          </div>
-        </div>
-
-        <!-- Filter Tags Bar -->
-        <div class="filter-tags-bar">
-          <button class="tag-btn active" onclick="filterTagClick(this, 'all')">[ Top Stocks (<span id="results-count">0</span>) ]</button>
-          <button class="tag-btn" onclick="filterTagClick(this, 'bullish')">[ Bullish Only ]</button>
-          <button class="tag-btn" onclick="filterTagClick(this, 'volume')">[ High Volume ]</button>
-          <button class="tag-btn" onclick="filterTagClick(this, 'breakout')">[ Breakout ]</button>
-          <button class="tag-btn" onclick="filterTagClick(this, 'uptrend')">[ Uptrend ]</button>
-          <button class="tag-btn" onclick="filterTagClick(this, 'ichimoku')">[ Ichimoku ]</button>
-          <button class="tag-btn" onclick="filterTagClick(this, 'macd')">[ MACD ]</button>
-          <button class="tag-btn" onclick="filterTagClick(this, 'all')">[ Custom ]</button>
-          <button id="btn-run-scan" class="term-btn-green" style="margin-left:auto;" onclick="runUniverseScreen()">▶ Run Scan</button>
-        </div>
-
-        <!-- Screener Results Table -->
-        <div class="table-container-box">
-          <table class="terminal-table">
-            <thead>
-              <tr>
-                <th style="width:35px;">#</th>
-                <th>Stock Name</th>
-                <th>Symbol</th>
-                <th>Close (₹)</th>
-                <th style="cursor:pointer;" onclick="toggleSortDirection()" title="Click to toggle sort order">
-                  % Change <span id="sort-indicator">↓</span>
-                </th>
-                <th>Volume</th>
-                <th>Match</th>
-                <th>Signal</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody id="stocks-table-body">
-              <tr><td colspan="9" style="text-align:center; padding:24px;">Click "▶ Run Scan" to evaluate NIFTY 500 universe.</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <!-- Pagination Footer -->
-        <div class="terminal-pagination-bar">
-          <div id="pagination-info" style="font-size:12px; font-weight:600;">Showing 0 stocks</div>
-          <div style="display:flex; gap:6px; align-items:center;">
-            <button class="term-btn" id="btn-prev-page" onclick="changePage(-1)" disabled>&lt; Prev</button>
-            <div id="page-numbers-container" style="display:flex; gap:3px;"></div>
-            <button class="term-btn" id="btn-next-page" onclick="changePage(1)" disabled>Next &gt;</button>
-          </div>
-        </div>
-
-        <!-- 26-Rule Technical Evaluation Inspector -->
-        <div class="rules-inspector-card" style="margin-top: 12px;">
-          <div class="rules-inspector-header">
-            <div>
-              <h4 style="font-size:13px; font-weight:800;">26-Rule Technical Evaluation</h4>
+        <!-- SCANNER TABLE & CONTROLS SECTION -->
+        <div id="scanner-table-section">
+          <!-- Scan Progress Container -->
+          <div id="scan-progress-container" class="terminal-progress-box hidden">
+            <div class="progress-info-row">
+              <span id="progress-text">Scanning NIFTY 500 stocks...</span>
+              <span id="progress-percent" style="font-weight:800;">0%</span>
             </div>
-            <div style="text-align:right;">
-              <span class="score-green" id="panel-rules-score">24 / 26</span>
-              <div style="font-size:10px; color:#555;">Rules Passed</div>
+            <div class="term-progress-bg">
+              <div class="term-progress-fill" id="progress-bar-fill"></div>
+            </div>
+            <div class="progress-sub-info">
+              <span>Evaluating 26 quantitative technical rules...</span>
+              <span id="progress-count-text">NIFTY 500 Universe</span>
             </div>
           </div>
 
-          <div class="rule-filter-tabs">
-            <button class="rule-tab active" id="tab-rule-all" onclick="filterPanelRules('all')">[ All (26) ]</button>
-            <button class="rule-tab" id="tab-rule-passed" onclick="filterPanelRules('passed')">[ Passed ]</button>
-            <button class="rule-tab" id="tab-rule-failed" onclick="filterPanelRules('failed')">[ Failed ]</button>
+          <!-- Filter Tags Bar -->
+          <div class="filter-tags-bar">
+            <button class="tag-btn active" onclick="filterTagClick(this, 'all')">[ Top Stocks (<span
+                id="results-count">0</span>) ]</button>
+            <button class="tag-btn" onclick="filterTagClick(this, 'bullish')">[ Bullish Only ]</button>
+            <button class="tag-btn" onclick="filterTagClick(this, 'volume')">[ High Volume ]</button>
+            <button class="tag-btn" onclick="filterTagClick(this, 'breakout')">[ Breakout ]</button>
+            <button class="tag-btn" onclick="filterTagClick(this, 'uptrend')">[ Uptrend ]</button>
+            <button class="tag-btn" onclick="filterTagClick(this, 'ichimoku')">[ Ichimoku ]</button>
+            <button class="tag-btn" onclick="filterTagClick(this, 'macd')">[ MACD ]</button>
+            <button class="tag-btn" onclick="filterTagClick(this, 'all')">[ Custom ]</button>
+            <button id="btn-run-scan" class="term-btn-green" style="margin-left:auto;" onclick="runUniverseScreen()">▶
+              Run Scan</button>
           </div>
 
-          <!-- Mini Rules Table -->
-          <table class="mini-rules-table">
-            <thead>
-              <tr>
-                <th style="width:25px;">#</th>
-                <th>Rule</th>
-                <th>Value</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody id="panel-rules-tbody">
-              <tr><td colspan="4" style="text-align:center; padding:16px;">Select a stock from the table to inspect.</td></tr>
-            </tbody>
-          </table>
+          <!-- Screener Results Table -->
+          <div class="table-container-box">
+            <table class="terminal-table">
+              <thead>
+                <tr>
+                  <th style="width:35px;">#</th>
+                  <th>Stock Name</th>
+                  <th>Symbol</th>
+                  <th>Close (₹)</th>
+                  <th style="cursor:pointer;" onclick="toggleSortDirection()" title="Click to toggle sort order">
+                    % Change <span id="sort-indicator">↓</span>
+                  </th>
+                  <th>Volume</th>
+                  <th>Match</th>
+                  <th>Signal</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="stocks-table-body">
+                <tr>
+                  <td colspan="9" style="text-align:center; padding:24px;">Click "▶ Run Scan" to evaluate NIFTY 500
+                    universe.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-          <div style="text-align:center; margin-top:8px; font-size:11px;">
-            <a href="#" style="color:#0000aa;" onclick="toggleAllRulesSpec()">Show all 26 rules...</a>
+          <!-- Pagination Footer -->
+          <div class="terminal-pagination-bar">
+            <div id="pagination-info" style="font-size:12px; font-weight:600;">Showing 0 stocks</div>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <button class="term-btn" id="btn-prev-page" onclick="changePage(-1)" disabled>&lt; Prev</button>
+              <div id="page-numbers-container" style="display:flex; gap:3px;"></div>
+              <button class="term-btn" id="btn-next-page" onclick="changePage(1)" disabled>Next &gt;</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Live Market Interactive Candlestick Chart Engine Card -->
+        <div class="main-chart-card" id="main-chart-card">
+
+          <!-- Chart Header Row -->
+          <div class="chart-header-row">
+            <div class="chart-symbol-group">
+              <h3 id="chart-stock-symbol">RELIANCE.NS</h3>
+              <span id="chart-stock-price">₹0.00</span>
+              <span id="chart-stock-change" class="badge-signal-bullish">+0.00%</span>
+            </div>
+
+            <div class="chart-meta-group">
+              <span id="chart-data-source">⚡ Zerodha KiteConnect Live</span>
+              <a href="https://kite.zerodha.com/connect/login?api_key=zgktuz1hr11f8scf&v=3" target="_blank"
+                id="chart-kite-reconnect-btn" class="chart-kite-btn-reconnect hidden"
+                title="Zerodha KiteConnect session is expired. Click to log in and re-activate live API.">
+                [ 🔑 Re-login Kite ]
+              </a>
+              <span id="chart-candles-count">0 candles</span>
+            </div>
+          </div>
+
+          <!-- Timeframe & Interval Selector Bar -->
+          <div class="chart-controls-row">
+            <!-- Intraday & Multi-Interval Tabs -->
+            <div class="chart-interval-tabs">
+              <button class="time-tab" onclick="switchChartInterval('1m')">1m</button>
+              <button class="time-tab" onclick="switchChartInterval('5m')">5m</button>
+              <button class="time-tab" onclick="switchChartInterval('15m')">15m</button>
+              <button class="time-tab" onclick="switchChartInterval('1h')">1h</button>
+              <button class="time-tab" onclick="switchChartInterval('4h')">4h</button>
+              <button class="time-tab active" onclick="switchChartInterval('1d')">1D</button>
+              <button class="time-tab" onclick="switchChartInterval('1w')">1W</button>
+              <button class="time-tab" onclick="switchChartInterval('1mo')">1M</button>
+            </div>
+
+            <!-- Historical Range / Period Selector -->
+            <div class="chart-period-tabs">
+              <span class="range-lbl">Range:</span>
+              <button class="time-tab" onclick="switchChartPeriod('1d')">1D</button>
+              <button class="time-tab" onclick="switchChartPeriod('5d')">5D</button>
+              <button class="time-tab" onclick="switchChartPeriod('1mo')">1M</button>
+              <button class="time-tab" onclick="switchChartPeriod('6mo')">6M</button>
+              <button class="time-tab active" onclick="switchChartPeriod('1y')">1Y</button>
+              <button class="time-tab" onclick="switchChartPeriod('max')">MAX</button>
+            </div>
+          </div>
+
+          <!-- Live Chart Canvas Container -->
+          <div id="mainStockChartContainer">
+            <canvas id="mainStockChartCanvas"></canvas>
           </div>
         </div>
       </div>
@@ -171,7 +209,7 @@
 
     <!-- Right Inspector Panel (Column 3) -->
     <aside id="panel-inspector" class="terminal-inspector-panel">
-      
+
       <!-- Stock Summary Header -->
       <div class="inspector-header-box">
         <div class="inspector-symbol-row">
@@ -259,10 +297,42 @@
         </div>
       </div>
 
+      <!-- Secondary Technical Trend & Indicator Chart Card -->
+      <div class="fin-section-card" id="right-bottom-chart-card">
+        <div class="fin-section-header">
+          <h4>📈 Technical Price &amp; Trend</h4>
+          <span class="fin-badge" id="right-chart-candles-badge">⚡ Live API</span>
+        </div>
+
+        <!-- Timeframe & Mode Selector Tabs -->
+        <div
+          style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 4px;">
+          <div class="timeframe-tabs-bar" id="right-chart-period-tabs" style="display: flex; gap: 3px;">
+            <button class="time-tab" onclick="updateRightChartTimeframe('5d', '15m')">5D</button>
+            <button class="time-tab" onclick="updateRightChartTimeframe('1mo', '1h')">1M</button>
+            <button class="time-tab" onclick="updateRightChartTimeframe('3mo', '1d')">3M</button>
+            <button class="time-tab active" onclick="updateRightChartTimeframe('6mo', '1d')">6M</button>
+            <button class="time-tab" onclick="updateRightChartTimeframe('1y', '1d')">1Y</button>
+            <button class="time-tab" onclick="updateRightChartTimeframe('max', '1w')">MAX</button>
+          </div>
+          <div style="display: flex; gap: 3px;">
+            <button class="time-tab active" id="btn-right-mode-price"
+              onclick="toggleRightChartMode('price')">Price</button>
+            <button class="time-tab" id="btn-right-mode-rsi" onclick="toggleRightChartMode('rsi')">RSI</button>
+          </div>
+        </div>
+
+        <!-- Chart Canvas Box -->
+        <div class="panel-chart-box" style="height: 200px; position: relative;">
+          <canvas id="panelStockChart"></canvas>
+        </div>
+      </div>
+
     </aside>
 
   </div>
 
-  <script src="/app.js"></script>
+  <script src="/app.js?v=18"></script>
 </body>
+
 </html>

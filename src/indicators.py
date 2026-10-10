@@ -46,12 +46,14 @@ def add_screener_indicators(df: pd.DataFrame) -> pd.DataFrame:
     span_a_3_7 = (conv_3 + base_7) / 2.0
     span_b_14 = (high.rolling(14).max() + low.rolling(14).min()) / 2.0
     cloud_bottom_3_7_14 = np.minimum(span_a_3_7, span_b_14)
+    cloud_top_3_7_14 = np.maximum(span_a_3_7, span_b_14)
 
     df["ichi_conv_3_7_14"] = conv_3
     df["ichi_base_3_7_14"] = base_7
     df["ichi_span_a_3_7_14"] = span_a_3_7
     df["ichi_span_b_3_7_14"] = span_b_14
     df["ichi_cloud_bottom_3_7_14"] = cloud_bottom_3_7_14
+    df["ichi_cloud_top_3_7_14"] = cloud_top_3_7_14
 
     # Ichimoku (9, 26, 52)
     conv_9 = (high.rolling(9).max() + low.rolling(9).min()) / 2.0
@@ -59,8 +61,14 @@ def add_screener_indicators(df: pd.DataFrame) -> pd.DataFrame:
     span_a_9_26 = (conv_9 + base_26) / 2.0
     span_b_52 = (high.rolling(52).max() + low.rolling(52).min()) / 2.0
     cloud_bottom_9_26_52 = np.minimum(span_a_9_26, span_b_52)
+    cloud_top_9_26_52 = np.maximum(span_a_9_26, span_b_52)
 
+    df["ichi_conv_9_26_52"] = conv_9
+    df["ichi_base_9_26_52"] = base_26
+    df["ichi_span_a_9_26_52"] = span_a_9_26
+    df["ichi_span_b_9_26_52"] = span_b_52
     df["ichi_cloud_bottom_9_26_52"] = cloud_bottom_9_26_52
+    df["ichi_cloud_top_9_26_52"] = cloud_top_9_26_52
 
     # 3. Parabolic SAR (0.02, 0.02, 0.2)
     df["psar"] = calc_psar(df, af_start=0.02, af_inc=0.02, af_max=0.2)

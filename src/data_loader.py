@@ -75,6 +75,7 @@ def fetch_from_kiteconnect(
     period: str = "6mo",
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    interval: str = "day",
     api_key: Optional[str] = None,
     access_token: Optional[str] = None
 ) -> Optional[pd.DataFrame]:
@@ -100,16 +101,31 @@ def fetch_from_kiteconnect(
         if start_date:
             from_dt = datetime.strptime(start_date, "%Y-%m-%d")
         else:
-            days_map = {"1d": 5, "1w": 14, "1m": 35, "3m": 90, "6m": 180, "1y": 365, "5y": 1825}
+            days_map = {
+                "1d": 2, "5d": 7, "7d": 7, "1w": 7, "1m": 30, "1mo": 30,
+                "3m": 90, "3mo": 90, "6m": 180, "6mo": 180,
+                "1y": 365, "2y": 730, "5y": 1825, "max": 1825
+            }
             days = days_map.get(period.lower().strip(), 180)
+
+            # Enforce Zerodha KiteConnect interval max limits to prevent API rejection
+            if interval == "minute":
+                days = min(days, 59)
+            elif interval in ["3minute", "5minute", "10minute"]:
+                days = min(days, 99)
+            elif interval in ["15minute", "30minute", "60minute"]:
+                days = min(days, 199)
+            elif interval == "day":
+                days = min(days, 2000)
+
             from_dt = to_dt - timedelta(days=days)
 
-        print(f"[DataLoader] Fetching historical OHLCV from Zerodha KiteConnect for {symbol} (Token: {inst_token})...")
+        print(f"[DataLoader] Fetching historical OHLCV ({interval}) from Zerodha KiteConnect for {symbol} (Token: {inst_token})...")
         records = kite.historical_data(
             instrument_token=inst_token,
             from_date=from_dt.strftime("%Y-%m-%d"),
             to_date=to_dt.strftime("%Y-%m-%d"),
-            interval="day",
+            interval=interval,
             continuous=False,
             oi=False
         )
@@ -493,3 +509,212 @@ def validate_data_sufficiency(df: pd.DataFrame, min_records: int = 50) -> bool:
     if len(df) < min_records:
         raise ValueError(f"Dataset has only {len(df)} records, required minimum is {min_records}.")
     return True
+
+
+def fetch_live_chart_candles(
+    symbol: str,
+    interval: str = "1d",
+    period: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Fetches live market OHLCV candle data for building interactive charts.
+    Supports intervals from 1m to 4h, 1d, 1w, 1mo up to maximum available historical days.
+
+    Supported Intervals:
+    - Intraday: '1m', '2m', '3m', '5m', '15m', '30m', '60m', '1h', '2h', '4h'
+    - Daily / Longer: '1d', 'day', '1w', 'week', '1mo', 'month'
+
+    Supported Periods: '1d', '5d', '7d', '1mo', '3mo', '6mo', '1y', '2y', '5y', 'max'
+    """
+    original_symbol = symbol.strip()
+    resolved_ticker = resolve_ticker(original_symbol)
+    
+    clean_interval = interval.lower().strip()
+    
+    # Standardize interval strings
+    if clean_interval in ["day", "1d"]:
+        std_interval = "1d"
+    elif clean_interval in ["week", "1w", "1wk"]:
+        std_interval = "1wk"
+    elif clean_interval in ["month", "1mo", "1mth"]:
+        std_interval = "1mo"
+    elif clean_interval in ["1h", "60m"]:
+        std_interval = "60m"
+    else:
+        std_interval = clean_interval  # 1m, 2m, 3m, 5m, 15m, 30m, 2h, 4h
+
+    # Optimal period auto-selection or constraint enforcement
+    if not period:
+        if std_interval == "1m":
+            actual_period = "5d"
+        elif std_interval in ["2m", "3m", "5m", "15m", "30m"]:
+            actual_period = "1mo"
+        elif std_interval in ["60m", "2h", "4h"]:
+            actual_period = "6mo"
+        elif std_interval in ["1d", "1wk", "1mo"]:
+            actual_period = "1y"
+        else:
+            actual_period = "6mo"
+    else:
+        req_p = period.lower().strip()
+        # Enforce limits per interval granularity so neither KiteConnect nor yfinance errors out
+        if std_interval == "1m":
+            actual_period = req_p if req_p in ["1d", "5d", "7d"] else "5d"
+        elif std_interval in ["2m", "3m", "5m", "15m", "30m"]:
+            actual_period = req_p if req_p in ["1d", "5d", "7d", "1mo", "60d"] else "1mo"
+        elif std_interval in ["60m", "2h", "4h"]:
+            actual_period = req_p if req_p in ["1d", "5d", "7d", "1mo", "3mo", "6mo", "1y", "730d"] else "1y"
+        else:
+            actual_period = req_p
+
+    # KiteConnect Interval mapping
+    KITE_INTERVAL_MAP = {
+        "1m": "minute",
+        "3m": "3minute",
+        "5m": "5minute",
+        "15m": "15minute",
+        "30m": "30minute",
+        "60m": "60minute",
+        "2h": "60minute",
+        "4h": "60minute",
+        "1d": "day",
+        "1wk": "day",
+        "1mo": "day",
+    }
+    kite_interval = KITE_INTERVAL_MAP.get(std_interval, "day")
+
+    # Yahoo Finance Interval mapping
+    YF_INTERVAL_MAP = {
+        "1m": "1m",
+        "2m": "2m",
+        "3m": "2m",
+        "5m": "5m",
+        "15m": "15m",
+        "30m": "30m",
+        "60m": "60m",
+        "2h": "60m",
+        "4h": "60m",
+        "1d": "1d",
+        "1wk": "1wk",
+        "1mo": "1mo",
+    }
+    yf_interval = YF_INTERVAL_MAP.get(std_interval, "1d")
+
+    df = None
+    data_source = "Unknown"
+
+    # 1. Primary Engine: Try Zerodha KiteConnect
+    try:
+        kite_df = fetch_from_kiteconnect(
+            resolved_ticker,
+            period=actual_period,
+            start_date=start_date,
+            end_date=end_date,
+            interval=kite_interval
+        )
+        if kite_df is not None and not kite_df.empty:
+            df = kite_df
+            data_source = "Zerodha KiteConnect API"
+    except Exception as e:
+        print(f"[DataLoader] KiteConnect chart fetch notice: {e}")
+
+    # 2. Fallback Engine: Yahoo Finance (yfinance)
+    if df is None or df.empty:
+        candidates = [resolved_ticker]
+        if "." not in resolved_ticker and not resolved_ticker.startswith("^"):
+            candidates.append(f"{resolved_ticker}.NS")
+            candidates.append(f"{resolved_ticker}.BO")
+
+        for cand in candidates:
+            try:
+                stock = yf.Ticker(cand)
+                if start_date and end_date:
+                    temp_df = stock.history(start=start_date, end=end_date, interval=yf_interval, auto_adjust=True)
+                else:
+                    temp_df = stock.history(period=actual_period, interval=yf_interval, auto_adjust=True)
+                
+                if temp_df is not None and not temp_df.empty and len(temp_df) > 0:
+                    df = temp_df
+                    data_source = "Yahoo Finance (yfinance)"
+                    break
+            except Exception:
+                continue
+
+    if df is None or df.empty:
+        raise ValueError(f"No candle data found for symbol '{symbol}' with interval '{interval}' and period '{actual_period}'.")
+
+    # Clean DataFrame column names
+    if "Close" not in df.columns and "close" in df.columns:
+        df.rename(columns={"open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume"}, inplace=True)
+
+    # Clean missing/NaN rows from OHLC to ensure clean JSON compliance (prevents Starlette NaN serialization 500 error)
+    if "Close" in df.columns:
+        cols_to_check = [c for c in ["Open", "High", "Low", "Close"] if c in df.columns]
+        df.dropna(subset=cols_to_check, inplace=True)
+
+    # Resampling for 2h and 4h if base interval is 60m
+    if std_interval in ["2h", "4h"] and len(df) > 0:
+        rule = "2h" if std_interval == "2h" else "4h"
+        df = df.resample(rule).agg({
+            "Open": "first",
+            "High": "max",
+            "Low": "min",
+            "Close": "last",
+            "Volume": "sum"
+        }).dropna()
+
+    # Format candles list
+    candles = []
+    is_intraday = std_interval in ["1m", "2m", "3m", "5m", "15m", "30m", "60m", "2h", "4h"]
+
+    for d, row in df.iterrows():
+        dt_obj = d.to_pydatetime() if hasattr(d, "to_pydatetime") else d
+        dt_str = dt_obj.strftime("%Y-%m-%d %H:%M:%S") if is_intraday else dt_obj.strftime("%Y-%m-%d")
+        epoch_sec = int(dt_obj.timestamp())
+
+        open_val = round(float(row["Open"]), 2)
+        high_val = round(float(row["High"]), 2)
+        low_val = round(float(row["Low"]), 2)
+        close_val = round(float(row["Close"]), 2)
+        vol_val = int(row["Volume"]) if pd.notna(row["Volume"]) else 0
+        chg_pct = round(((close_val - open_val) / (open_val + 1e-10)) * 100, 2)
+
+        candles.append({
+            "timestamp": dt_obj.isoformat(),
+            "date": dt_str,
+            "time": epoch_sec,
+            "open": open_val,
+            "high": high_val,
+            "low": low_val,
+            "close": close_val,
+            "volume": vol_val,
+            "change_pct": chg_pct
+        })
+
+    latest_close = candles[-1]["close"] if candles else 0.0
+    first_open = candles[0]["open"] if candles else 0.0
+    price_chg = round(latest_close - first_open, 2)
+    price_chg_pct = round((price_chg / (first_open + 1e-10)) * 100, 2)
+    high_max = max([c["high"] for c in candles]) if candles else 0.0
+    low_min = min([c["low"] for c in candles]) if candles else 0.0
+
+    return {
+        "status": "success",
+        "symbol": original_symbol,
+        "resolved_symbol": resolved_ticker,
+        "interval": clean_interval,
+        "period": actual_period,
+        "data_source": data_source,
+        "total_candles": len(candles),
+        "first_timestamp": candles[0]["date"] if candles else None,
+        "latest_timestamp": candles[-1]["date"] if candles else None,
+        "latest_close": latest_close,
+        "price_change": price_chg,
+        "price_change_pct": price_chg_pct,
+        "highest_high": high_max,
+        "lowest_low": low_min,
+        "candles": candles
+    }
+

@@ -23,6 +23,16 @@ def get_db_connection() -> sqlite3.Connection:
     return conn
 
 
+# Mapping of Screener Nodes to their dedicated isolated SQLite tables
+SCREENER_TABLES_MAP = {
+    "NODE_01_BULLISH_TRENDING": "screener_bullish_trending",
+    "NODE_02_BULLISH_MOMENTUM": "screener_bullish_momentum",
+    "NODE_03_PROFIT_JUMP_200": "screener_profit_jump_200",
+    "NODE_04_HIGH_SALES_GROWTH": "screener_high_sales_growth",
+    "NODE_05_BEARISH_TRENDING": "screener_bearish_trending",
+}
+
+
 def init_db() -> None:
     """Initializes SQLite tables for OHLCV data and Screener Node results if they do not exist."""
     with get_db_connection() as conn:
@@ -106,6 +116,36 @@ def init_db() -> None:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+
+        # 5. Dedicated Tables for Each Screener Node
+        for tbl in SCREENER_TABLES_MAP.values():
+            cursor.execute(f"""
+                CREATE TABLE IF NOT EXISTS {tbl} (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id INTEGER NOT NULL,
+                    ticker TEXT NOT NULL,
+                    passed_all INTEGER NOT NULL,
+                    passed_count INTEGER NOT NULL,
+                    total_rules INTEGER NOT NULL,
+                    pass_percentage REAL NOT NULL,
+                    latest_close REAL,
+                    latest_volume INTEGER,
+                    rsi_14 REAL,
+                    macd_hist REAL,
+                    change_pct REAL,
+                    filter_details_json TEXT,
+                    scanned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (run_id) REFERENCES screener_runs (id) ON DELETE CASCADE
+                )
+            """)
+            cursor.execute(f"""
+                CREATE INDEX IF NOT EXISTS idx_{tbl}_ticker 
+                ON {tbl} (ticker)
+            """)
+            cursor.execute(f"""
+                CREATE INDEX IF NOT EXISTS idx_{tbl}_run_id 
+                ON {tbl} (run_id)
+            """)
 
         conn.commit()
 
@@ -254,6 +294,18 @@ def save_screener_run_to_db(
                 json.dumps(details.get("filter_results", [])),
             ))
 
+        # 2. Insert individual stock results into dedicated isolated table
+        target_tbl = SCREENER_TABLES_MAP.get(node_id)
+        if target_tbl and result_rows:
+            cursor.executemany(f"""
+                INSERT INTO {target_tbl} (
+                    run_id, ticker, passed_all, passed_count, total_rules, 
+                    pass_percentage, latest_close, latest_volume, rsi_14, macd_hist, change_pct, filter_details_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, result_rows)
+
+        # Also insert into general screener_results for backwards compatibility
         if result_rows:
             cursor.executemany("""
                 INSERT INTO screener_results (
@@ -264,23 +316,45 @@ def save_screener_run_to_db(
             """, result_rows)
 
         conn.commit()
+
+
 def get_latest_screener_results_from_db(node_id: str = "NODE_01_BULLISH_TRENDING", limit: int = 500) -> List[Dict[str, Any]]:
     """
-    Retrieves the latest screened stock results for a given node from SQLite.
+    Retrieves the latest screened stock results for a given node from its dedicated isolated SQLite table.
     """
+    target_tbl = SCREENER_TABLES_MAP.get(node_id, "screener_results")
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT r.*, sr.run_timestamp, sr.node_id, sr.universe
-            FROM screener_results r
+        order_sql = "ORDER BY r.pass_percentage DESC, r.change_pct ASC" if node_id == "NODE_05_BEARISH_TRENDING" else "ORDER BY r.pass_percentage DESC, r.change_pct DESC"
+        cursor.execute(f"""
+            SELECT r.id, r.ticker, r.passed_all, r.passed_count, r.total_rules,
+                   r.pass_percentage, r.latest_close, r.latest_volume, r.rsi_14,
+                   r.macd_hist, r.change_pct, sr.run_timestamp, sr.node_id, sr.universe
+            FROM {target_tbl} r
             JOIN screener_runs sr ON r.run_id = sr.id
             WHERE r.run_id = (
                 SELECT id FROM screener_runs WHERE node_id = ? ORDER BY id DESC LIMIT 1
             )
-            ORDER BY r.pass_percentage DESC, r.change_pct DESC
+            {order_sql}
             LIMIT ?
         """, (node_id, limit))
         rows = cursor.fetchall()
+
+        # Fallback to screener_results if dedicated table has not been populated yet
+        if not rows and target_tbl != "screener_results":
+            cursor.execute(f"""
+                SELECT r.id, r.ticker, r.passed_all, r.passed_count, r.total_rules,
+                       r.pass_percentage, r.latest_close, r.latest_volume, r.rsi_14,
+                       r.macd_hist, r.change_pct, sr.run_timestamp, sr.node_id, sr.universe
+                FROM screener_results r
+                JOIN screener_runs sr ON r.run_id = sr.id
+                WHERE r.run_id = (
+                    SELECT id FROM screener_runs WHERE node_id = ? ORDER BY id DESC LIMIT 1
+                )
+                {order_sql}
+                LIMIT ?
+            """, (node_id, limit))
+            rows = cursor.fetchall()
 
     results = []
     for row in rows:
@@ -294,7 +368,6 @@ def get_latest_screener_results_from_db(node_id: str = "NODE_01_BULLISH_TRENDING
             "change_pct": d.get("change_pct"),
             "rsi_14": d.get("rsi_14"),
             "passed_count": d.get("passed_count"),
-            "filter_details_json": d.get("filter_details_json")
         }
         results.append(d)
 

@@ -27,7 +27,7 @@ logging.basicConfig(level=logging.INFO, format="[%(asctime)s] [%(levelname)s] %(
 
 
 def _single_stock_scan_worker(ticker: str) -> Optional[Dict[str, Any]]:
-    """Worker function to pull OHLCV and run 26-rule technical evaluation per stock."""
+    """Worker function to pull OHLCV and evaluate all 5 registered screener nodes per stock."""
     try:
         resolved = resolve_ticker(ticker)
         df = fetch_stock_data(resolved, period="6mo")
@@ -37,22 +37,49 @@ def _single_stock_scan_worker(ticker: str) -> Optional[Dict[str, Any]]:
         # Save OHLCV bars into SQLite DB
         save_ohlcv_to_db(resolved, df)
 
-        # Evaluate 26-rule technical filter node
-        screener = BullishTrendingScreenerNode(df)
-        res = screener.evaluate_latest()
-        latest_bar = res.get("latest_bar", {})
+        # Pre-fetch fundamentals for fundamental growth nodes
+        f = {}
+        try:
+            from src.data_loader import fetch_stock_fundamentals
+            f = fetch_stock_fundamentals(resolved)
+        except Exception:
+            pass
+
+        from src.screener import get_screener_node_by_id
+
+        node_ids = [
+            "NODE_01_BULLISH_TRENDING",
+            "NODE_02_BULLISH_MOMENTUM",
+            "NODE_03_PROFIT_JUMP_200",
+            "NODE_04_HIGH_SALES_GROWTH",
+            "NODE_05_BEARISH_TRENDING",
+        ]
+
+        node_evals = {}
+        for nid in node_ids:
+            try:
+                screener = get_screener_node_by_id(nid, df, fundamentals=f)
+                res = screener.evaluate_latest()
+                latest_bar = res.get("latest_bar", {})
+                node_evals[nid] = {
+                    "ticker": ticker,
+                    "resolved_ticker": resolved,
+                    "passed_all": res.get("passed_all", False),
+                    "passed_count": res.get("passed_count", 0),
+                    "pass_percentage": res.get("pass_percentage", 0.0),
+                    "close": latest_bar.get("close", 0.0),
+                    "volume": latest_bar.get("volume", 0),
+                    "rsi_14": latest_bar.get("rsi_14"),
+                    "macd": latest_bar.get("macd"),
+                    "details": res,
+                }
+            except Exception as n_err:
+                logger.warning(f"Error evaluating node {nid} for {ticker}: {n_err}")
 
         return {
             "ticker": ticker,
             "resolved_ticker": resolved,
-            "passed_all": res["passed_all"],
-            "passed_count": res["passed_count"],
-            "pass_percentage": res["pass_percentage"],
-            "close": latest_bar.get("close", 0.0),
-            "volume": latest_bar.get("volume", 0),
-            "rsi_14": latest_bar.get("rsi_14"),
-            "macd": latest_bar.get("macd"),
-            "details": res,
+            "node_evaluations": node_evals
         }
     except Exception as e:
         logger.warning(f"Error processing stock '{ticker}': {e}")
@@ -61,47 +88,66 @@ def _single_stock_scan_worker(ticker: str) -> Optional[Dict[str, Any]]:
 
 def run_automatic_scheduled_scan(trigger_name: str = "AUTOMATED_SCHEDULER") -> Dict[str, Any]:
     """
-    Executes an automatic end-to-end data pull & screening scan across NIFTY 500.
+    Executes an automatic end-to-end data pull & screening scan across NIFTY 500 for ALL screener nodes.
     Saves all results strictly automatically into the SQLite database.
     """
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    logger.info(f"⚡ Starting automatic scheduled scan [{trigger_name}] at {now_str}...")
+    logger.info(f"⚡ Starting automatic scheduled multi-node scan [{trigger_name}] at {now_str}...")
 
     csv_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "nifty500.csv")
     tickers = load_tickers_from_csv(csv_path)
     logger.info(f"Loaded {len(tickers)} tickers from NIFTY 500 universe.")
 
-    scanned_results = []
+    raw_results = []
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = {executor.submit(_single_stock_scan_worker, t): t for t in tickers}
         for future in as_completed(futures):
             res = future.result()
             if res:
-                scanned_results.append(res)
+                raw_results.append(res)
 
-    scanned_results.sort(key=lambda x: x["pass_percentage"], reverse=True)
-    matched = [item for item in scanned_results if item["passed_all"]]
+    node_ids = [
+        "NODE_01_BULLISH_TRENDING",
+        "NODE_02_BULLISH_MOMENTUM",
+        "NODE_03_PROFIT_JUMP_200",
+        "NODE_04_HIGH_SALES_GROWTH",
+        "NODE_05_BEARISH_TRENDING",
+    ]
 
-    # Save run results into SQLite DB
-    try:
-        run_id = save_screener_run_to_db(
-            node_id="NODE_01_BULLISH_TRENDING",
-            universe="nifty500",
-            scanned_count=len(scanned_results),
-            matched_count=len(matched),
-            stock_results=scanned_results
-        )
-        logger.info(f"✅ [SQLite DB] Saved automatic screener run #{run_id} ({len(scanned_results)} stocks evaluated, {len(matched)} 100% matched).")
-    except Exception as db_err:
-        logger.error(f"❌ Failed to persist automatic screener run to SQLite: {db_err}")
+    saved_summary = {}
+
+    for nid in node_ids:
+        node_results = []
+        for r in raw_results:
+            ne = r.get("node_evaluations", {}).get(nid)
+            if ne:
+                node_results.append(ne)
+
+        if nid == "NODE_05_BEARISH_TRENDING":
+            node_results.sort(key=lambda x: (-x.get("pass_percentage", 0.0), x.get("details", {}).get("latest_bar", {}).get("change_pct", 0.0)))
+        else:
+            node_results.sort(key=lambda x: (-x.get("pass_percentage", 0.0), -x.get("details", {}).get("latest_bar", {}).get("change_pct", 0.0)))
+        matched = [item for item in node_results if item.get("passed_all")]
+
+        try:
+            run_id = save_screener_run_to_db(
+                node_id=nid,
+                universe="nifty500",
+                scanned_count=len(node_results),
+                matched_count=len(matched),
+                stock_results=node_results
+            )
+            saved_summary[nid] = {"count": len(node_results), "matched": len(matched)}
+            logger.info(f"✅ [SQLite DB] Saved screener run for {nid} #{run_id} ({len(node_results)} stocks evaluated, {len(matched)} 100% matched).")
+        except Exception as db_err:
+            logger.error(f"❌ Failed to persist {nid} screener run to SQLite: {db_err}")
 
     return {
         "status": "success",
         "timestamp": now_str,
         "trigger": trigger_name,
-        "scanned_count": len(scanned_results),
-        "matched_count": len(matched),
-        "matched_stocks": [m["ticker"] for m in matched],
+        "total_stocks_evaluated": len(raw_results),
+        "nodes_persisted": saved_summary,
     }
 
 

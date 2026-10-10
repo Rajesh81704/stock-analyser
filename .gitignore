@@ -26,3 +26,4 @@ database/*.db-wal
 database/*.db-shm
 data/*.db
 *.db
+.kite_token

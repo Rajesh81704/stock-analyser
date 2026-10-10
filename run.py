@@ -15,17 +15,6 @@ def main():
     parser.add_argument("--no-reload", action="store_true", help="Disable auto-reload mode")
 
     args = parser.parse_args()
-
-    print("=" * 70)
-    print("                     FastDesk MarketX")
-    print("        NIFTY 500 QUANTITATIVE SCREENER & STOCK EVALUATOR")
-    print("=" * 70)
-    print(f"  • Web Workstation Dashboard: http://localhost:{args.port}")
-    print(f"  • Interactive API Docs:     http://localhost:{args.port}/docs")
-    print(f"  • Zerodha Auth Callback:    http://localhost:{args.port}/callback")
-    print("=" * 70)
-    print(f"Starting uvicorn server on {args.host}:{args.port} (Auto-reload: {not args.no_reload})...\n")
-
     uvicorn.run(
         "web.app:app",
         host=args.host,

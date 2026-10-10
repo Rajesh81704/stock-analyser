@@ -9,20 +9,22 @@ Endpoints:
 """
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import json
 import os
 from typing import Any, Dict, List, Optional
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Path, Query, Request, status
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Path, Query, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from src.data_loader import fetch_stock_data, fetch_stock_fundamentals, resolve_ticker
+from src.data_loader import fetch_stock_data, fetch_stock_fundamentals, resolve_ticker, fetch_live_chart_candles
 from src.screener import FILTER_RULES_SPEC, BullishTrendingScreenerNode, BullishMomentumScreenerNode, list_available_screener_nodes, get_screener_node_by_id
 from src.stock_evaluator import evaluate_individual_stock
 from src.universe import get_default_universe, load_tickers_from_csv
 from src.database import get_expected_market_date, is_db_screener_updated_for_date
 from src.scheduler import start_automated_scheduler, run_automatic_scheduled_scan
+from src.webhooks import ws_manager, process_incoming_webhook_tick
 
 
 app = FastAPI(
@@ -55,17 +57,24 @@ async def on_startup():
 
     try:
         target_date = get_expected_market_date()
-        is_updated = is_db_screener_updated_for_date("NODE_01_BULLISH_TRENDING", target_date)
+        node_ids = [
+            "NODE_01_BULLISH_TRENDING",
+            "NODE_02_BULLISH_MOMENTUM",
+            "NODE_03_PROFIT_JUMP_200",
+            "NODE_04_HIGH_SALES_GROWTH",
+            "NODE_05_BEARISH_TRENDING",
+        ]
+        missing_nodes = [nid for nid in node_ids if not is_db_screener_updated_for_date(nid, target_date)]
 
-        if is_updated:
-            print(f"[Startup] ✅ SQLite DB contains up-to-date bullish stock analysis for market date '{target_date}'.")
+        if not missing_nodes:
+            print(f"[Startup] ✅ SQLite DB contains up-to-date quantitative analysis across all 5 screener nodes for market date '{target_date}'. Skipping re-download and scan.")
         else:
             print("\n" + "=" * 75)
-            print(f"[Startup] ⚠️  SQLite DB is not updated for target market date '{target_date}'.")
-            print(f"[Startup] ⚡ Running automatic NIFTY 500 bulk scan & analysis to update database...")
+            print(f"[Startup] ⚠️  Latest data for market date '{target_date}' NOT found in SQLite DB ({len(missing_nodes)} missing/stale nodes).")
+            print(f"[Startup] ⚡ Running automatic multi-node NIFTY 500 bulk scan & analysis to update database...")
             print("=" * 75 + "\n")
             res = run_automatic_scheduled_scan(trigger_name="SERVER_STARTUP_SYNC")
-            print(f"\n[Startup] 🎉 Startup sync complete! Processed {res.get('scanned_count')} stocks ({res.get('matched_count')} 100% matched) for {target_date}.\n")
+            print(f"\n[Startup] 🎉 Startup multi-node sync complete! Processed {res.get('total_stocks_evaluated')} stocks across 5 screener nodes for {target_date}.\n")
     except Exception as sync_err:
         print(f"[Startup] Warning during startup DB sync: {sync_err}")
 
@@ -212,6 +221,66 @@ async def create_screener_filter_node(node: FilterNodeItem):
 
 
 @app.get(
+    "/api/chart/candles",
+    summary="Fetch Live Market Candle Data for Building Charts (1m to 4h, 1d to max)",
+    tags=["Live Chart & Candle Engine"],
+)
+async def get_chart_candles_by_query(
+    symbol: str = Query(..., description="Stock ticker symbol (e.g. RELIANCE, TCS.NS, INFY, TATAMOTORS, ^NSEI)"),
+    interval: str = Query("1d", description="Candle time frame: 1m, 2m, 3m, 5m, 15m, 30m, 60m, 1h, 2h, 4h, 1d, 1w, 1mo"),
+    period: Optional[str] = Query(None, description="Historical range: 1d, 5d, 7d, 1mo, 3mo, 6mo, 1y, 2y, 5y, max"),
+    start_date: Optional[str] = Query(None, description="Optional start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="Optional end date (YYYY-MM-DD)"),
+):
+    """
+    Fetches live market OHLCV candle data for building interactive charts.
+    
+    Supported Intervals:
+    - **Intraday**: `1m`, `2m`, `3m`, `5m`, `15m`, `30m`, `60m`, `1h`, `2h`, `4h`
+    - **Daily / Longer**: `1d` / `day`, `1w` / `week`, `1mo` / `month`
+
+    Supported Periods:
+    - `1d`, `5d`, `7d`, `1mo`, `3mo`, `6mo`, `1y`, `2y`, `5y`, `max` (auto-calculated if omitted)
+    """
+    try:
+        data = fetch_live_chart_candles(
+            symbol=symbol,
+            interval=interval,
+            period=period,
+            start_date=start_date,
+            end_date=end_date
+        )
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error fetching candle data for '{symbol}': {str(e)}")
+
+
+@app.get(
+    "/api/stock/{ticker}/candles",
+    summary="Fetch Live Market Candle Data for Building Charts (RESTful path alias)",
+    tags=["Live Chart & Candle Engine"],
+)
+async def get_chart_candles_by_path(
+    ticker: str = Path(..., description="Stock ticker symbol in path (e.g. RELIANCE.NS, KARURVYSYA.NS)"),
+    interval: str = Query("1d", description="Candle time frame: 1m, 2m, 3m, 5m, 15m, 30m, 60m, 1h, 2h, 4h, 1d, 1w, 1mo"),
+    period: Optional[str] = Query(None, description="Historical range: 1d, 5d, 7d, 1mo, 3mo, 6mo, 1y, 2y, 5y, max"),
+    start_date: Optional[str] = Query(None, description="Optional start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="Optional end date (YYYY-MM-DD)"),
+):
+    try:
+        data = fetch_live_chart_candles(
+            symbol=ticker,
+            interval=interval,
+            period=period,
+            start_date=start_date,
+            end_date=end_date
+        )
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error fetching candle data for '{ticker}': {str(e)}")
+
+
+@app.get(
     "/api/stock/{ticker}/evaluate",
     response_model=StockEvaluationResponse,
     summary="Comprehensive Individual Stock Evaluation",
@@ -353,8 +422,16 @@ async def screen_single_stock(
 def _screen_worker(ticker: str, node_id: str = "NODE_01_BULLISH_TRENDING") -> Optional[Dict[str, Any]]:
     try:
         resolved = resolve_ticker(ticker)
+        fundamentals = None
+        if node_id in ["NODE_03_PROFIT_JUMP_200", "NODE_04_HIGH_SALES_GROWTH"]:
+            try:
+                fundamentals = fetch_stock_fundamentals(resolved)
+            except Exception:
+                pass
         df = fetch_stock_data(resolved, period="6mo")
-        screener = get_screener_node_by_id(node_id, df)
+        if df.empty:
+            return None
+        screener = get_screener_node_by_id(node_id, df, fundamentals=fundamentals)
         res = screener.evaluate_latest()
 
         latest_bar = res.get("latest_bar", {})
@@ -490,6 +567,116 @@ async def trigger_automated_scan():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+_KITE_STATUS_CACHE = {
+    "active": False,
+    "user_name": None,
+    "user_id": None,
+    "last_checked": 0,
+    "login_url": "https://kite.zerodha.com/connect/login?api_key=zgktuz1hr11f8scf&v=3",
+}
+
+def check_kite_session_status(force: bool = False) -> Dict[str, Any]:
+    """Checks whether the current Zerodha KiteConnect session is authenticated and active."""
+    import time
+    now = time.time()
+    # Cache result for 45s to prevent unnecessary external API roundtrips
+    if not force and (now - _KITE_STATUS_CACHE["last_checked"] < 45):
+        return _KITE_STATUS_CACHE
+
+    from src.data_loader import KITE_API_KEY, KITE_ACCESS_TOKEN
+    from kiteconnect import KiteConnect
+    try:
+        kite = KiteConnect(api_key=KITE_API_KEY)
+        kite.set_access_token(KITE_ACCESS_TOKEN)
+        profile = kite.profile()
+        _KITE_STATUS_CACHE.update({
+            "active": True,
+            "user_name": profile.get("user_name"),
+            "user_id": profile.get("user_id"),
+            "last_checked": now,
+            "error": None
+        })
+    except Exception as e:
+        _KITE_STATUS_CACHE.update({
+            "active": False,
+            "user_name": None,
+            "user_id": None,
+            "last_checked": now,
+            "error": str(e)
+        })
+    return _KITE_STATUS_CACHE
+
+
+@app.get(
+    "/api/kite/status",
+    summary="Get Zerodha KiteConnect Session Status",
+    tags=["Kite Connect Integration"],
+)
+def api_kite_status(force: bool = False):
+    """Returns whether KiteConnect session is active or expired, plus the Zerodha login URL."""
+    return check_kite_session_status(force=force)
+
+
+_MARKET_NEWS_CACHE = {
+    "articles": [],
+    "last_fetched": 0
+}
+
+@app.get(
+    "/api/market/news",
+    summary="Fetch Latest Top Stock Market Headlines",
+    tags=["Market News Wire"],
+)
+def get_market_news(limit: int = Query(25, ge=1, le=50), force: bool = False):
+    """Fetches real-time Indian stock market breaking news headlines with caching."""
+    import time
+    now = time.time()
+    if not force and _MARKET_NEWS_CACHE["articles"] and (now - _MARKET_NEWS_CACHE["last_fetched"] < 120):
+        return {"articles": _MARKET_NEWS_CACHE["articles"][:limit], "cached": True}
+
+    import urllib.request
+    import xml.etree.ElementTree as ET
+
+    articles = []
+    try:
+        url = "https://news.google.com/rss/search?q=stock+market+india+nifty+sensex&hl=en-IN&gl=IN&ceid=IN:en"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            xml_data = resp.read()
+        root = ET.fromstring(xml_data)
+        for item in root.findall(".//item"):
+            raw_title = item.find("title").text if item.find("title") is not None else ""
+            link = item.find("link").text if item.find("link") is not None else ""
+            pub_date_str = item.find("pubDate").text if item.find("pubDate") is not None else ""
+            source_el = item.find("source")
+            source = source_el.text if source_el is not None else "Market Wire"
+
+            clean_title = raw_title
+            if " - " in clean_title:
+                clean_title = clean_title.rsplit(" - ", 1)[0].strip()
+
+            if clean_title and link:
+                articles.append({
+                    "title": clean_title,
+                    "link": link,
+                    "source": source,
+                    "published": pub_date_str,
+                })
+            if len(articles) >= 40:
+                break
+
+        if articles:
+            _MARKET_NEWS_CACHE["articles"] = articles
+            _MARKET_NEWS_CACHE["last_fetched"] = now
+    except Exception as e:
+        print(f"[MarketNews Error] {e}")
+        if _MARKET_NEWS_CACHE["articles"]:
+            return {"articles": _MARKET_NEWS_CACHE["articles"][:limit], "fallback": True}
+        return {"articles": [], "error": str(e)}
+
+    return {"articles": _MARKET_NEWS_CACHE["articles"][:limit], "count": len(_MARKET_NEWS_CACHE["articles"][:limit])}
+
+
 @app.get(
     "/callback",
     summary="Zerodha Kite Connect Auth Callback Handler",
@@ -513,23 +700,81 @@ async def kite_callback(request: Request):
             acc_token = data.get("access_token")
             if acc_token:
                 set_active_kite_access_token(acc_token)
+                check_kite_session_status(force=True)
                 print(f"[Kite AutoAuth] 🎉 AUTOMATICALLY GENERATED & ACTIVATED KITE ACCESS TOKEN: {acc_token}")
-                return {
-                    "status": "success",
-                    "message": "🎉 Zerodha Kite Connect Session Activated Successfully! Live market data active.",
-                    "access_token": acc_token,
-                    "user_name": data.get("user_name"),
-                    "user_id": data.get("user_id"),
-                    "params": params
-                }
+                # Redirect user directly back to the workstation with success indicator
+                return RedirectResponse(url="/?kite_auth=success", status_code=303)
         except Exception as err:
             print(f"[Kite AutoAuth Error] {err}")
+            return RedirectResponse(url=f"/?kite_auth=error&msg={str(err)}", status_code=303)
+
+    return RedirectResponse(url="/", status_code=303)
+
+
+# =====================================================================
+# Real-time Webhook & WebSocket Endpoints (0 HTTP Polling Architecture)
+# =====================================================================
+
+@app.post(
+    "/api/webhook/ticks",
+    summary="Receive Real-time Live Market Ticks via Webhook",
+    tags=["Real-time Webhook Streaming"],
+)
+@app.post(
+    "/api/webhook/zerodha",
+    summary="Zerodha Kite Postback & Tick Webhook Listener",
+    tags=["Real-time Webhook Streaming"],
+)
+async def webhook_tick_listener(req: Request):
+    """
+    Receives live market tick data or Zerodha postback updates via webhook.
+    Broadcasts payload instantly to all connected WebSocket clients with 0 HTTP polling.
+    """
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+
+    processed = process_incoming_webhook_tick(body if isinstance(body, dict) else {})
+    symbol = processed.get("symbol", "UNKNOWN")
+
+    await ws_manager.broadcast_symbol_tick(symbol, processed)
 
     return {
         "status": "success",
-        "message": "Zerodha Kite Connect login callback received.",
-        "params": params
+        "message": "Webhook tick received & broadcasted to live WebSocket clients",
+        "processed_tick": processed
     }
+
+
+@app.websocket("/ws/live")
+async def websocket_live_endpoint(websocket: WebSocket):
+    """
+    WebSocket Endpoint for Real-time Streaming of Stock Prices & Screener Updates.
+    No continuous HTTP polling required!
+    """
+    await ws_manager.connect(websocket)
+    try:
+        await websocket.send_json({
+            "type": "CONNECTION_ESTABLISHED",
+            "message": "Connected to FastDesk MarketX Live Real-time WebSocket Stream"
+        })
+        while True:
+            data_str = await websocket.receive_text()
+            try:
+                msg = json.loads(data_str)
+                action = msg.get("action")
+                symbol = msg.get("symbol")
+                if action == "subscribe" and symbol:
+                    ws_manager.subscribe(websocket, symbol)
+                    await websocket.send_json({"type": "SUBSCRIBED", "symbol": symbol.upper()})
+                elif action == "unsubscribe" and symbol:
+                    ws_manager.unsubscribe(websocket, symbol)
+                    await websocket.send_json({"type": "UNSUBSCRIBED", "symbol": symbol.upper()})
+            except Exception:
+                pass
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
 
 
 # =====================================================================
@@ -537,6 +782,46 @@ async def kite_callback(request: Request):
 # =====================================================================
 
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
+
+@app.get("/", include_in_schema=False)
+@app.get("/screener", include_in_schema=False)
+async def serve_index():
+    index_file = os.path.join(FRONTEND_DIR, "index.html")
+    if os.path.exists(index_file):
+        with open(index_file, "r", encoding="utf-8") as f:
+            content = f.read()
+        return HTMLResponse(content=content, headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        })
+    return HTMLResponse("<h1>Frontend not found</h1>", status_code=404)
+
+@app.get("/app.js", include_in_schema=False)
+async def serve_app_js():
+    js_file = os.path.join(FRONTEND_DIR, "app.js")
+    if os.path.exists(js_file):
+        with open(js_file, "r", encoding="utf-8") as f:
+            content = f.read()
+        return Response(content=content, media_type="application/javascript", headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        })
+    return Response("Not found", status_code=404)
+
+@app.get("/style.css", include_in_schema=False)
+async def serve_style_css():
+    css_file = os.path.join(FRONTEND_DIR, "style.css")
+    if os.path.exists(css_file):
+        with open(css_file, "r", encoding="utf-8") as f:
+            content = f.read()
+        return Response(content=content, media_type="text/css", headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        })
+    return Response("Not found", status_code=404)
 
 if os.path.exists(FRONTEND_DIR):
     app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
