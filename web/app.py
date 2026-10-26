@@ -323,6 +323,77 @@ async def get_chart_candles_by_path(
 
 
 @app.get(
+    "/api/chart/live-tick",
+    summary="Get Ultra-Fast Sub-Second Real-Time Live Market Tick for Charting",
+    tags=["Live Chart & Candle Engine"],
+)
+async def get_chart_live_tick(
+    symbol: str = Query(..., description="Stock ticker symbol (e.g. MPHASIS.NS, RELIANCE, TCS)")
+):
+    from zoneinfo import ZoneInfo
+    IST = ZoneInfo("Asia/Kolkata")
+    now_ist = datetime.now(IST)
+
+    clean_sym = symbol.strip().upper().replace(".NS", "").replace(".BO", "")
+    resolved = resolve_ticker(symbol)
+
+    live_price = 0.0
+    day_high = 0.0
+    day_low = 0.0
+    day_volume = 0
+    change_pct = 0.0
+    source = "Zerodha KiteConnect Live"
+
+    try:
+        from src.data_loader import KITE_API_KEY, KITE_ACCESS_TOKEN
+        if KITE_API_KEY and KITE_ACCESS_TOKEN:
+            from kiteconnect import KiteConnect
+            kc = KiteConnect(api_key=KITE_API_KEY)
+            kc.set_access_token(KITE_ACCESS_TOKEN)
+            q_map = kc.quote([f"NSE:{clean_sym}"])
+            if q_map and f"NSE:{clean_sym}" in q_map:
+                q = q_map[f"NSE:{clean_sym}"]
+                live_price = float(q.get("last_price") or 0.0)
+                ohlc = q.get("ohlc", {})
+                day_high = float(ohlc.get("high") or live_price)
+                day_low = float(ohlc.get("low") or live_price)
+                day_volume = int(q.get("volume") or 0)
+                open_p = float(ohlc.get("open") or live_price)
+                change_pct = round(((live_price - open_p) / max(0.01, open_p)) * 100, 2)
+                source = "Zerodha KiteConnect Live"
+    except Exception:
+        pass
+
+    if live_price <= 0:
+        try:
+            import yfinance as yf
+            ticker = yf.Ticker(resolved)
+            fast_info = getattr(ticker, "fast_info", None)
+            if fast_info:
+                live_price = float(getattr(fast_info, "last_price", 0.0) or 0.0)
+                day_high = float(getattr(fast_info, "day_high", live_price) or live_price)
+                day_low = float(getattr(fast_info, "day_low", live_price) or live_price)
+                day_volume = int(getattr(fast_info, "last_volume", 0) or 0)
+                source = "Yahoo Finance Fast Quote"
+        except Exception:
+            pass
+
+    return {
+        "status": "success",
+        "symbol": symbol,
+        "resolved_symbol": resolved,
+        "price": live_price,
+        "high": day_high,
+        "low": day_low,
+        "volume": day_volume,
+        "change_pct": change_pct,
+        "time": int(now_ist.timestamp()),
+        "timestamp": now_ist.strftime("%Y-%m-%d %H:%M:%S"),
+        "source": source
+    }
+
+
+@app.get(
     "/api/stock/{ticker}/evaluate",
     response_model=StockEvaluationResponse,
     summary="Comprehensive Individual Stock Evaluation",

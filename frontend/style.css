@@ -1761,4 +1761,19 @@ body {
   align-items: center;
 }
 
+@keyframes blink {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.25; transform: scale(0.85); }
+}
 
+.realtime-tick-flash-up {
+  color: #089981 !important;
+  text-shadow: 0 0 8px rgba(8, 153, 129, 0.6);
+  transition: all 0.15s ease;
+}
+
+.realtime-tick-flash-down {
+  color: #f23645 !important;
+  text-shadow: 0 0 8px rgba(242, 54, 69, 0.6);
+  transition: all 0.15s ease;
+}

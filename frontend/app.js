@@ -8,8 +8,8 @@ const pageSize = 10;
 let sortAscending = false;
 let activeRuleFilter = 'all';
 let currentChartSymbol = 'KARURVYSYA.NS';
-let currentChartInterval = '1d';
-let currentChartPeriod = '1y';
+let currentChartInterval = '5m';
+let currentChartPeriod = '5d';
 let currentRightChartPeriod = '6mo';
 let currentRightChartInterval = '1d';
 let currentRightChartMode = 'price';
@@ -805,16 +805,165 @@ function showKiteToast(msg) {
 
 
 let liveChartRefreshTimer = null;
+let liveTickPollTimer = null;
+let currentActiveLatestCandle = null;
+let currentActiveLatestVolume = null;
+let lastLiveTickPrice = null;
+let isLiveTickPolling = false;
+
+async function pollAndApplyLiveTick() {
+  if (isLiveTickPolling) return;
+  if (!currentChartSymbol) return;
+
+  const mainChart = document.getElementById('main-chart-card');
+  if (!mainChart) return;
+  const isHidden = mainChart.closest('.hidden') !== null || mainChart.offsetParent === null;
+  if (isHidden) return;
+
+  isLiveTickPolling = true;
+  try {
+    const res = await fetch(`/api/chart/live-tick?symbol=${encodeURIComponent(currentChartSymbol)}`);
+    if (!res.ok) return;
+    const tick = await res.json();
+    if (!tick || !tick.price || tick.price <= 0) return;
+
+    const livePrice = Number(tick.price);
+    const dayHigh = Number(tick.high || livePrice);
+    const dayLow = Number(tick.low || livePrice);
+    const dayVol = Number(tick.volume || 0);
+    const changePct = Number(tick.change_pct || 0);
+    const tickTime = Number(tick.time);
+
+    // 1. Update Header UI Price and Change
+    const priceEl = document.getElementById('chart-stock-price');
+    const changeEl = document.getElementById('chart-stock-change');
+    const sourceEl = document.getElementById('chart-data-source');
+
+    if (priceEl) {
+      const prevPrice = lastLiveTickPrice !== null ? lastLiveTickPrice : (parseFloat(priceEl.innerText.replace('₹', '')) || livePrice);
+      priceEl.innerText = '₹' + livePrice.toFixed(2);
+
+      // Real-time tick pulse animation
+      if (livePrice > prevPrice) {
+        priceEl.classList.remove('realtime-tick-flash-down');
+        priceEl.classList.add('realtime-tick-flash-up');
+        setTimeout(() => priceEl.classList.remove('realtime-tick-flash-up'), 500);
+      } else if (livePrice < prevPrice) {
+        priceEl.classList.remove('realtime-tick-flash-up');
+        priceEl.classList.add('realtime-tick-flash-down');
+        setTimeout(() => priceEl.classList.remove('realtime-tick-flash-down'), 500);
+      }
+      lastLiveTickPrice = livePrice;
+    }
+
+    if (changeEl) {
+      const isUp = changePct >= 0;
+      changeEl.innerText = (isUp ? '+' : '') + changePct.toFixed(2) + '%';
+      changeEl.className = isUp ? 'badge-signal-bullish' : 'badge-signal-bearish';
+    }
+
+    if (sourceEl) {
+      const now = new Date();
+      const timeStr = now.toTimeString().split(' ')[0];
+      sourceEl.innerHTML = `⚡ ${tick.source || 'Zerodha KiteConnect Live'} <span class="live-tick-indicator" style="display:inline-flex; align-items:center; gap:4px; font-size:11px; color:#089981; font-weight:600; margin-left:6px;"><span style="width:7px; height:7px; background:#089981; border-radius:50%; box-shadow:0 0 6px #089981; animation:blink 1s infinite;"></span> ${timeStr}</span>`;
+    }
+
+    // 2. Also update inspector price & change if currently showing same stock
+    const panelTickerEl = document.getElementById('panel-ticker');
+    if (panelTickerEl && (panelTickerEl.innerText === currentChartSymbol || panelTickerEl.innerText === (tick.resolved_symbol || ''))) {
+      const panelPriceEl = document.getElementById('panel-price');
+      const panelChangeEl = document.getElementById('panel-change');
+      if (panelPriceEl) panelPriceEl.innerText = '₹' + livePrice.toFixed(2);
+      if (panelChangeEl) {
+        const isUp = changePct >= 0;
+        panelChangeEl.innerText = (isUp ? '+' : '') + changePct.toFixed(2) + '%';
+        panelChangeEl.className = isUp ? 'change-green' : 'change-red';
+      }
+    }
+
+    // 3. Update TradingView Candlestick in Real-Time
+    if (candlestickSeriesInstance && currentActiveLatestCandle) {
+      const isIntraday = ['1m', '2m', '3m', '5m', '15m', '30m', '60m', '1h', '2h', '4h'].includes((currentChartInterval || '').toLowerCase());
+
+      let bucketSeconds = 300; // default 5m
+      const ci = (currentChartInterval || '').toLowerCase();
+      if (ci === '1m') bucketSeconds = 60;
+      else if (ci === '2m') bucketSeconds = 120;
+      else if (ci === '3m') bucketSeconds = 180;
+      else if (ci === '5m') bucketSeconds = 300;
+      else if (ci === '15m') bucketSeconds = 900;
+      else if (ci === '30m') bucketSeconds = 1800;
+      else if (ci === '60m' || ci === '1h') bucketSeconds = 3600;
+      else if (ci === '2h') bucketSeconds = 7200;
+      else if (ci === '4h') bucketSeconds = 14400;
+
+      if (isIntraday) {
+        const bucketTime = Math.floor(tickTime / bucketSeconds) * bucketSeconds;
+
+        if (typeof currentActiveLatestCandle.time === 'number' && bucketTime > currentActiveLatestCandle.time) {
+          // A new candle has begun for the new time bucket!
+          currentActiveLatestCandle = {
+            time: bucketTime,
+            open: livePrice,
+            high: livePrice,
+            low: livePrice,
+            close: livePrice
+          };
+          if (currentActiveLatestVolume) {
+            currentActiveLatestVolume = {
+              time: bucketTime,
+              value: 100,
+              color: 'rgba(8, 153, 129, 0.45)'
+            };
+          }
+        } else {
+          // Update the ongoing candle bar
+          currentActiveLatestCandle.close = livePrice;
+          currentActiveLatestCandle.high = Math.max(currentActiveLatestCandle.high, livePrice);
+          currentActiveLatestCandle.low = Math.min(currentActiveLatestCandle.low, livePrice);
+        }
+      } else {
+        // Daily or higher timeframe
+        currentActiveLatestCandle.close = livePrice;
+        currentActiveLatestCandle.high = Math.max(currentActiveLatestCandle.high, livePrice);
+        currentActiveLatestCandle.low = Math.min(currentActiveLatestCandle.low, livePrice);
+      }
+
+      // Stream sub-second tick directly into TradingView series!
+      candlestickSeriesInstance.update(currentActiveLatestCandle);
+
+      if (volumeSeriesInstance && currentActiveLatestVolume) {
+        const isUp = currentActiveLatestCandle.close >= currentActiveLatestCandle.open;
+        currentActiveLatestVolume.time = currentActiveLatestCandle.time;
+        if (dayVol > 0) currentActiveLatestVolume.value = dayVol;
+        currentActiveLatestVolume.color = isUp ? 'rgba(8, 153, 129, 0.45)' : 'rgba(242, 54, 69, 0.45)';
+        volumeSeriesInstance.update(currentActiveLatestVolume);
+      }
+    }
+  } catch (err) {
+    console.debug('Live tick poll notice:', err);
+  } finally {
+    isLiveTickPolling = false;
+  }
+}
 
 function startLiveChartAutoRefresh() {
-  if (liveChartRefreshTimer) return;
+  if (liveTickPollTimer) clearInterval(liveTickPollTimer);
+  if (liveChartRefreshTimer) clearInterval(liveChartRefreshTimer);
+
+  // 1. Ultra-fast 1.2s live tick streamer (updates candlestick & price flash in real time)
+  liveTickPollTimer = setInterval(() => {
+    pollAndApplyLiveTick();
+  }, 1200);
+
+  // 2. Periodic 15s background sync for full indicator & candle history update
   liveChartRefreshTimer = setInterval(() => {
     const mainChart = document.getElementById('main-chart-card');
     const isVisible = mainChart && (mainChart.offsetParent !== null || window.getComputedStyle(mainChart).display !== 'none');
     if (isVisible && currentChartSymbol) {
       loadLiveMainChart(currentChartSymbol, currentChartInterval, currentChartPeriod, true);
     }
-  }, 3000); // 3-second real-time pulse
+  }, 15000);
 }
 
 async function loadMarketNews(force = false) {
@@ -1888,6 +2037,26 @@ function renderMainChartCanvas(candles) {
       const cleanSma = Array.from(smaMap.values()).sort((a, b) => {
         return isIntraday ? (a.time - b.time) : String(a.time).localeCompare(String(b.time));
       });
+
+      // Track active latest candle and volume bar for sub-second live tick streaming
+      if (cleanCandles.length > 0) {
+        const lastBar = cleanCandles[cleanCandles.length - 1];
+        currentActiveLatestCandle = {
+          time: lastBar.time,
+          open: Number(lastBar.open),
+          high: Number(lastBar.high),
+          low: Number(lastBar.low),
+          close: Number(lastBar.close)
+        };
+      }
+      if (cleanVolume.length > 0) {
+        const lastV = cleanVolume[cleanVolume.length - 1];
+        currentActiveLatestVolume = {
+          time: lastV.time,
+          value: Number(lastV.value),
+          color: lastV.color
+        };
+      }
 
       // IN-PLACE UPDATE FOR LIVE MARKET DATA (Zero flicker, preserves user zoom/pan)
       if (lastRenderedChartKey === chartKey && lightweightChartInstance && candlestickSeriesInstance) {

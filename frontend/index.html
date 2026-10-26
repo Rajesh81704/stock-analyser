@@ -236,11 +236,11 @@
             <!-- Intraday & Multi-Interval Tabs -->
             <div class="chart-interval-tabs">
               <button class="time-tab" onclick="switchChartInterval('1m')">1m</button>
-              <button class="time-tab" onclick="switchChartInterval('5m')">5m</button>
+              <button class="time-tab active" onclick="switchChartInterval('5m')">5m</button>
               <button class="time-tab" onclick="switchChartInterval('15m')">15m</button>
               <button class="time-tab" onclick="switchChartInterval('1h')">1h</button>
               <button class="time-tab" onclick="switchChartInterval('4h')">4h</button>
-              <button class="time-tab active" onclick="switchChartInterval('1d')">1D</button>
+              <button class="time-tab" onclick="switchChartInterval('1d')">1D</button>
               <button class="time-tab" onclick="switchChartInterval('1w')">1W</button>
               <button class="time-tab" onclick="switchChartInterval('1mo')">1M</button>
             </div>
@@ -249,10 +249,10 @@
             <div class="chart-period-tabs">
               <span class="range-lbl">Range:</span>
               <button class="time-tab" onclick="switchChartPeriod('1d')">1D</button>
-              <button class="time-tab" onclick="switchChartPeriod('5d')">5D</button>
+              <button class="time-tab active" onclick="switchChartPeriod('5d')">5D</button>
               <button class="time-tab" onclick="switchChartPeriod('1mo')">1M</button>
               <button class="time-tab" onclick="switchChartPeriod('6mo')">6M</button>
-              <button class="time-tab active" onclick="switchChartPeriod('1y')">1Y</button>
+              <button class="time-tab" onclick="switchChartPeriod('1y')">1Y</button>
               <button class="time-tab" onclick="switchChartPeriod('max')">MAX</button>
             </div>
           </div>
@@ -493,7 +493,7 @@
     </div>
   </div>
 
-  <script src="/app.js?v=20"></script>
+  <script src="/app.js?v=20261026_realtime_stream_v3"></script>
 </body>
 
 </html>
