@@ -97,9 +97,11 @@ def fetch_from_kiteconnect(
         if not inst_token:
             return None
 
-        to_dt = datetime.now() if not end_date else datetime.strptime(end_date, "%Y-%m-%d")
+        from zoneinfo import ZoneInfo
+        IST = ZoneInfo("Asia/Kolkata")
+        to_dt = datetime.now(IST) if not end_date else datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=IST)
         if start_date:
-            from_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            from_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=IST)
         else:
             days_map = {
                 "1d": 2, "5d": 7, "7d": 7, "1w": 7, "1m": 30, "1mo": 30,
@@ -120,11 +122,15 @@ def fetch_from_kiteconnect(
 
             from_dt = to_dt - timedelta(days=days)
 
-        print(f"[DataLoader] Fetching historical OHLCV ({interval}) from Zerodha KiteConnect for {symbol} (Token: {inst_token})...")
+        is_intraday_interval = interval in ["minute", "3minute", "5minute", "10minute", "15minute", "30minute", "60minute"]
+        from_str = from_dt.strftime("%Y-%m-%d %H:%M:%S") if is_intraday_interval else from_dt.strftime("%Y-%m-%d")
+        to_str = to_dt.strftime("%Y-%m-%d %H:%M:%S") if is_intraday_interval else to_dt.strftime("%Y-%m-%d")
+
+        print(f"[DataLoader] Fetching historical OHLCV ({interval}) from Zerodha KiteConnect for {symbol} ({from_str} to {to_str})...")
         records = kite.historical_data(
             instrument_token=inst_token,
-            from_date=from_dt.strftime("%Y-%m-%d"),
-            to_date=to_dt.strftime("%Y-%m-%d"),
+            from_date=from_str,
+            to_date=to_str,
             interval=interval,
             continuous=False,
             oi=False
@@ -669,10 +675,18 @@ def fetch_live_chart_candles(
     candles = []
     is_intraday = std_interval in ["1m", "2m", "3m", "5m", "15m", "30m", "60m", "2h", "4h"]
 
+    from zoneinfo import ZoneInfo
+    IST = ZoneInfo("Asia/Kolkata")
+
     for d, row in df.iterrows():
         dt_obj = d.to_pydatetime() if hasattr(d, "to_pydatetime") else d
-        dt_str = dt_obj.strftime("%Y-%m-%d %H:%M:%S") if is_intraday else dt_obj.strftime("%Y-%m-%d")
-        epoch_sec = int(dt_obj.timestamp())
+        if dt_obj.tzinfo is None:
+            dt_obj_ist = dt_obj.replace(tzinfo=IST)
+        else:
+            dt_obj_ist = dt_obj.astimezone(IST)
+            
+        dt_str = dt_obj_ist.strftime("%Y-%m-%d %H:%M:%S") if is_intraday else dt_obj_ist.strftime("%Y-%m-%d")
+        epoch_sec = int(dt_obj_ist.timestamp())
 
         open_val = round(float(row["Open"]), 2)
         high_val = round(float(row["High"]), 2)
@@ -682,7 +696,7 @@ def fetch_live_chart_candles(
         chg_pct = round(((close_val - open_val) / (open_val + 1e-10)) * 100, 2)
 
         candles.append({
-            "timestamp": dt_obj.isoformat(),
+            "timestamp": dt_obj_ist.isoformat(),
             "date": dt_str,
             "time": epoch_sec,
             "open": open_val,
@@ -692,6 +706,27 @@ def fetch_live_chart_candles(
             "volume": vol_val,
             "change_pct": chg_pct
         })
+
+    # Live Real-Time Tick Update: During market hours, enrich latest candle with live LTP from KiteConnect
+    try:
+        now_ist = datetime.now(IST)
+        if now_ist.weekday() < 5 and (now_ist.hour > 9 or (now_ist.hour == 9 and now_ist.minute >= 15)) and (now_ist.hour < 15 or (now_ist.hour == 15 and now_ist.minute <= 30)):
+            if KITE_API_KEY and KITE_ACCESS_TOKEN and candles:
+                from kiteconnect import KiteConnect
+                kc = KiteConnect(api_key=KITE_API_KEY)
+                kc.set_access_token(KITE_ACCESS_TOKEN)
+                clean_sym = resolved_ticker.replace(".NS", "").replace(".BO", "")
+                ltp_resp = kc.ltp([f"NSE:{clean_sym}"])
+                if ltp_resp and f"NSE:{clean_sym}" in ltp_resp:
+                    live_p = float(ltp_resp[f"NSE:{clean_sym}"]["last_price"])
+                    if live_p > 0:
+                        last_c = candles[-1]
+                        last_c["close"] = live_p
+                        last_c["high"] = max(last_c["high"], live_p)
+                        last_c["low"] = min(last_c["low"], live_p)
+                        data_source = f"{data_source} · Live Tick"
+    except Exception:
+        pass
 
     latest_close = candles[-1]["close"] if candles else 0.0
     first_open = candles[0]["open"] if candles else 0.0

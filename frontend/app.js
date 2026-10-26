@@ -809,12 +809,12 @@ let liveChartRefreshTimer = null;
 function startLiveChartAutoRefresh() {
   if (liveChartRefreshTimer) return;
   liveChartRefreshTimer = setInterval(() => {
-    const scanView = document.getElementById('scanner-view');
-    // Periodically update the live candlestick chart during market hours when chart is visible
-    if (scanView && !scanView.classList.contains('hidden') && currentChartSymbol) {
-      loadLiveMainChart(currentChartSymbol, currentChartInterval, currentChartPeriod);
+    const mainChart = document.getElementById('main-chart-card');
+    const isVisible = mainChart && (mainChart.offsetParent !== null || window.getComputedStyle(mainChart).display !== 'none');
+    if (isVisible && currentChartSymbol) {
+      loadLiveMainChart(currentChartSymbol, currentChartInterval, currentChartPeriod, true);
     }
-  }, 10000); // 10-second real-time pulse
+  }, 3000); // 3-second real-time pulse
 }
 
 async function loadMarketNews(force = false) {
@@ -1752,13 +1752,25 @@ async function loadLiveMainChart(symbol, interval = null, period = null) {
     if (!resp.ok) throw new Error(data.detail || 'Failed to fetch candles');
 
     if (symbolEl) symbolEl.innerText = data.symbol || currentChartSymbol;
-    if (priceEl) priceEl.innerText = '₹' + Number(data.latest_close || 0).toFixed(2);
+    if (priceEl) {
+      const oldPrice = parseFloat(priceEl.innerText.replace('₹', '')) || 0;
+      const newPrice = Number(data.latest_close || 0);
+      priceEl.innerText = '₹' + newPrice.toFixed(2);
+      if (oldPrice > 0 && Math.abs(newPrice - oldPrice) >= 0.05) {
+        priceEl.style.transition = 'color 0.2s ease';
+        priceEl.style.color = newPrice > oldPrice ? '#089981' : '#f23645';
+        setTimeout(() => { priceEl.style.color = ''; }, 500);
+      }
+    }
     if (changeEl) {
       const isUp = (data.price_change_pct || 0) >= 0;
       changeEl.innerText = (isUp ? '+' : '') + Number(data.price_change_pct || 0).toFixed(2) + '%';
       changeEl.className = isUp ? 'badge-signal-bullish' : 'badge-signal-bearish';
     }
-    if (sourceEl) sourceEl.innerText = '⚡ ' + (data.data_source || 'Zerodha KiteConnect Live');
+    if (sourceEl) {
+      const isLive = data.data_source && (data.data_source.includes('Live Tick') || data.data_source.includes('KiteConnect'));
+      sourceEl.innerHTML = `⚡ ${data.data_source || 'Zerodha KiteConnect API'}` + (isLive ? ' <span style="display:inline-block; width:7px; height:7px; background:#089981; border-radius:50%; margin-left:4px; box-shadow:0 0 6px #089981; animation:blink 1.5s infinite;"></span>' : '');
+    }
     if (countEl) countEl.innerText = (data.total_candles || 0) + ' candles';
 
     const chartReconnectBtn = document.getElementById('chart-kite-reconnect-btn');
