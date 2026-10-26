@@ -246,10 +246,10 @@ def start_automated_scheduler() -> BackgroundScheduler:
         replace_existing=True
     )
 
-    # 3. Intraday Trailing SL Monitor: Every 2 minutes
+    # 3. Intraday Trailing SL Monitor: Every 30 seconds
     scheduler.add_job(
         _intraday_trailing_sl_job,
-        trigger=IntervalTrigger(minutes=2),
+        trigger=IntervalTrigger(seconds=30),
         id="job_intraday_trailing_sl_monitor",
         name="Intraday Trailing SL Real-Time Monitor",
         replace_existing=True
@@ -277,7 +277,7 @@ def start_automated_scheduler() -> BackgroundScheduler:
     _global_scheduler = scheduler
     logger.info("🚀 Automated Stock Scheduler started successfully!")
     logger.info("  • Morning Screener & Top Picks: Daily Mon-Fri 09:16 IST")
-    logger.info("  • Intraday Trailing SL Engine: Every 2 mins (09:15-15:30 IST)")
+    logger.info("  • Intraday Trailing SL & Target Engine: Every 30 secs (09:15-15:30 IST)")
     logger.info("  • EOD Square-off: Mon-Fri 15:15 IST")
     logger.info("  • General 30-min Technical Scan: Every 30 mins during market hours")
     logger.info("  • Post-Market Scan: Daily at 16:00 IST (EOD)")

@@ -482,6 +482,29 @@ class DailyIntradayAutoTrader:
                 conn.close()
                 return []
 
+            # Instantaneous batch quote fetching via KiteConnect for all open positions
+            batch_prices = {}
+            if not current_prices:
+                try:
+                    from src.data_loader import KITE_API_KEY, KITE_ACCESS_TOKEN
+                    if KITE_API_KEY and KITE_ACCESS_TOKEN:
+                        from kiteconnect import KiteConnect
+                        kc = KiteConnect(api_key=KITE_API_KEY)
+                        kc.set_access_token(KITE_ACCESS_TOKEN)
+                        instruments = [f"NSE:{r['symbol'].replace('.NS', '')}" for r in open_trades]
+                        q_map = kc.quote(instruments)
+                        if q_map:
+                            for r in open_trades:
+                                sym_clean = r["symbol"].replace(".NS", "")
+                                k_key = f"NSE:{sym_clean}"
+                                if k_key in q_map:
+                                    lp = float(q_map[k_key].get("last_price") or 0.0)
+                                    if lp > 0:
+                                        batch_prices[r["symbol"]] = lp
+                                        batch_prices[sym_clean] = lp
+                except Exception as batch_err:
+                    logger.debug(f"KiteConnect batch quote notice: {batch_err}")
+
             updates = []
 
             for row in open_trades:
@@ -495,17 +518,26 @@ class DailyIntradayAutoTrader:
                 allocated = float(row["allocated_capital"])
                 history = json.loads(row["price_history"] or "[]")
 
-                # Get current price
+                # Get current price via batch Kite quote -> custom price -> fast info
                 curr_p = None
                 if current_prices and sym in current_prices:
                     curr_p = float(current_prices[sym])
+                elif batch_prices and sym in batch_prices:
+                    curr_p = float(batch_prices[sym])
+                elif batch_prices and sym.replace(".NS", "") in batch_prices:
+                    curr_p = float(batch_prices[sym.replace(".NS", "")])
                 else:
-                    # Fetch latest price
                     try:
                         resolved = resolve_ticker(sym)
-                        df = fetch_stock_data(resolved, period="1d")
-                        if df is not None and not df.empty:
-                            curr_p = float(df["close"].iloc[-1])
+                        import yfinance as yf
+                        tk = yf.Ticker(resolved)
+                        fi = getattr(tk, "fast_info", None)
+                        if fi and getattr(fi, "last_price", None):
+                            curr_p = float(fi.last_price)
+                        else:
+                            df = fetch_stock_data(resolved, period="1d")
+                            if df is not None and not df.empty:
+                                curr_p = float(df["close"].iloc[-1])
                     except Exception:
                         pass
 
@@ -516,39 +548,48 @@ class DailyIntradayAutoTrader:
                 new_highest = max(highest_p, curr_p)
                 gain_from_entry_pct = ((new_highest - entry_p) / entry_p) * 100.0
 
-                # Trailing SL Logic (Trailing format):
-                # 1. At +0.75% profit -> Move SL to breakeven
-                # 2. For every +0.5% move higher -> Trail SL upward (0.5% below high watermark)
-                new_sl = curr_sl
+                # Trailing SL & Target Logic (High-Profitability Multi-tier Protection):
+                # Tier 1 (Gain >= +0.75%): Move SL to breakeven + roundtrip tax buffer (zero risk)
+                # Tier 2 (Gain >= +1.25%): Trail SL 0.5% below high watermark (locks in at least +0.75%)
+                # Tier 3 (Gain >= +1.75%): Tighten trail to 0.4% below high watermark (locks in at least +1.35%)
+                # Tier 4 (Target Hit >= target_p): Realize full target profit (capturing any upside surge)
+                candidate_sl = curr_sl
+
+                if gain_from_entry_pct >= 1.75:
+                    tight_trail = round(new_highest * 0.996, 2)
+                    candidate_sl = max(candidate_sl, tight_trail)
+                elif gain_from_entry_pct >= 1.25:
+                    dynamic_trail = round(new_highest * 0.995, 2)
+                    candidate_sl = max(candidate_sl, dynamic_trail)
+                elif gain_from_entry_pct >= 0.75:
+                    candidate_sl = max(candidate_sl, entry_p)
+
+                new_sl = max(curr_sl, candidate_sl)
                 sl_event = None
 
-                if gain_from_entry_pct >= 0.75 and curr_sl < entry_p:
-                    new_sl = entry_p  # Breakeven
-                    sl_event = "SL_TRAILED_TO_BREAKEVEN"
-                elif gain_from_entry_pct >= 1.25:
-                    trailed_candidate = round(new_highest * 0.995, 2)  # 0.5% trail offset
-                    if trailed_candidate > new_sl:
-                        new_sl = trailed_candidate
+                if new_sl > curr_sl:
+                    if curr_sl < entry_p and new_sl >= entry_p:
+                        sl_event = f"SL_TRAILED_TO_BREAKEVEN ({new_sl})"
+                    else:
                         sl_event = f"SL_TRAILED_UP_TO_{new_sl}"
 
-                if sl_event:
                     history.append({
                         "time": now_ts,
                         "event": sl_event,
                         "highest_price": new_highest,
                         "new_sl": new_sl,
-                        "note": f"Price reached ₹{new_highest:.2f} (+{gain_from_entry_pct:.2f}%). Trailing SL raised."
+                        "note": f"High reached ₹{new_highest:.2f} (+{gain_from_entry_pct:.2f}%). Trailing SL raised to ₹{new_sl:.2f}."
                     })
 
                 # Check Exit Conditions:
-                # 1. Target Hit
-                # 2. Trailing SL Hit / Stop Loss Hit
+                # 1. Target Hit (Full Target profit booked, capturing any upside gap)
+                # 2. Trailing SL Hit / Stop Loss Hit (Banks locked profit or caps initial risk)
                 # 3. Force EOD Squareoff
                 exit_price = None
                 exit_reason = None
 
                 if curr_p >= target_p:
-                    exit_price = target_p
+                    exit_price = max(curr_p, target_p)
                     exit_reason = "TARGET_HIT"
                 elif curr_p <= new_sl:
                     exit_price = new_sl
