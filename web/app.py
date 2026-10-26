@@ -344,6 +344,10 @@ async def get_chart_live_tick(
     change_pct = 0.0
     source = "Zerodha KiteConnect Live"
 
+    best_bid = 0.0
+    best_ask = 0.0
+    last_qty = 0
+
     try:
         from src.data_loader import KITE_API_KEY, KITE_ACCESS_TOKEN
         if KITE_API_KEY and KITE_ACCESS_TOKEN:
@@ -360,6 +364,13 @@ async def get_chart_live_tick(
                 day_volume = int(q.get("volume") or 0)
                 open_p = float(ohlc.get("open") or live_price)
                 change_pct = round(((live_price - open_p) / max(0.01, open_p)) * 100, 2)
+                
+                depth = q.get("depth", {})
+                bids = depth.get("buy", [])
+                asks = depth.get("sell", [])
+                best_bid = float(bids[0].get("price") or live_price) if bids else live_price
+                best_ask = float(asks[0].get("price") or live_price) if asks else live_price
+                last_qty = int(q.get("last_quantity") or 0)
                 source = "Zerodha KiteConnect Live"
     except Exception:
         pass
@@ -374,6 +385,8 @@ async def get_chart_live_tick(
                 day_high = float(getattr(fast_info, "day_high", live_price) or live_price)
                 day_low = float(getattr(fast_info, "day_low", live_price) or live_price)
                 day_volume = int(getattr(fast_info, "last_volume", 0) or 0)
+                best_bid = live_price
+                best_ask = live_price
                 source = "Yahoo Finance Fast Quote"
         except Exception:
             pass
@@ -383,10 +396,13 @@ async def get_chart_live_tick(
         "symbol": symbol,
         "resolved_symbol": resolved,
         "price": live_price,
+        "bid": best_bid or live_price,
+        "ask": best_ask or live_price,
         "high": day_high,
         "low": day_low,
         "volume": day_volume,
         "change_pct": change_pct,
+        "last_quantity": last_qty,
         "time": int(now_ist.timestamp()),
         "timestamp": now_ist.strftime("%Y-%m-%d %H:%M:%S"),
         "source": source
