@@ -182,25 +182,29 @@ def _morning_intraday_screener_and_trade_job():
 
 
 def _intraday_trailing_sl_job():
-    """Triggered every 2 minutes during market hours to trail SLs and monitor targets/stops."""
+    """Triggered every 30 seconds to trail SLs, monitor targets, and enforce strict 3:00 PM square-off."""
     try:
-        if is_market_hours():
-            from src.algodesk.automation.daily_screener_trader import daily_auto_trader
-            updates = daily_auto_trader.monitor_and_update_trailing_sl(force_eod_squareoff=False)
+        from src.algodesk.automation.daily_screener_trader import daily_auto_trader
+        now = datetime.now(IST)
+        is_past_3pm = now.time() >= time(15, 0)
+
+        # Run if within market hours (09:15-15:30) or if any open positions exist past 3 PM
+        if is_market_hours() or is_past_3pm:
+            updates = daily_auto_trader.monitor_and_update_trailing_sl(force_eod_squareoff=is_past_3pm)
             if updates:
-                logger.info(f"📈 [Trailing SL Monitor] Checked {len(updates)} active positions.")
+                logger.info(f"📈 [Trailing SL Monitor] Processed {len(updates)} positions (force_squareoff={is_past_3pm}).")
     except Exception as e:
         logger.error(f"❌ Error during intraday trailing SL monitor: {e}")
 
 
 def _eod_intraday_squareoff_job():
-    """Triggered Mon-Fri at 15:15 IST to square off any open intraday positions before market close."""
+    """Triggered Mon-Fri at 15:00 IST (3:00 PM) sharp to square off any open intraday positions before market close."""
     try:
         from src.algodesk.automation.daily_screener_trader import daily_auto_trader
-        logger.info("🔔 [15:15 PM IST] Closing all open intraday positions at EOD...")
+        logger.info("🔔 [15:00 PM IST] Closing all open intraday positions at strict 3:00 PM cutoff...")
         daily_auto_trader.monitor_and_update_trailing_sl(force_eod_squareoff=True)
     except Exception as e:
-        logger.error(f"❌ Error during EOD square-off: {e}")
+        logger.error(f"❌ Error during 3:00 PM EOD square-off: {e}")
 
 
 def _market_hours_job():
@@ -240,7 +244,7 @@ def start_automated_scheduler() -> BackgroundScheduler:
     # 2. Morning Screener & Top Stock Algo Trade: Mon-Fri at 09:16 IST
     scheduler.add_job(
         _morning_intraday_screener_and_trade_job,
-        trigger=CronTrigger(day_of_week="mon-fri", hour=9, minute=16),
+        trigger=CronTrigger(day_of_week="mon-fri", hour=9, minute=16, timezone="Asia/Kolkata"),
         id="job_morning_top_stock_screener",
         name="Daily Morning Top 10 Stock Screener & Algo Trade",
         replace_existing=True
@@ -255,19 +259,19 @@ def start_automated_scheduler() -> BackgroundScheduler:
         replace_existing=True
     )
 
-    # 4. Intraday EOD Square-Off: Mon-Fri at 15:15 IST
+    # 4. Intraday EOD 3:00 PM Square-Off: Mon-Fri at 15:00 IST sharp
     scheduler.add_job(
         _eod_intraday_squareoff_job,
-        trigger=CronTrigger(day_of_week="mon-fri", hour=15, minute=15),
+        trigger=CronTrigger(day_of_week="mon-fri", hour=15, minute=0, timezone="Asia/Kolkata"),
         id="job_eod_squareoff",
-        name="Daily EOD 15:15 Intraday Square-off",
+        name="Daily EOD 15:00 Intraday 3PM Square-off",
         replace_existing=True
     )
 
     # 5. Post-Market Close Job: Mon-Fri at 16:00 (4:00 PM IST)
     scheduler.add_job(
         _post_market_job,
-        trigger=CronTrigger(day_of_week="mon-fri", hour=16, minute=0),
+        trigger=CronTrigger(day_of_week="mon-fri", hour=16, minute=0, timezone="Asia/Kolkata"),
         id="job_post_market_eod",
         name="Daily EOD Post-Market Scan",
         replace_existing=True
@@ -278,7 +282,7 @@ def start_automated_scheduler() -> BackgroundScheduler:
     logger.info("🚀 Automated Stock Scheduler started successfully!")
     logger.info("  • Morning Screener & Top Picks: Daily Mon-Fri 09:16 IST")
     logger.info("  • Intraday Trailing SL & Target Engine: Every 30 secs (09:15-15:30 IST)")
-    logger.info("  • EOD Square-off: Mon-Fri 15:15 IST")
+    logger.info("  • EOD 3:00 PM Square-off: Mon-Fri 15:00 IST sharp")
     logger.info("  • General 30-min Technical Scan: Every 30 mins during market hours")
     logger.info("  • Post-Market Scan: Daily at 16:00 IST (EOD)")
     return scheduler

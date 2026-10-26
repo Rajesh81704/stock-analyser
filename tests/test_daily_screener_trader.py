@@ -116,3 +116,49 @@ def test_trailing_sl_rules():
     finally:
         if os.path.exists(db_path):
             os.remove(db_path)
+
+
+def test_3pm_force_squareoff_rule():
+    """Verifies that all open positions are squared off by 3 PM even if target is not achieved."""
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        db_path = tmp.name
+
+    try:
+        trader = DailyIntradayAutoTrader(db_path=db_path)
+
+        # Insert a sample trade: Entry 100, SL 99 (-1%), Target 102 (+2%)
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO daily_intraday_trades (
+                trade_date, symbol, side, qty, allocated_capital, entry_time,
+                entry_price, initial_sl, highest_price, current_sl, target_price,
+                gross_pnl, brokerage_and_taxes, net_pnl, return_pct, status, price_history, updated_at
+            ) VALUES (
+                '2026-10-26', 'STOCK_3PM', 'BUY', 50, 5000.0, '2026-10-26 14:00:00',
+                100.0, 99.0, 100.5, 99.0, 102.0,
+                0.0, 0.0, 0.0, 0.0, 'OPEN', '[]', '2026-10-26 14:00:00'
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+        # At 3:00 PM: target (102.0) is NOT achieved (price is only 100.5)
+        # force_eod_squareoff triggers:
+        updates = trader.monitor_and_update_trailing_sl(
+            current_prices={"STOCK_3PM": 100.5},
+            force_eod_squareoff=True
+        )
+
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        row = cur.execute("SELECT status, exit_reason, exit_price FROM daily_intraday_trades WHERE symbol='STOCK_3PM'").fetchone()
+        conn.close()
+
+        assert row[0] == "CLOSED"
+        assert row[1] == "3PM_SQUAREOFF"
+        assert row[2] == 100.5
+    finally:
+        if os.path.exists(db_path):
+            os.remove(db_path)
+

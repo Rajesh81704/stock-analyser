@@ -21,7 +21,7 @@ import os
 import sqlite3
 import threading
 import time
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, time as dt_time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -342,6 +342,11 @@ class DailyIntradayAutoTrader:
         today_str = trade_date_str or get_ist_date()
         now_ts = get_ist_now_ts()
 
+        # Strict 3:00 PM Cutoff: Block opening any new intraday positions after 15:00 IST
+        if not trade_date_str and datetime.now(IST).time() >= dt_time(15, 0):
+            logger.warning("🚫 [PaperTrader] Cannot enter new intraday trades after 15:00 IST (3:00 PM square-off cutoff passed).")
+            return []
+
         # If no picks provided in memory, read from `daily_intraday_picks`
         if not picks:
             conn = self._get_connection()
@@ -465,10 +470,16 @@ class DailyIntradayAutoTrader:
            - At +0.75% profit: moves SL to Breakeven (entry_price).
            - For each additional +0.5% advance: trails SL to (highest_price - 0.5%).
         2. Closes trades on Target Hit (+2%), Trailing SL Hit (locking in gains), or Stop Loss Hit.
-        3. On force_eod_squareoff (at 15:15 IST), squares off all remaining positions at market price.
+        3. Strict 3:00 PM IST Cutoff: By 3:00 PM IST (15:00), ALL open positions are squared off
+           at market price even if target is not achieved.
         4. Calculates exact Zerodha statutory intraday taxes and net PnL, persisting to DB.
         """
-        now_ts = get_ist_now_ts()
+        now_dt = datetime.now(IST)
+        now_ts = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+        is_past_3pm = now_dt.time() >= dt_time(15, 0)
+
+        # Enforce 3:00 PM strict square-off: if forced or past 15:00 IST without injected mock prices
+        is_eod_cutoff = force_eod_squareoff or (is_past_3pm and current_prices is None)
 
         # Read open trades quickly and close read connection
         conn = self._get_connection()
@@ -587,21 +598,21 @@ class DailyIntradayAutoTrader:
                 })
 
             # Check Exit Conditions:
-            # 1. Target Hit (Full Target profit booked, capturing any upside gap)
-            # 2. Trailing SL Hit / Stop Loss Hit (Banks locked profit or caps initial risk)
-            # 3. Force EOD Squareoff
+            # 1. Strict 3:00 PM Cutoff Square-Off (by 3pm all positions must be squared off even if target not achieved)
+            # 2. Target Hit (Full Target profit booked, capturing any upside gap)
+            # 3. Trailing SL Hit / Stop Loss Hit (Banks locked profit or caps initial risk)
             exit_price = None
             exit_reason = None
 
-            if curr_p >= target_p:
+            if is_eod_cutoff:
+                exit_price = curr_p
+                exit_reason = "3PM_SQUAREOFF"
+            elif curr_p >= target_p:
                 exit_price = max(curr_p, target_p)
                 exit_reason = "TARGET_HIT"
             elif curr_p <= new_sl:
                 exit_price = new_sl
                 exit_reason = "TRAILING_SL_HIT" if new_sl >= entry_p else "STOP_LOSS_HIT"
-            elif force_eod_squareoff:
-                exit_price = curr_p
-                exit_reason = "INTRADAY_SQUAREOFF"
 
             if exit_price is not None:
                 # Calculate exact Zerodha statutory intraday cost
@@ -713,6 +724,20 @@ class DailyIntradayAutoTrader:
     def get_automation_status(self) -> Dict[str, Any]:
         """Returns comprehensive status, today's picks, open positions, and all trade logs."""
         today_str = get_ist_date()
+
+        # Enforce 3:00 PM strict squareoff check: If past 15:00 IST and open trades exist, square them off
+        if datetime.now(IST).time() >= dt_time(15, 0):
+            try:
+                conn_check = self._get_connection()
+                cur_check = conn_check.cursor()
+                cur_check.execute("SELECT COUNT(*) FROM daily_intraday_trades WHERE status = 'OPEN'")
+                open_cnt = cur_check.fetchone()[0]
+                conn_check.close()
+                if open_cnt > 0:
+                    self.monitor_and_update_trailing_sl(force_eod_squareoff=True)
+            except Exception as e_sq:
+                logger.warning(f"Auto 3PM status square-off notice: {e_sq}")
+
         conn = self._get_connection()
         cur = conn.cursor()
 

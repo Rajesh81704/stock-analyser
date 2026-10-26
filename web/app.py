@@ -2363,6 +2363,14 @@ def trigger_daily_automation_run(top_n: int = Query(10, ge=1, le=25)):
         from src.algodesk.automation.daily_screener_trader import daily_auto_trader
         picks = daily_auto_trader.run_morning_screener_and_pick(top_n=top_n)
         trades = daily_auto_trader.execute_paper_algo_trades(picks=picks)
+        from src.algodesk.automation.daily_screener_trader import IST
+        if not trades and datetime.now(IST).hour >= 15:
+            return {
+                "status": "success",
+                "message": f"Screened {len(picks)} stocks. New trades not opened because market is past 3:00 PM IST intraday cutoff.",
+                "picks": picks,
+                "trades": []
+            }
         return {
             "status": "success",
             "message": f"Successfully screened top stocks across NIFTY 500 and executed {len(trades)} paper trades.",
