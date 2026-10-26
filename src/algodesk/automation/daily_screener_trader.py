@@ -61,7 +61,12 @@ class DailyIntradayAutoTrader:
 
     def _get_connection(self) -> sqlite3.Connection:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        conn = sqlite3.connect(str(self.db_path), timeout=30.0, check_same_thread=False)
+        try:
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute("PRAGMA busy_timeout=30000;")
+        except Exception:
+            pass
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -465,164 +470,218 @@ class DailyIntradayAutoTrader:
         """
         now_ts = get_ist_now_ts()
 
+        # Read open trades quickly and close read connection
+        conn = self._get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, trade_date, symbol, side, qty, allocated_capital,
+                   entry_time, entry_price, initial_sl, highest_price, current_sl,
+                   target_price, price_history, status
+            FROM daily_intraday_trades
+            WHERE status = 'OPEN'
+        """)
+        open_trades = [dict(r) for r in cur.fetchall()]
+        conn.close()
+
+        if not open_trades:
+            return []
+
+        # Instantaneous batch quote fetching via KiteConnect for all open positions
+        batch_prices = {}
+        if not current_prices:
+            try:
+                from src.data_loader import KITE_API_KEY, KITE_ACCESS_TOKEN
+                if KITE_API_KEY and KITE_ACCESS_TOKEN:
+                    from kiteconnect import KiteConnect
+                    kc = KiteConnect(api_key=KITE_API_KEY)
+                    kc.set_access_token(KITE_ACCESS_TOKEN)
+                    instruments = [f"NSE:{r['symbol'].replace('.NS', '')}" for r in open_trades]
+                    q_map = kc.quote(instruments)
+                    if q_map:
+                        for r in open_trades:
+                            sym_clean = r["symbol"].replace(".NS", "")
+                            k_key = f"NSE:{sym_clean}"
+                            if k_key in q_map:
+                                lp = float(q_map[k_key].get("last_price") or 0.0)
+                                if lp > 0:
+                                    batch_prices[r["symbol"]] = lp
+                                    batch_prices[sym_clean] = lp
+            except Exception as batch_err:
+                logger.debug(f"KiteConnect batch quote notice: {batch_err}")
+
+        updates = []
+        trade_db_writes = []
+
+        for row in open_trades:
+            t_id = row["id"]
+            sym = row["symbol"]
+            qty = row["qty"]
+            entry_p = float(row["entry_price"])
+            curr_sl = float(row["current_sl"])
+            highest_p = float(row["highest_price"])
+            target_p = float(row["target_price"])
+            allocated = float(row["allocated_capital"])
+            history = json.loads(row["price_history"] or "[]")
+
+            # Get current price via batch Kite quote -> custom price -> fast info
+            curr_p = None
+            if current_prices and sym in current_prices:
+                curr_p = float(current_prices[sym])
+            elif batch_prices and sym in batch_prices:
+                curr_p = float(batch_prices[sym])
+            elif batch_prices and sym.replace(".NS", "") in batch_prices:
+                curr_p = float(batch_prices[sym.replace(".NS", "")])
+            else:
+                try:
+                    resolved = resolve_ticker(sym)
+                    import yfinance as yf
+                    tk = yf.Ticker(resolved)
+                    fi = getattr(tk, "fast_info", None)
+                    if fi and getattr(fi, "last_price", None):
+                        curr_p = float(fi.last_price)
+                    else:
+                        df = fetch_stock_data(resolved, period="1d")
+                        if df is not None and not df.empty:
+                            curr_p = float(df["close"].iloc[-1])
+                except Exception:
+                    pass
+
+            if curr_p is None or curr_p <= 0:
+                curr_p = entry_p  # fallback
+
+            # Update highest price watermark
+            new_highest = max(highest_p, curr_p)
+            gain_from_entry_pct = ((new_highest - entry_p) / entry_p) * 100.0
+
+            # Trailing SL & Target Logic (High-Profitability Multi-tier Protection):
+            # Tier 1 (Gain >= +0.75%): Move SL to breakeven + roundtrip tax buffer (zero risk)
+            # Tier 2 (Gain >= +1.25%): Trail SL 0.5% below high watermark (locks in at least +0.75%)
+            # Tier 3 (Gain >= +1.75%): Tighten trail to 0.4% below high watermark (locks in at least +1.35%)
+            # Tier 4 (Target Hit >= target_p): Realize full target profit (capturing any upside surge)
+            candidate_sl = curr_sl
+
+            if gain_from_entry_pct >= 1.75:
+                tight_trail = round(new_highest * 0.996, 2)
+                candidate_sl = max(candidate_sl, tight_trail)
+            elif gain_from_entry_pct >= 1.25:
+                dynamic_trail = round(new_highest * 0.995, 2)
+                candidate_sl = max(candidate_sl, dynamic_trail)
+            elif gain_from_entry_pct >= 0.75:
+                candidate_sl = max(candidate_sl, entry_p)
+
+            new_sl = max(curr_sl, candidate_sl)
+            sl_event = None
+
+            if new_sl > curr_sl:
+                if curr_sl < entry_p and new_sl >= entry_p:
+                    sl_event = f"SL_TRAILED_TO_BREAKEVEN ({new_sl})"
+                else:
+                    sl_event = f"SL_TRAILED_UP_TO_{new_sl}"
+
+                history.append({
+                    "time": now_ts,
+                    "event": sl_event,
+                    "highest_price": new_highest,
+                    "new_sl": new_sl,
+                    "note": f"High reached ₹{new_highest:.2f} (+{gain_from_entry_pct:.2f}%). Trailing SL raised to ₹{new_sl:.2f}."
+                })
+
+            # Check Exit Conditions:
+            # 1. Target Hit (Full Target profit booked, capturing any upside gap)
+            # 2. Trailing SL Hit / Stop Loss Hit (Banks locked profit or caps initial risk)
+            # 3. Force EOD Squareoff
+            exit_price = None
+            exit_reason = None
+
+            if curr_p >= target_p:
+                exit_price = max(curr_p, target_p)
+                exit_reason = "TARGET_HIT"
+            elif curr_p <= new_sl:
+                exit_price = new_sl
+                exit_reason = "TRAILING_SL_HIT" if new_sl >= entry_p else "STOP_LOSS_HIT"
+            elif force_eod_squareoff:
+                exit_price = curr_p
+                exit_reason = "INTRADAY_SQUAREOFF"
+
+            if exit_price is not None:
+                # Calculate exact Zerodha statutory intraday cost
+                cost_breakdown = self.cost_calculator.calculate_roundtrip(
+                    side="LONG",
+                    qty=qty,
+                    raw_entry_price=entry_p,
+                    raw_exit_price=exit_price,
+                    trailing_turnover_cr=120.0
+                )
+                brokerage_taxes = round(cost_breakdown.total_costs, 2)
+                gross_pnl = round((exit_price - entry_p) * qty, 2)
+                net_pnl = round(gross_pnl - brokerage_taxes, 2)
+                ret_pct = round((net_pnl / allocated) * 100.0, 2)
+
+                history.append({
+                    "time": now_ts,
+                    "event": "EXIT",
+                    "exit_price": exit_price,
+                    "exit_reason": exit_reason,
+                    "gross_pnl": gross_pnl,
+                    "brokerage_taxes": brokerage_taxes,
+                    "net_pnl": net_pnl,
+                    "return_pct": ret_pct
+                })
+
+                trade_db_writes.append({
+                    "type": "CLOSED",
+                    "trade_id": t_id,
+                    "exit_time": now_ts,
+                    "exit_price": exit_price,
+                    "exit_reason": exit_reason,
+                    "highest_price": new_highest,
+                    "current_sl": new_sl,
+                    "gross_pnl": gross_pnl,
+                    "brokerage_taxes": brokerage_taxes,
+                    "net_pnl": net_pnl,
+                    "return_pct": ret_pct,
+                    "price_history": json.dumps(history),
+                    "updated_at": now_ts
+                })
+
+                updates.append({
+                    "trade_id": t_id,
+                    "symbol": sym,
+                    "action": "CLOSED",
+                    "exit_reason": exit_reason,
+                    "exit_price": exit_price,
+                    "gross_pnl": gross_pnl,
+                    "brokerage_taxes": brokerage_taxes,
+                    "net_pnl": net_pnl,
+                    "return_pct": ret_pct
+                })
+                logger.info(f"🎯 [PaperTrader] Trade Closed {sym}: {exit_reason} @ ₹{exit_price:.2f} | Net PnL: ₹{net_pnl:+.2f} ({ret_pct:+.2f}%)")
+            else:
+                trade_db_writes.append({
+                    "type": "TRAILING_UPDATE",
+                    "trade_id": t_id,
+                    "highest_price": new_highest,
+                    "current_sl": new_sl,
+                    "price_history": json.dumps(history),
+                    "updated_at": now_ts
+                })
+
+                updates.append({
+                    "trade_id": t_id,
+                    "symbol": sym,
+                    "action": "TRAILING_UPDATE",
+                    "current_price": curr_p,
+                    "highest_price": new_highest,
+                    "current_sl": new_sl
+                })
+
+        # Commit computed updates atomically under lock
         with self._lock:
             conn = self._get_connection()
             cur = conn.cursor()
 
-            cur.execute("""
-                SELECT id, trade_date, symbol, side, qty, allocated_capital,
-                       entry_time, entry_price, initial_sl, highest_price, current_sl,
-                       target_price, price_history, status
-                FROM daily_intraday_trades
-                WHERE status = 'OPEN'
-            """)
-            open_trades = cur.fetchall()
-
-            if not open_trades:
-                conn.close()
-                return []
-
-            # Instantaneous batch quote fetching via KiteConnect for all open positions
-            batch_prices = {}
-            if not current_prices:
-                try:
-                    from src.data_loader import KITE_API_KEY, KITE_ACCESS_TOKEN
-                    if KITE_API_KEY and KITE_ACCESS_TOKEN:
-                        from kiteconnect import KiteConnect
-                        kc = KiteConnect(api_key=KITE_API_KEY)
-                        kc.set_access_token(KITE_ACCESS_TOKEN)
-                        instruments = [f"NSE:{r['symbol'].replace('.NS', '')}" for r in open_trades]
-                        q_map = kc.quote(instruments)
-                        if q_map:
-                            for r in open_trades:
-                                sym_clean = r["symbol"].replace(".NS", "")
-                                k_key = f"NSE:{sym_clean}"
-                                if k_key in q_map:
-                                    lp = float(q_map[k_key].get("last_price") or 0.0)
-                                    if lp > 0:
-                                        batch_prices[r["symbol"]] = lp
-                                        batch_prices[sym_clean] = lp
-                except Exception as batch_err:
-                    logger.debug(f"KiteConnect batch quote notice: {batch_err}")
-
-            updates = []
-
-            for row in open_trades:
-                t_id = row["id"]
-                sym = row["symbol"]
-                qty = row["qty"]
-                entry_p = float(row["entry_price"])
-                curr_sl = float(row["current_sl"])
-                highest_p = float(row["highest_price"])
-                target_p = float(row["target_price"])
-                allocated = float(row["allocated_capital"])
-                history = json.loads(row["price_history"] or "[]")
-
-                # Get current price via batch Kite quote -> custom price -> fast info
-                curr_p = None
-                if current_prices and sym in current_prices:
-                    curr_p = float(current_prices[sym])
-                elif batch_prices and sym in batch_prices:
-                    curr_p = float(batch_prices[sym])
-                elif batch_prices and sym.replace(".NS", "") in batch_prices:
-                    curr_p = float(batch_prices[sym.replace(".NS", "")])
-                else:
-                    try:
-                        resolved = resolve_ticker(sym)
-                        import yfinance as yf
-                        tk = yf.Ticker(resolved)
-                        fi = getattr(tk, "fast_info", None)
-                        if fi and getattr(fi, "last_price", None):
-                            curr_p = float(fi.last_price)
-                        else:
-                            df = fetch_stock_data(resolved, period="1d")
-                            if df is not None and not df.empty:
-                                curr_p = float(df["close"].iloc[-1])
-                    except Exception:
-                        pass
-
-                if curr_p is None or curr_p <= 0:
-                    curr_p = entry_p  # fallback
-
-                # Update highest price watermark
-                new_highest = max(highest_p, curr_p)
-                gain_from_entry_pct = ((new_highest - entry_p) / entry_p) * 100.0
-
-                # Trailing SL & Target Logic (High-Profitability Multi-tier Protection):
-                # Tier 1 (Gain >= +0.75%): Move SL to breakeven + roundtrip tax buffer (zero risk)
-                # Tier 2 (Gain >= +1.25%): Trail SL 0.5% below high watermark (locks in at least +0.75%)
-                # Tier 3 (Gain >= +1.75%): Tighten trail to 0.4% below high watermark (locks in at least +1.35%)
-                # Tier 4 (Target Hit >= target_p): Realize full target profit (capturing any upside surge)
-                candidate_sl = curr_sl
-
-                if gain_from_entry_pct >= 1.75:
-                    tight_trail = round(new_highest * 0.996, 2)
-                    candidate_sl = max(candidate_sl, tight_trail)
-                elif gain_from_entry_pct >= 1.25:
-                    dynamic_trail = round(new_highest * 0.995, 2)
-                    candidate_sl = max(candidate_sl, dynamic_trail)
-                elif gain_from_entry_pct >= 0.75:
-                    candidate_sl = max(candidate_sl, entry_p)
-
-                new_sl = max(curr_sl, candidate_sl)
-                sl_event = None
-
-                if new_sl > curr_sl:
-                    if curr_sl < entry_p and new_sl >= entry_p:
-                        sl_event = f"SL_TRAILED_TO_BREAKEVEN ({new_sl})"
-                    else:
-                        sl_event = f"SL_TRAILED_UP_TO_{new_sl}"
-
-                    history.append({
-                        "time": now_ts,
-                        "event": sl_event,
-                        "highest_price": new_highest,
-                        "new_sl": new_sl,
-                        "note": f"High reached ₹{new_highest:.2f} (+{gain_from_entry_pct:.2f}%). Trailing SL raised to ₹{new_sl:.2f}."
-                    })
-
-                # Check Exit Conditions:
-                # 1. Target Hit (Full Target profit booked, capturing any upside gap)
-                # 2. Trailing SL Hit / Stop Loss Hit (Banks locked profit or caps initial risk)
-                # 3. Force EOD Squareoff
-                exit_price = None
-                exit_reason = None
-
-                if curr_p >= target_p:
-                    exit_price = max(curr_p, target_p)
-                    exit_reason = "TARGET_HIT"
-                elif curr_p <= new_sl:
-                    exit_price = new_sl
-                    exit_reason = "TRAILING_SL_HIT" if new_sl >= entry_p else "STOP_LOSS_HIT"
-                elif force_eod_squareoff:
-                    exit_price = curr_p
-                    exit_reason = "INTRADAY_SQUAREOFF"
-
-                if exit_price is not None:
-                    # Calculate exact Zerodha statutory intraday cost
-                    cost_breakdown = self.cost_calculator.calculate_roundtrip(
-                        side="LONG",
-                        qty=qty,
-                        raw_entry_price=entry_p,
-                        raw_exit_price=exit_price,
-                        trailing_turnover_cr=120.0
-                    )
-                    brokerage_taxes = round(cost_breakdown.total_costs, 2)
-                    gross_pnl = round((exit_price - entry_p) * qty, 2)
-                    net_pnl = round(gross_pnl - brokerage_taxes, 2)
-                    ret_pct = round((net_pnl / allocated) * 100.0, 2)
-
-                    history.append({
-                        "time": now_ts,
-                        "event": "EXIT",
-                        "exit_price": exit_price,
-                        "exit_reason": exit_reason,
-                        "gross_pnl": gross_pnl,
-                        "brokerage_taxes": brokerage_taxes,
-                        "net_pnl": net_pnl,
-                        "return_pct": ret_pct
-                    })
-
+            for u in trade_db_writes:
+                if u["type"] == "CLOSED":
                     cur.execute("""
                         UPDATE daily_intraday_trades
                         SET exit_time = ?, exit_price = ?, exit_reason = ?,
@@ -631,40 +690,17 @@ class DailyIntradayAutoTrader:
                             status = 'CLOSED', price_history = ?, updated_at = ?
                         WHERE id = ?
                     """, (
-                        now_ts, exit_price, exit_reason,
-                        new_highest, new_sl, gross_pnl,
-                        brokerage_taxes, net_pnl, ret_pct,
-                        json.dumps(history), now_ts, t_id
+                        u["exit_time"], u["exit_price"], u["exit_reason"],
+                        u["highest_price"], u["current_sl"], u["gross_pnl"],
+                        u["brokerage_taxes"], u["net_pnl"], u["return_pct"],
+                        u["price_history"], u["updated_at"], u["trade_id"]
                     ))
-
-                    updates.append({
-                        "trade_id": t_id,
-                        "symbol": sym,
-                        "action": "CLOSED",
-                        "exit_reason": exit_reason,
-                        "exit_price": exit_price,
-                        "gross_pnl": gross_pnl,
-                        "brokerage_taxes": brokerage_taxes,
-                        "net_pnl": net_pnl,
-                        "return_pct": ret_pct
-                    })
-                    logger.info(f"🎯 [PaperTrader] Trade Closed {sym}: {exit_reason} @ ₹{exit_price:.2f} | Net PnL: ₹{net_pnl:+.2f} ({ret_pct:+.2f}%)")
                 else:
-                    # Update active watermark & trailed SL in DB
                     cur.execute("""
                         UPDATE daily_intraday_trades
                         SET highest_price = ?, current_sl = ?, price_history = ?, updated_at = ?
                         WHERE id = ?
-                    """, (new_highest, new_sl, json.dumps(history), now_ts, t_id))
-
-                    updates.append({
-                        "trade_id": t_id,
-                        "symbol": sym,
-                        "action": "TRAILING_UPDATE",
-                        "current_price": curr_p,
-                        "highest_price": new_highest,
-                        "current_sl": new_sl
-                    })
+                    """, (u["highest_price"], u["current_sl"], u["price_history"], u["updated_at"], u["trade_id"]))
 
             conn.commit()
             conn.close()
