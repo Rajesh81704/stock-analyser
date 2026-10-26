@@ -660,12 +660,13 @@ class ContinuousQuantOptimizer:
                     strat = QuantStrategy(latest_result=latest_res, **sdata)
                     self.strategies[sid] = strat
                 logger.info(f"Loaded {len(self.strategies)} strategies from {self.STATE_FILE}")
-                # Re-backtest loaded strategies to sync with current backtester engine
-                for sid, strat in list(self.strategies.items()):
-                    summary = self.backtester.run_backtest(strat)
-                    strat.latest_result = summary
-                    if summary.verdict == "PROFITABLE":
-                        self._export_to_algodesk_config(strat, summary)
+                # Skip expensive synchronous re-backtest of 1100+ strategies on startup if already cached
+                for sid, strat in list(self.strategies.items())[:10]:
+                    if not strat.latest_result:
+                        summary = self.backtester.run_backtest(strat)
+                        strat.latest_result = summary
+                        if summary.verdict == "PROFITABLE":
+                            self._export_to_algodesk_config(strat, summary)
 
                 # Ensure diverse high-winrate baseline strategies exist across distinct names
                 diverse_baselines = [
