@@ -1,0 +1,28 @@
+name: "orb_stocks_in_play"
+version: "1.0.0"
+strategy_class: "orb_stocks_in_play"
+timeframe: "5m"
+mode: "PAPER"            # BACKTEST | PAPER | LIVE (default PAPER)
+live_enabled: false      # Strict safety gate: must be true to even consider LIVE
+
+universe:
+  source: "nifty500"
+  min_turnover_cr: 20.0  # Trailing 20d traded value >= Rs 20 Crore
+  min_price: 50.0        # Minimum prev close price
+  max_symbols_per_day: 5 # Top N stocks in play
+
+parameters:
+  or_minutes: 5          # 5, 15, or 30 minutes
+  min_rvol: 1.0          # Minimum relative volume (today OR vol / 14d baseline)
+  rvol_window: 14        # 14 prior trading days for baseline (shifted)
+  atr_window: 14         # Daily ATR window (shifted 1 day)
+  stop_atr: 0.10         # Stop distance = 0.10 * daily ATR
+  direction: "both"      # both | long_only | short_only
+  conservative_intrabar: true # Stop hit assumed if entry bar touches stop
+
+risk:
+  risk_pct_per_trade: 0.01 # 1% of start-of-day equity
+  max_leverage: 5.0        # Max gross leverage across all slots
+  max_open_positions: 5
+  entry_cutoff_time: "14:45:00"
+  square_off_time: "15:10:00"

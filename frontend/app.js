@@ -473,38 +473,321 @@ async function checkKiteSessionStatus() {
     if (container) {
       if (!data.active) {
         // Kite session is expired: show button to login!
-        const loginUrl = data.login_url || 'https://kite.zerodha.com/connect/login?api_key=zgktuz1hr11f8scf&v=3';
         container.innerHTML = `
-          <a href="${loginUrl}" 
-             target="_blank" 
+          <button onclick="openKiteLoginModal('request_token')" 
              class="kite-session-btn expired" 
              title="KiteConnect session expired. Click to log into Zerodha and activate live API.">
             <span class="kite-dot amber"></span>
             <span>⚡ Kite Expired — Re-login</span>
-          </a>
+          </button>
         `;
       } else {
         // Kite session is active
         const userLabel = data.user_id ? ` (${data.user_id})` : '';
         container.innerHTML = `
-          <span class="kite-session-btn active" title="Zerodha KiteConnect Live API is connected">
+          <button onclick="openKiteLoginModal('status')" class="kite-session-btn active" title="Zerodha KiteConnect Live API is connected">
             <span class="kite-dot green"></span>
             <span>🟢 Kite Live${userLabel}</span>
-          </span>
+          </button>
         `;
       }
     }
 
+    updateKiteModalStatus(data);
+
     if (chartBtn) {
       if (!data.active) {
         chartBtn.classList.remove('hidden');
-        if (data.login_url) chartBtn.href = data.login_url;
+        chartBtn.onclick = (e) => { e.preventDefault(); openKiteLoginModal('request_token'); };
       } else {
         chartBtn.classList.add('hidden');
       }
     }
   } catch (err) {
     console.warn('Could not check Kite session status:', err);
+  }
+}
+
+function updateKiteModalStatus(data) {
+  const statusEl = document.getElementById('kite-modal-status-text');
+  if (!statusEl) return;
+  if (data && data.active) {
+    const u = data.user_id ? ` (${data.user_id})` : '';
+    statusEl.innerHTML = `<span style="color: #059669;">🟢 CONNECTED${u}</span>`;
+  } else {
+    const err = (data && data.error) ? ` — ${data.error}` : '';
+    statusEl.innerHTML = `<span style="color: #b45309;">⚡ DISCONNECTED (Daily login required)${err}</span>`;
+  }
+}
+
+function switchKiteModalTab(tabName) {
+  const target = tabName.replace('_', '-');
+  ['request-token', 'access-token', 'oauth'].forEach(t => {
+    const panel = document.getElementById(`kite-tab-${t}`);
+    const btn = document.getElementById(`tab-btn-${t}`);
+    if (panel) panel.style.display = (t === target) ? 'block' : 'none';
+    if (btn) btn.classList.toggle('active', t === target);
+  });
+  const fb = document.getElementById('modal-token-feedback');
+  if (fb) fb.innerHTML = '';
+  if (tabName === 'request_token' || target === 'request-token') {
+    setTimeout(() => {
+      const inp = document.getElementById('modal-request-token-input');
+      if (inp) inp.focus();
+    }, 100);
+  } else if (tabName === 'access_token' || target === 'access-token') {
+    setTimeout(() => {
+      const inp = document.getElementById('modal-access-token-input');
+      if (inp) inp.focus();
+    }, 100);
+  }
+}
+
+function openKiteLoginModal(tab = 'request_token') {
+  const modal = document.getElementById('kite-login-modal');
+  if (modal) {
+    modal.style.display = 'flex';
+    switchKiteModalTab(tab === 'status' ? 'request_token' : tab);
+    fetch('/api/kite/status?force=true')
+      .then(r => r.json())
+      .then(d => updateKiteModalStatus(d))
+      .catch(() => {});
+  }
+}
+
+function closeKiteLoginModal() {
+  const modal = document.getElementById('kite-login-modal');
+  if (modal) modal.style.display = 'none';
+  const fb = document.getElementById('modal-token-feedback');
+  if (fb) fb.innerHTML = '';
+}
+
+function extractRequestToken(raw) {
+  if (!raw) return '';
+  raw = raw.trim();
+  const match = raw.match(/request_token=([a-zA-Z0-9_-]+)/);
+  if (match) return match[1];
+  if (raw.startsWith('http://') || raw.startsWith('https://')) {
+    try {
+      const u = new URL(raw);
+      const tok = u.searchParams.get('request_token');
+      if (tok) return tok;
+    } catch (e) {}
+  }
+  return raw;
+}
+
+function handleTokenInputChange(val) {
+  const preview = document.getElementById('modal-token-extracted-preview');
+  if (!preview) return;
+  const extracted = extractRequestToken(val);
+  if (val.includes('request_token=') && extracted) {
+    preview.style.display = 'flex';
+    preview.innerHTML = `<span>✓ Extracted request_token: <strong>${extracted}</strong></span>`;
+  } else if (val.trim().length === 32) {
+    preview.style.display = 'flex';
+    preview.innerHTML = `<span>✓ Valid 32-character token format detected</span>`;
+  } else {
+    preview.style.display = 'none';
+  }
+}
+
+async function submitManualRequestToken() {
+  const input = document.getElementById('modal-request-token-input');
+  const fb = document.getElementById('modal-token-feedback');
+  const rawVal = input ? input.value.trim() : '';
+  const token = extractRequestToken(rawVal);
+  if (!token) {
+    if (fb) fb.innerHTML = '<span style="color:#cc0000;">⚠️ Please paste your request_token or Zerodha redirect URL.</span>';
+    return;
+  }
+
+  fb.innerHTML = '<span style="color:#0284c7;">⚡ Exchanging request_token with Zerodha Kite API...</span>';
+  try {
+    const res = await fetch('/api/kite/set-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: token, is_request_token: true })
+    });
+    const data = await res.json();
+    if (res.ok && data.status === 'success') {
+      fb.innerHTML = `<span style="color:#059669;">🎉 ${data.message || 'Login Successful! Kite Session Connected.'}</span>`;
+      if (input) input.value = '';
+      const preview = document.getElementById('modal-token-extracted-preview');
+      if (preview) preview.style.display = 'none';
+      setTimeout(() => {
+        closeKiteLoginModal();
+        checkKiteSessionStatus();
+        showKiteToast(`🎉 Kite Live Session Activated: ${data.user_id || 'Connected'}`);
+      }, 1200);
+    } else {
+      fb.innerHTML = `<span style="color:#cc0000;">❌ Error: ${data.detail || 'Failed to exchange request token.'}</span>`;
+    }
+  } catch (err) {
+    fb.innerHTML = `<span style="color:#cc0000;">❌ Network Error: ${err.message}</span>`;
+  }
+}
+
+async function submitDirectAccessToken() {
+  const input = document.getElementById('modal-access-token-input');
+  const fb = document.getElementById('modal-token-feedback');
+  const token = input ? input.value.trim() : '';
+  if (!token) {
+    if (fb) fb.innerHTML = '<span style="color:#cc0000;">⚠️ Please enter an access_token.</span>';
+    return;
+  }
+
+  fb.innerHTML = '<span style="color:#0284c7;">⚡ Validating and saving access token...</span>';
+  try {
+    const res = await fetch('/api/kite/set-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: token, is_request_token: false })
+    });
+    const data = await res.json();
+    if (res.ok && data.status === 'success') {
+      fb.innerHTML = `<span style="color:#059669;">🎉 ${data.message || 'Access token activated!'}</span>`;
+      if (input) input.value = '';
+      setTimeout(() => {
+        closeKiteLoginModal();
+        checkKiteSessionStatus();
+        showKiteToast('Zerodha KiteConnect Access Token Activated!');
+      }, 1200);
+    } else {
+      fb.innerHTML = `<span style="color:#cc0000;">❌ Error: ${data.detail || 'Failed to activate token.'}</span>`;
+    }
+  } catch (err) {
+    fb.innerHTML = `<span style="color:#cc0000;">❌ Network Error: ${err.message}</span>`;
+  }
+}
+
+// Backwards compatibility for any other triggers
+async function submitDirectToken() {
+  return submitManualRequestToken();
+}
+
+// -------------------------------------------------------------------------
+// NIFTY 500 Equities Loading & Categorization (Left Sidebar)
+// -------------------------------------------------------------------------
+let allNifty500Stocks = [];
+let currentNiftyCapFilter = 'all';
+let currentNiftySectorFilter = 'all';
+let currentNiftySearchTerm = '';
+let activeNiftySymbol = null;
+
+async function loadNifty500Stocks() {
+  const listEl = document.getElementById('nifty-stock-list');
+  if (!listEl) return;
+  try {
+    const res = await fetch('/api/nifty500/stocks');
+    const data = await res.json();
+    allNifty500Stocks = data.stocks || [];
+    renderNiftyStockList();
+  } catch (err) {
+    listEl.innerHTML = '<div style="padding:16px; color:#cc0000; text-align:center;">Failed to load NIFTY 500 stocks.</div>';
+  }
+}
+
+function setNiftyMarketCapFilter(btn, capType) {
+  document.querySelectorAll('.market-cap-tabs .mcap-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  currentNiftyCapFilter = capType;
+  renderNiftyStockList();
+}
+
+function handleNiftySector(sector) {
+  currentNiftySectorFilter = sector;
+  renderNiftyStockList();
+}
+
+function handleNiftySearch(val) {
+  currentNiftySearchTerm = (val || '').toLowerCase().trim();
+  renderNiftyStockList();
+}
+
+function renderNiftyStockList() {
+  const listEl = document.getElementById('nifty-stock-list');
+  const badgeCount = document.getElementById('nifty-count-badge');
+  if (!listEl) return;
+
+  let filtered = allNifty500Stocks;
+
+  if (currentNiftyCapFilter !== 'all') {
+    filtered = filtered.filter(s => s.market_cap.toLowerCase() === currentNiftyCapFilter.toLowerCase());
+  }
+
+  if (currentNiftySectorFilter !== 'all') {
+    filtered = filtered.filter(s => s.sector_group === currentNiftySectorFilter || s.industry === currentNiftySectorFilter);
+  }
+
+  if (currentNiftySearchTerm) {
+    filtered = filtered.filter(s => 
+      s.symbol.toLowerCase().includes(currentNiftySearchTerm) ||
+      s.name.toLowerCase().includes(currentNiftySearchTerm) ||
+      s.industry.toLowerCase().includes(currentNiftySearchTerm)
+    );
+  }
+
+  if (badgeCount) badgeCount.textContent = `${filtered.length} Stocks`;
+
+  if (filtered.length === 0) {
+    listEl.innerHTML = '<div style="padding: 24px; text-align: center; color: #777;">No matching stocks found.</div>';
+    return;
+  }
+
+  let html = '';
+  for (const s of filtered) {
+    const isSelected = activeNiftySymbol && activeNiftySymbol === s.symbol;
+    let capBadgeClass = 'stock-badge-large';
+    if (s.market_cap === 'Mid Cap') capBadgeClass = 'stock-badge-mid';
+    if (s.market_cap === 'Small Cap') capBadgeClass = 'stock-badge-small';
+
+    let pctClass = 'pct-neutral';
+    let pctSign = '';
+    if (s.change_pct > 0) { pctClass = 'pct-positive'; pctSign = '+'; }
+    else if (s.change_pct < 0) { pctClass = 'pct-negative'; }
+
+    const priceStr = s.close > 0 ? `₹${s.close.toFixed(2)}` : '--';
+    const pctStr = s.change_pct !== 0 ? `${pctSign}${s.change_pct.toFixed(2)}%` : '--';
+
+    html += `
+      <div class="nifty-stock-item ${isSelected ? 'active' : ''}" onclick="onNiftyStockItemClick('${s.symbol}')">
+        <div class="stock-item-left">
+          <div class="stock-item-sym-row">
+            <span class="stock-item-sym">${s.symbol}</span>
+            <span class="stock-badge-cap ${capBadgeClass}">${s.market_cap}</span>
+          </div>
+          <div class="stock-item-name" title="${s.name}">${s.name}</div>
+          <div class="stock-item-sector">${s.industry}</div>
+        </div>
+        <div class="stock-item-right">
+          <span class="stock-item-price">${priceStr}</span>
+          <span class="stock-item-pct ${pctClass}">${pctStr}</span>
+        </div>
+      </div>
+    `;
+  }
+  listEl.innerHTML = html;
+}
+
+function onNiftyStockItemClick(symbol) {
+  activeNiftySymbol = symbol;
+  renderNiftyStockList();
+  
+  // Trigger evaluation and chart update in main workstation
+  const stock = allNifty500Stocks.find(s => s.symbol === symbol);
+  const ticker = stock ? stock.ticker : `${symbol}.NS`;
+
+  // If scanner view is hidden, show scanner view
+  const dirView = document.getElementById('directory-view');
+  const scanView = document.getElementById('scanner-view');
+  if (dirView && scanView && !dirView.classList.contains('hidden')) {
+    dirView.classList.add('hidden');
+    scanView.classList.remove('hidden');
+  }
+
+  if (typeof selectStockRow === 'function') {
+    selectStockRow(ticker, null, true);
   }
 }
 
@@ -519,6 +802,7 @@ function showKiteToast(msg) {
     setTimeout(() => toast.remove(), 500);
   }, 4500);
 }
+
 
 let liveChartRefreshTimer = null;
 
@@ -605,6 +889,7 @@ window.onload = async function() {
   await loadDBNodesAndRenderDirectory();
   initRealtimeWebSocket();
   await checkKiteSessionStatus();
+  await loadNifty500Stocks();
   startLiveChartAutoRefresh();
   loadMarketNews(false);
   setInterval(() => loadMarketNews(false), 120000); // Auto-refresh news headlines every 2 mins

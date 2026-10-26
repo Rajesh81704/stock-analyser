@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block title %}Strategies & Configuration | AlgoDesk MarketX{% endblock %}
+
+{% block content %}
+<div class="panel-header-banner" style="margin-bottom: 12px;">
+  <h2>📋 Strategy Management & Discovery Registry</h2>
+  <p>Drop new Python strategies in <code>strategies_user/</code> and YAML parameter configurations in <code>configs/</code>.</p>
+</div>
+
+<div class="algo-desk-card">
+  <div class="algo-desk-card-header">
+    <span>Active Configured Strategies</span>
+    <span style="font-size: 10px; color: #666;">Loaded from configs/*.yaml</span>
+  </div>
+
+  <div class="table-container-box" style="margin: 0;">
+    <table class="terminal-table">
+      <thead>
+        <tr>
+          <th>Strategy Name</th>
+          <th>Timeframe</th>
+          <th>Mode</th>
+          <th>Live Gating</th>
+          <th>Universe Filter</th>
+          <th>Max Slots</th>
+          <th>Risk Per Trade</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for cfg in configs %}
+          <tr>
+            <td>
+              <strong>{{ cfg.name }}</strong>
+              <div style="font-size: 10px; color: #666;">Class: {{ cfg.strategy_class }} (v{{ cfg.version }})</div>
+            </td>
+            <td><code>{{ cfg.timeframe }}</code></td>
+            <td>
+              <span class="badge-signal-bullish">
+                {{ cfg.mode.value }}
+              </span>
+            </td>
+            <td>
+              {% if cfg.live_enabled %}
+                <span class="change-green" style="font-weight: 700;">LIVE ENABLED</span>
+              {% else %}
+                <span style="color: #666; font-size: 10.5px;">GATED (PAPER/BACKTEST ONLY)</span>
+              {% endif %}
+            </td>
+            <td>Turnover &ge; ₹{{ cfg.universe.min_turnover_cr }} Cr</td>
+            <td>Top {{ cfg.universe.max_symbols_per_day }}</td>
+            <td>{{ (cfg.risk.risk_pct_per_trade * 100)|round(1) }}%</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="algo-desk-card">
+  <div class="algo-desk-card-header">
+    <span>Discovered Strategy Registry</span>
+    <span style="font-size: 10px; color: #000080; font-weight: 700;">AUTO-DISCOVERED</span>
+  </div>
+
+  <div class="table-container-box" style="margin: 0;">
+    <table class="terminal-table">
+      <thead>
+        <tr>
+          <th>Registered Name</th>
+          <th>Implementation Class</th>
+          <th>Module Path</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for reg in registered %}
+          <tr>
+            <td style="font-weight: 800; color: var(--navy-header);">{{ reg.name }}</td>
+            <td><code>{{ reg.class_name }}</code></td>
+            <td style="font-size: 10.5px; color: #666;">{{ reg.module }}</td>
+            <td>
+              <a href="/backtests" class="link-blue">[ Run Backtest ]</a>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

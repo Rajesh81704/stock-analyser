@@ -1,0 +1,93 @@
+name: CD - Deploy to VPS
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  ci-check:
+    name: Run Pre-Deployment Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Test Suite
+        env:
+          KITE_API_KEY: "dummy_test_api_key"
+          KITE_API_SECRET: "dummy_test_api_secret"
+        run: |
+          pytest -v tests/
+
+  deploy:
+    name: Deploy to Production VPS
+    needs: [ci-check]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remote Deployment via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST || '72.61.255.43' }}
+          username: ${{ secrets.VPS_USER || 'stock' }}
+          password: ${{ secrets.VPS_PASSWORD || 'stock' }}
+          key: ${{ secrets.VPS_SSH_KEY || '' }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          timeout: 120s
+          command_timeout: 30m
+          script: |
+            set -e
+            echo "🚀 [Deploy] Starting automated deployment on VPS..."
+            cd /home/stock/stock-analyser
+
+            # 1. Update source code from repository
+            echo "📥 [Deploy] Pulling latest changes from GitHub main..."
+            if [ -d .git ]; then
+              git fetch origin main
+              git reset --hard origin/main
+            else
+              echo "Initializing git workspace..."
+              git init
+              git remote add origin https://github.com/Rajesh81704/stock-analyser.git || git remote set-url origin https://github.com/Rajesh81704/stock-analyser.git
+              git fetch origin main
+              git reset --hard origin/main
+            fi
+
+            # 2. Sync Python dependencies
+            echo "📦 [Deploy] Updating Python dependencies..."
+            /home/stock/stock_venv/bin/pip install -r requirements.txt --quiet
+
+            # 3. Reload PM2 Process Zero-Downtime
+            echo "🔄 [Deploy] Reloading PM2 process..."
+            pm2 reload stock-analyser --update-env || pm2 restart stock-analyser
+
+            # 4. Wait for engine initialization and verify health
+            echo "🩺 [Deploy] Verifying server health..."
+            sleep 6
+            STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8500/api/automation/top10/status || echo "000")
+            echo "Status Code: $STATUS_CODE"
+            if [ "$STATUS_CODE" != "200" ]; then
+              echo "⚠️ HTTP health probe returned $STATUS_CODE, waiting 10s for model initializations..."
+              sleep 10
+              STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8500/api/automation/top10/status || echo "000")
+            fi
+
+            echo "📊 [Deploy] PM2 Process Status:"
+            pm2 status stock-analyser
+
+            echo "✅ [Deploy] Deployment to https://srv1326463.hstgr.cloud completed successfully!"

@@ -9,20 +9,35 @@
   <link
     href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,600;0,700;0,800;1,400&family=Libre+Baskerville:wght@700&display=swap"
     rel="stylesheet">
-  <link rel="stylesheet" href="/style.css?v=8">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="https://unpkg.com/lightweight-charts@4.2.1/dist/lightweight-charts.standalone.production.js"></script>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/chart.js"></script>
+  <script src="/lightweight-charts.js"></script>
 </head>
 
 <body>
 
   <!-- Top Navbar Header -->
   <header class="terminal-navbar">
-    <div class="brand-title" onclick="goHome()" title="FastDesk MarketX Home">
-      FastDesk <span class="brand-blue">MarketX</span>
+    <div style="display: flex; align-items: center; gap: 18px;">
+      <div class="brand-title" onclick="goHome()" title="FastDesk MarketX Home">
+        FastDesk <span class="brand-blue">MarketX</span>
+      </div>
+      <nav class="top-nav-links">
+        <a onclick="goHome()" class="top-link active" id="nav-screener">📊 Screener</a>
+        <a href="/dashboard" class="top-link" id="nav-algodesk" title="Open Algo Trading Desk (Paper)">⚡ Algo Desk</a>
+        <a href="/live" class="top-link" id="nav-live" style="color: #cc0000; font-weight: 700;" title="Real Brokerage Live Trading Desk">🔴 Real Trading</a>
+        <a href="/backtests" class="top-link" id="nav-backtests" title="Quant Backtester">🧪 Backtests</a>
+        <a href="/strategies" class="top-link" id="nav-strategies" title="Intraday Strategies">📋 Strategies</a>
+        <a href="/ai" class="top-link" id="nav-ai" title="Gemini AI Quant Lab">🤖 Gemini AI</a>
+      </nav>
     </div>
-    <div id="kite-auth-badge-container" class="kite-auth-container">
-      <!-- Injected by checkKiteSessionStatus() -->
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <div id="kite-auth-badge-container" class="kite-auth-container">
+        <!-- Injected by checkKiteSessionStatus() -->
+      </div>
+      <button onclick="openKiteLoginModal('request_token')" class="kite-manual-login-btn" id="nav-manual-token-btn" title="Paste request_token or Zerodha redirect URL manually to authenticate">
+        🔑 Enter Request Token
+      </button>
     </div>
   </header>
 
@@ -40,6 +55,49 @@
       <ul class="sidebar-menu">
         <li><a onclick="goHome()" id="sb-home" class="sidebar-link active">Home / Screeners</a></li>
       </ul>
+
+      <!-- NIFTY 500 Equities Categorized Universe -->
+      <div class="nifty-universe-container">
+        <div class="nifty-universe-header">
+          <span>&gt; NIFTY 500 EQUITIES</span>
+          <span class="header-count-badge" id="nifty-count-badge">501 Stocks</span>
+        </div>
+
+        <!-- Market Cap Filter Tabs -->
+        <div class="market-cap-tabs">
+          <button class="mcap-btn active" onclick="setNiftyMarketCapFilter(this, 'all')">ALL</button>
+          <button class="mcap-btn" onclick="setNiftyMarketCapFilter(this, 'large cap')">LARGE</button>
+          <button class="mcap-btn" onclick="setNiftyMarketCapFilter(this, 'mid cap')">MID</button>
+          <button class="mcap-btn" onclick="setNiftyMarketCapFilter(this, 'small cap')">SMALL</button>
+        </div>
+
+        <!-- Filter Controls -->
+        <div class="nifty-filter-controls">
+          <input type="text" id="nifty-search-input" class="nifty-search-input" placeholder="Filter symbol/name..." onkeyup="handleNiftySearch(this.value)">
+          <select id="nifty-sector-select" class="nifty-sector-select" onchange="handleNiftySector(this.value)">
+            <option value="all">-- All Sectors (14 Industry Types) --</option>
+            <option value="Financials">Financial Services (98)</option>
+            <option value="Capital Goods">Capital Goods (70)</option>
+            <option value="Healthcare">Healthcare & Pharma (44)</option>
+            <option value="Automobile">Automobile & Auto Parts (40)</option>
+            <option value="Consumer">Consumer Services & Durables (39)</option>
+            <option value="Infra & Realty">Infra, Realty & Materials (38)</option>
+            <option value="Energy & Power">Energy, Power & Oil/Gas (38)</option>
+            <option value="FMCG">FMCG (28)</option>
+            <option value="Chemicals">Chemicals (26)</option>
+            <option value="Technology">Information Technology (25)</option>
+            <option value="Metals & Mining">Metals & Mining (20)</option>
+            <option value="Telecom & Media">Telecom & Media (15)</option>
+            <option value="Services">Services (14)</option>
+          </select>
+        </div>
+
+        <!-- Scrollable NIFTY 500 Stock List -->
+        <div id="nifty-stock-list" class="nifty-stock-list">
+          <div style="padding: 16px; text-align: center; color: #666;">Loading NIFTY 500 constituents...</div>
+        </div>
+      </div>
+
 
       <!-- Live Market News Headlines Wire -->
       <div class="sidebar-news-container">
@@ -330,9 +388,112 @@
 
     </aside>
 
+  <!-- Interactive Zerodha Kite Login Modal -->
+  <div id="kite-login-modal" class="terminal-modal-backdrop" style="display: none;" onclick="if(event.target === this) closeKiteLoginModal()">
+    <div class="terminal-modal-box" style="width: 580px; max-width: 95%;">
+      <div class="terminal-modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span>🔑 Zerodha KiteConnect Session & Login</span>
+        </div>
+        <button class="terminal-modal-close" onclick="closeKiteLoginModal()" title="Close">✕</button>
+      </div>
+
+      <div class="terminal-modal-body">
+        <!-- Live Status Pill -->
+        <div id="kite-modal-status-banner" style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; font-size: 11.5px;">
+          <span style="font-weight: 700; color: #475569;">Broker Session Status:</span>
+          <span id="kite-modal-status-text" style="font-weight: 800; color: #b45309;">⚡ Checking status...</span>
+        </div>
+
+        <!-- Mode Navigation Tabs -->
+        <div class="kite-modal-tabs">
+          <button type="button" class="kite-modal-tab-btn active" id="tab-btn-request-token" onclick="switchKiteModalTab('request_token')">
+            📋 Paste Request Token (Manual)
+          </button>
+          <button type="button" class="kite-modal-tab-btn" id="tab-btn-access-token" onclick="switchKiteModalTab('access_token')">
+            ⚡ Direct Access Token
+          </button>
+          <button type="button" class="kite-modal-tab-btn" id="tab-btn-oauth" onclick="switchKiteModalTab('oauth')">
+            🌐 Zerodha Web Portal
+          </button>
+        </div>
+
+        <!-- TAB 1: Paste Request Token Manually -->
+        <div id="kite-tab-request-token" class="kite-tab-panel">
+          <div class="kite-login-choice-card" style="border-left: 3px solid #0284c7;">
+            <h4 style="margin: 0; color: #0369a1; font-size: 12.5px;">📋 Option: Paste Request Token manually</h4>
+            <p style="font-size: 11px; color: #475569; margin: 4px 0 0 0; line-height: 1.4;">
+              Log into Zerodha in your browser. Copy either the <strong>request_token</strong> or the <strong>entire redirect URL</strong> from your address bar and paste it below:
+            </p>
+
+            <div style="margin-top: 8px;">
+              <input type="text" id="modal-request-token-input" placeholder="Paste request_token or full redirect URL (e.g. ?request_token=...)" class="kite-token-input" oninput="handleTokenInputChange(this.value)" autocomplete="off">
+              <div id="modal-token-extracted-preview" class="kite-token-extracted-badge" style="display: none;"></div>
+            </div>
+
+            <div style="display: flex; gap: 8px; align-items: center; margin-top: 6px; flex-wrap: wrap;">
+              <button onclick="submitManualRequestToken()" class="btn-activate-token" style="padding: 7px 14px; font-weight: 800; font-size: 11.5px;">
+                ⚡ Exchange Request Token & Log In
+              </button>
+              <a href="https://kite.zerodha.com/connect/login?api_key=zgktuz1hr11f8scf&v=3" target="_blank" class="kite-oauth-btn" style="padding: 6px 12px; font-size: 11px; text-decoration: none;">
+                🌐 Open Zerodha Login in New Tab ↗
+              </a>
+            </div>
+
+            <!-- 3-Step Quick Guide -->
+            <div style="background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 4px; padding: 8px 10px; margin-top: 8px; font-size: 10.5px; color: #475569; line-height: 1.5;">
+              <strong style="color: #1e1b4b;">How to get your request_token:</strong>
+              <div style="margin-top: 2px;">1. Click <em>'Open Zerodha Login in New Tab ↗'</em> above and authenticate with your Zerodha credentials & TOTP.</div>
+              <div>2. Zerodha redirects you to your callback URL (e.g. <code>http://127.0.0.1:8000/callback?...request_token=XXXXX</code>).</div>
+              <div>3. Copy that redirected URL or just the <code>request_token</code> value, paste it above, and click <strong>'Exchange Request Token & Log In'</strong>.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 2: Direct Access Token -->
+        <div id="kite-tab-access-token" class="kite-tab-panel" style="display: none;">
+          <div class="kite-login-choice-card" style="border-left: 3px solid #059669;">
+            <h4 style="margin: 0; color: #047857; font-size: 12.5px;">⚡ Option: Direct Access Token</h4>
+            <p style="font-size: 11px; color: #475569; margin: 4px 0 0 0; line-height: 1.4;">
+              If you already have a valid active 32-character <code>access_token</code> generated today for this API key, paste it here:
+            </p>
+            <div style="margin-top: 8px;">
+              <input type="text" id="modal-access-token-input" placeholder="Paste 32-character daily Access Token directly..." class="kite-token-input" autocomplete="off">
+            </div>
+            <div style="margin-top: 6px;">
+              <button onclick="submitDirectAccessToken()" class="btn-activate-token" style="padding: 7px 14px; font-weight: 800; font-size: 11.5px; background: #0284c7; border-color: #0369a1;">
+                Save & Connect Access Token
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 3: Zerodha Web Portal -->
+        <div id="kite-tab-oauth" class="kite-tab-panel" style="display: none;">
+          <div class="kite-login-choice-card" style="border-left: 3px solid #d97706;">
+            <h4 style="margin: 0; color: #b45309; font-size: 12.5px;">🌐 1-Click Zerodha Web OAuth Login</h4>
+            <p style="font-size: 11px; color: #475569; margin: 4px 0 0 0; line-height: 1.4;">
+              Click below to initiate the standard Zerodha 2FA authentication flow in a new browser window.
+            </p>
+            <div style="margin-top: 10px;">
+              <a href="https://kite.zerodha.com/connect/login?api_key=zgktuz1hr11f8scf&v=3" target="_blank" class="kite-oauth-btn" style="display: inline-flex; width: auto; padding: 8px 16px;">
+                ⚡ Open Zerodha Kite Portal
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <!-- Feedback & Status Output -->
+        <div id="modal-token-feedback" style="min-height: 20px; font-size: 11px; font-weight: 700;"></div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid #cbd5e1; padding-top: 8px;">
+          <button class="term-btn" onclick="closeKiteLoginModal()">Close</button>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <script src="/app.js?v=18"></script>
+  <script src="/app.js?v=20"></script>
 </body>
 
 </html>

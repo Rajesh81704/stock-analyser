@@ -11,6 +11,9 @@ from datetime import datetime, time
 import logging
 import os
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
+
+IST = ZoneInfo("Asia/Kolkata")
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -153,7 +156,7 @@ def run_automatic_scheduled_scan(trigger_name: str = "AUTOMATED_SCHEDULER") -> D
 
 def is_market_hours() -> bool:
     """Checks if current time is within Indian Stock Market hours (Mon-Fri 09:15 to 15:30 IST)."""
-    now = datetime.now()
+    now = datetime.now(IST)
     # Monday = 0, Sunday = 6
     if now.weekday() >= 5:
         return False
@@ -161,6 +164,43 @@ def is_market_hours() -> bool:
     market_open = time(9, 15)
     market_close = time(15, 30)
     return market_open <= current_time <= market_close
+
+
+def _morning_intraday_screener_and_trade_job():
+    """Triggered Mon-Fri at 09:16 IST to screen top 10 stocks and execute paper algo trades."""
+    try:
+        from src.algodesk.automation.daily_screener_trader import daily_auto_trader
+        if daily_auto_trader.is_market_day():
+            logger.info("🌅 [09:16 AM IST] Running Morning Screener & Picking Top 10 Stocks across NIFTY 500 for Intraday Algo Trading...")
+            picks = daily_auto_trader.run_morning_screener_and_pick(top_n=10)
+            trades = daily_auto_trader.execute_paper_algo_trades(picks=picks)
+            logger.info(f"✅ [Morning Screener] Picked {len(picks)} stocks and initiated {len(trades)} algo trades.")
+        else:
+            logger.info("Skipping morning screener: Weekend or non-market day.")
+    except Exception as e:
+        logger.error(f"❌ Error during morning screener and trade job: {e}")
+
+
+def _intraday_trailing_sl_job():
+    """Triggered every 2 minutes during market hours to trail SLs and monitor targets/stops."""
+    try:
+        if is_market_hours():
+            from src.algodesk.automation.daily_screener_trader import daily_auto_trader
+            updates = daily_auto_trader.monitor_and_update_trailing_sl(force_eod_squareoff=False)
+            if updates:
+                logger.info(f"📈 [Trailing SL Monitor] Checked {len(updates)} active positions.")
+    except Exception as e:
+        logger.error(f"❌ Error during intraday trailing SL monitor: {e}")
+
+
+def _eod_intraday_squareoff_job():
+    """Triggered Mon-Fri at 15:15 IST to square off any open intraday positions before market close."""
+    try:
+        from src.algodesk.automation.daily_screener_trader import daily_auto_trader
+        logger.info("🔔 [15:15 PM IST] Closing all open intraday positions at EOD...")
+        daily_auto_trader.monitor_and_update_trailing_sl(force_eod_squareoff=True)
+    except Exception as e:
+        logger.error(f"❌ Error during EOD square-off: {e}")
 
 
 def _market_hours_job():
@@ -197,7 +237,34 @@ def start_automated_scheduler() -> BackgroundScheduler:
         replace_existing=True
     )
 
-    # 2. Post-Market Close Job: Mon-Fri at 16:00 (4:00 PM IST)
+    # 2. Morning Screener & Top Stock Algo Trade: Mon-Fri at 09:16 IST
+    scheduler.add_job(
+        _morning_intraday_screener_and_trade_job,
+        trigger=CronTrigger(day_of_week="mon-fri", hour=9, minute=16),
+        id="job_morning_top_stock_screener",
+        name="Daily Morning Top 10 Stock Screener & Algo Trade",
+        replace_existing=True
+    )
+
+    # 3. Intraday Trailing SL Monitor: Every 2 minutes
+    scheduler.add_job(
+        _intraday_trailing_sl_job,
+        trigger=IntervalTrigger(minutes=2),
+        id="job_intraday_trailing_sl_monitor",
+        name="Intraday Trailing SL Real-Time Monitor",
+        replace_existing=True
+    )
+
+    # 4. Intraday EOD Square-Off: Mon-Fri at 15:15 IST
+    scheduler.add_job(
+        _eod_intraday_squareoff_job,
+        trigger=CronTrigger(day_of_week="mon-fri", hour=15, minute=15),
+        id="job_eod_squareoff",
+        name="Daily EOD 15:15 Intraday Square-off",
+        replace_existing=True
+    )
+
+    # 5. Post-Market Close Job: Mon-Fri at 16:00 (4:00 PM IST)
     scheduler.add_job(
         _post_market_job,
         trigger=CronTrigger(day_of_week="mon-fri", hour=16, minute=0),
@@ -209,6 +276,9 @@ def start_automated_scheduler() -> BackgroundScheduler:
     scheduler.start()
     _global_scheduler = scheduler
     logger.info("🚀 Automated Stock Scheduler started successfully!")
-    logger.info("  • Intraday Job: Every 30 mins during market hours (09:15-15:30 IST)")
-    logger.info("  • Post-Market Job: Daily at 16:00 IST (EOD)")
+    logger.info("  • Morning Screener & Top Picks: Daily Mon-Fri 09:16 IST")
+    logger.info("  • Intraday Trailing SL Engine: Every 2 mins (09:15-15:30 IST)")
+    logger.info("  • EOD Square-off: Mon-Fri 15:15 IST")
+    logger.info("  • General 30-min Technical Scan: Every 30 mins during market hours")
+    logger.info("  • Post-Market Scan: Daily at 16:00 IST (EOD)")
     return scheduler

@@ -1,0 +1,30 @@
+# =====================================================================
+# AlgoDesk AI-Generated Strategy Configuration (Auto-Optimized by Gemini)
+# Status: PROFITABLE | Net Return: +2.34% | Profit Factor: 8.25
+# Generated: 2026-10-26 01:25:41
+# =====================================================================
+name: "quant_orb_breakout_238_6_v3"
+description: "Algorithmic momentum baseline."
+archetype: "ORB_BREAKOUT"
+version: "3"
+timeframe: "5m"
+live_enabled: false
+
+parameters:
+  or_minutes: 15
+  vol_mult: 1.2
+  stop_loss_pct: 0.006
+  target_pct: 0.014
+
+risk:
+  risk_per_trade_pct: 0.01
+  max_open_positions: 3
+  stop_loss_pct: 0.006
+  target_pct: 0.014
+
+backtest_metrics:
+  net_return_pct: 2.34
+  profit_factor: 8.25
+  win_rate_pct: 80.0
+  sharpe_ratio: 18.79
+  max_drawdown_pct: 0.32

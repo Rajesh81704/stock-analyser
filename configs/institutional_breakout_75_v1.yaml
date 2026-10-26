@@ -1,0 +1,31 @@
+# =====================================================================
+# AlgoDesk AI-Generated Strategy Configuration (Auto-Optimized by Gemini)
+# Status: PROFITABLE (75%+ WINRATE) | Net Return: +0.9% | Profit Factor: 3.81
+# Generated: 2026-10-26 01:49:24
+# =====================================================================
+name: "institutional_breakout_75_v1"
+description: "Institutional volume expansion above opening 15m range with rapid breakeven profit lock."
+archetype: "ORB_BREAKOUT"
+version: "1"
+timeframe: "5m"
+live_enabled: false
+
+parameters:
+  or_minutes: 15
+  vol_mult: 1.2
+  stop_loss_pct: 0.006
+  target_pct: 0.0125
+  trailing_stop: True
+
+risk:
+  risk_per_trade_pct: 0.01
+  max_open_positions: 3
+  stop_loss_pct: 0.006
+  target_pct: 0.0125
+
+backtest_metrics:
+  net_return_pct: 0.9
+  profit_factor: 3.81
+  win_rate_pct: 80.0
+  sharpe_ratio: 8.06
+  max_drawdown_pct: 0.32

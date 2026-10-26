@@ -1259,7 +1259,32 @@ body {
   background: #ecfdf5;
   color: #047857;
   border: 1.5px solid #10b981;
-  cursor: default;
+  cursor: pointer;
+}
+
+.kite-manual-login-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #1e1b4b;
+  color: #38bdf8;
+  border: 1px solid #38bdf8;
+  padding: 4px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 4px;
+  cursor: pointer;
+  letter-spacing: -0.2px;
+  transition: all 0.15s ease;
+  text-decoration: none;
+}
+
+.kite-manual-login-btn:hover {
+  background: #38bdf8;
+  color: #0f172a;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(56, 189, 248, 0.35);
 }
 
 .kite-dot {
@@ -1327,4 +1352,413 @@ body {
   gap: 8px;
   animation: slide-in 0.3s ease;
 }
+
+/* =====================================================================
+   NIFTY 500 Market Type Categorized Equities List & Workstation Controls
+   ===================================================================== */
+.nifty-universe-container {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  border: 1px solid var(--border-dark);
+  border-radius: 4px;
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+.nifty-universe-header {
+  background: var(--navy-header);
+  color: var(--navy-header-text);
+  padding: 6px 10px;
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border-dark);
+}
+
+.nifty-universe-header .header-count-badge {
+  background: rgba(255,255,255,0.2);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+}
+
+.market-cap-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  background: #bfbfbf;
+  padding: 4px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.mcap-btn {
+  background: #eaeaea;
+  border: 1px solid var(--border-dark);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 4px 2px;
+  cursor: pointer;
+  text-align: center;
+  color: var(--text-primary);
+  transition: all 0.1s ease;
+}
+
+.mcap-btn:hover {
+  background: #ffffff;
+}
+
+.mcap-btn.active {
+  background: var(--navy-header);
+  color: #ffffff;
+  border-color: #000000;
+}
+
+.nifty-filter-controls {
+  padding: 6px 8px;
+  background: #ececec;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.nifty-search-input {
+  width: 100%;
+  padding: 5px 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border: 1px solid var(--border-dark);
+  background: #ffffff;
+  box-sizing: border-box;
+}
+
+.nifty-search-input:focus {
+  outline: 2px solid var(--navy-header);
+}
+
+.nifty-sector-select {
+  width: 100%;
+  padding: 4px 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  border: 1px solid var(--border-dark);
+  background: #ffffff;
+  box-sizing: border-box;
+  font-weight: 600;
+}
+
+.nifty-stock-list {
+  max-height: 480px;
+  overflow-y: auto;
+  background: #ffffff;
+  font-size: 11px;
+}
+
+.nifty-stock-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 10px;
+  border-bottom: 1px solid #e0e0e0;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.nifty-stock-item:hover {
+  background: #f0f4ff;
+}
+
+.nifty-stock-item.active {
+  background: #dbeafe;
+  border-left: 4px solid var(--navy-header);
+}
+
+.stock-item-left {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-width: 65%;
+}
+
+.stock-item-sym-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stock-item-sym {
+  font-weight: 800;
+  color: #000000;
+  font-size: 11.5px;
+}
+
+.stock-badge-cap {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 2px;
+  text-transform: uppercase;
+}
+
+.stock-badge-large { background: #e0e7ff; color: #3730a3; }
+.stock-badge-mid { background: #fef3c7; color: #92400e; }
+.stock-badge-small { background: #f3f4f6; color: #374151; }
+
+.stock-item-name {
+  font-size: 10px;
+  color: #555555;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stock-item-sector {
+  font-size: 9px;
+  color: #777777;
+}
+
+.stock-item-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.stock-item-price {
+  font-weight: 800;
+  font-size: 11px;
+}
+
+.stock-item-pct {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+.pct-positive { background: var(--accent-green-bg); color: var(--accent-green); }
+.pct-negative { background: var(--accent-red-bg); color: var(--accent-red); }
+.pct-neutral { background: #f3f4f6; color: #6b7280; }
+
+/* Interactive Kite Login Modal */
+.terminal-modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  backdrop-filter: blur(3px);
+}
+
+.terminal-modal-box {
+  background: #e8e8e8;
+  border: 2px solid #000080;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+  width: 520px;
+  max-width: 95%;
+  font-family: var(--font-mono);
+}
+
+.terminal-modal-header {
+  background: var(--navy-header);
+  color: #ffffff;
+  padding: 8px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 800;
+  font-size: 13px;
+}
+
+.terminal-modal-close {
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 800;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.terminal-modal-close:hover {
+  color: #ef4444;
+}
+
+.terminal-modal-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  color: #000000;
+}
+
+.kite-modal-tabs {
+  display: flex;
+  gap: 6px;
+  border-bottom: 2px solid #cbd5e1;
+  padding-bottom: 6px;
+  margin-bottom: 8px;
+}
+
+.kite-modal-tab-btn {
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid #cbd5e1;
+  background: #f1f5f9;
+  color: #475569;
+  border-radius: 4px 4px 0 0;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.kite-modal-tab-btn:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.kite-modal-tab-btn.active {
+  background: #000080;
+  color: #ffffff;
+  border-color: #000080;
+}
+
+.kite-tab-panel {
+  display: block;
+}
+
+.kite-token-extracted-badge {
+  background: #ecfdf5;
+  border: 1px solid #10b981;
+  color: #047857;
+  padding: 5px 8px;
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  border-radius: 3px;
+  margin-top: 5px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  word-break: break-all;
+}
+
+.kite-login-choice-card {
+  background: #ffffff;
+  border: 1px solid var(--border-dark);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.kite-login-choice-card h4 {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--navy-header);
+}
+
+.kite-token-input {
+  width: 100%;
+  padding: 6px 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border: 1px solid var(--border-dark);
+  box-sizing: border-box;
+}
+
+.kite-oauth-btn {
+  background: #000080;
+  color: #ffffff;
+  border: 1px solid #000000;
+  padding: 8px 14px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-decoration: none;
+}
+
+.kite-oauth-btn:hover {
+  background: #0000aa;
+}
+
+.btn-activate-token {
+  background: #059669;
+  color: #ffffff;
+  border: 1px solid #047857;
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-activate-token:hover {
+  background: #047857;
+}
+
+/* Algo Trading Desk Panels */
+.algo-metric-banner {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.algo-stat-cell {
+  background: #ffffff;
+  border: 1px solid var(--border-dark);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+}
+
+.algo-stat-cell .stat-lbl {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  color: #666666;
+  font-weight: 700;
+}
+
+.algo-stat-cell .stat-val {
+  font-size: 16px;
+  font-weight: 800;
+  color: #000000;
+  margin-top: 2px;
+}
+
+.algo-desk-card {
+  background: #ffffff;
+  border: 1px solid var(--border-dark);
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.algo-desk-card-header {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--navy-header);
+  border-bottom: 1px solid var(--border-light);
+  padding-bottom: 6px;
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
 

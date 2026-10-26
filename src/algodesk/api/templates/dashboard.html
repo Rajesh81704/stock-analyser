@@ -1,0 +1,558 @@
+{% extends "base.html" %}
+
+{% block title %}AlgoDesk MarketX — Algorithmic Intraday Execution Workstation{% endblock %}
+
+{% block content %}
+
+<!-- Kill Switch Banner (if active) -->
+{% if kill_switch %}
+<div style="background: #fee2e2; border: 2px solid #cc0000; padding: 10px 14px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+  <div>
+    <strong style="color: #cc0000; font-size: 13px;">🛑 EMERGENCY KILL SWITCH IS ACTIVE</strong>
+    <p style="color: #991b1b; font-size: 11px; margin-top: 2px;">
+      Reason: {{ kill_switch_reason or 'Triggered by operator' }}. All new order generation is blocked.
+    </p>
+  </div>
+  <form method="post" action="/api/kill-switch" style="margin:0;">
+    <input type="hidden" name="active" value="false">
+    <button class="term-btn-green" style="font-weight: 800;">[ RE-ENABLE PLATFORM ]</button>
+  </form>
+</div>
+{% endif %}
+
+<!-- Selected Stock Candlestick Chart Card -->
+<div class="main-chart-card" id="main-chart-card" style="margin-bottom: 12px;">
+  <!-- Chart Header Row -->
+  <div class="chart-header-row">
+    <div class="chart-symbol-group">
+      <h3 id="chart-stock-symbol">RELIANCE.NS</h3>
+      <span id="chart-stock-price">₹1,190.00</span>
+      <span id="chart-stock-change" class="badge-signal-bullish">+0.51%</span>
+    </div>
+
+    <div class="chart-meta-group">
+      <span id="chart-data-source">⚡ Zerodha KiteConnect Live</span>
+      <span id="chart-candles-count" style="font-size: 10.5px; color: #555;">-- candles</span>
+    </div>
+  </div>
+
+  <!-- Timeframe & Interval Selector Bar -->
+  <div class="chart-controls-row">
+    <!-- Intraday & Multi-Interval Tabs -->
+    <div class="chart-interval-tabs">
+      <button class="time-tab" onclick="switchChartInterval('1m')">1m</button>
+      <button class="time-tab" onclick="switchChartInterval('5m')">5m</button>
+      <button class="time-tab" onclick="switchChartInterval('15m')">15m</button>
+      <button class="time-tab" onclick="switchChartInterval('1h')">1h</button>
+      <button class="time-tab active" onclick="switchChartInterval('1d')">1D</button>
+      <button class="time-tab" onclick="switchChartInterval('1w')">1W</button>
+      <button class="time-tab" onclick="switchChartInterval('1mo')">1M</button>
+    </div>
+
+    <!-- Historical Range / Period Selector -->
+    <div class="chart-period-tabs">
+      <span class="range-lbl">Range:</span>
+      <button class="time-tab" onclick="switchChartPeriod('1d')">1D</button>
+      <button class="time-tab" onclick="switchChartPeriod('5d')">5D</button>
+      <button class="time-tab" onclick="switchChartPeriod('1mo')">1M</button>
+      <button class="time-tab active" onclick="switchChartPeriod('6mo')">6M</button>
+      <button class="time-tab" onclick="switchChartPeriod('1y')">1Y</button>
+      <button class="time-tab" onclick="switchChartPeriod('max')">MAX</button>
+    </div>
+  </div>
+
+  <!-- Live Candlestick & Volume Chart Container -->
+  <div id="mainStockChartContainer" style="height: 340px; position: relative;">
+    <div id="tvChartContainer" style="width: 100%; height: 100%;"></div>
+    <canvas id="mainStockChartCanvas" style="display: none;"></canvas>
+  </div>
+</div>
+
+
+<!-- Portfolio Performance Metrics Banner -->
+<div class="algo-metric-banner">
+  <div class="algo-stat-cell">
+    <span class="stat-lbl">Simulated Capital</span>
+    <span class="stat-val">₹1,00,000.00</span>
+  </div>
+  <div class="algo-stat-cell">
+    <span class="stat-lbl">Net Portfolio Equity</span>
+    <span class="stat-val">₹{{ "{:,.2f}".format(portfolio.equity) }}</span>
+  </div>
+  <div class="algo-stat-cell">
+    <span class="stat-lbl">Available Cash</span>
+    <span class="stat-val">₹{{ "{:,.2f}".format(portfolio.cash) }}</span>
+  </div>
+  <div class="algo-stat-cell">
+    <span class="stat-lbl">Active Positions</span>
+    <span class="stat-val" style="color: {% if portfolio.positions|length > 0 %}#059669{% else %}#000000{% endif %};">
+      {{ portfolio.positions|length }} / {{ risk_limits.max_open_positions }}
+    </span>
+  </div>
+  <div class="algo-stat-cell">
+    <span class="stat-lbl">Execution Mode</span>
+    <span class="stat-val" style="font-size: 14px; color: #000080;">
+      {{ mode }}
+    </span>
+  </div>
+</div>
+
+<!-- Active Positions Table -->
+<div class="algo-desk-card">
+  <div class="algo-desk-card-header">
+    <span>📋 Active Open Positions (Intraday MIS)</span>
+    <span style="font-size: 10px; color: #666;">Auto square-off at 15:15 IST</span>
+  </div>
+
+  <div class="table-container-box" style="margin: 0;">
+    <table class="terminal-table">
+      <thead>
+        <tr>
+          <th>Symbol</th>
+          <th>Side</th>
+          <th>Qty</th>
+          <th>Entry Price</th>
+          <th>Current Price</th>
+          <th>Unrealized P&L</th>
+          <th>Stop Loss</th>
+          <th>Target</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if portfolio.positions %}
+          {% for sym, pos in portfolio.positions.items() %}
+            <tr>
+              <td style="font-weight: 800;">{{ sym }}</td>
+              <td>
+                <span class="{% if pos.qty > 0 %}change-green{% else %}change-red{% endif %}" style="font-weight: 700;">
+                  {% if pos.qty > 0 %}BUY (LONG){% else %}SELL (SHORT){% endif %}
+                </span>
+              </td>
+              <td>{{ pos.qty|abs }}</td>
+              <td>₹{{ "%.2f"|format(pos.entry_price) }}</td>
+              <td>₹{{ "%.2f"|format(pos.current_price) }}</td>
+              <td style="font-weight: 800; color: {% if pos.unrealized_pnl >= 0 %}#059669{% else %}#cc0000{% endif %};">
+                {% if pos.unrealized_pnl >= 0 %}+{% endif %}₹{{ "%.2f"|format(pos.unrealized_pnl) }}
+              </td>
+              <td>{% if pos.stop_loss %}₹{{ "%.2f"|format(pos.stop_loss) }}{% else %}--{% endif %}</td>
+              <td>{% if pos.target %}₹{{ "%.2f"|format(pos.target) }}{% else %}--{% endif %}</td>
+              <td>
+                <button onclick="closePosition('{{ sym }}')" class="term-btn" style="background:#fee2e2; color:#cc0000; border-color:#cc0000; padding: 2px 6px; font-size: 10px;">
+                  Close
+                </button>
+              </td>
+            </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="9" style="text-align: center; padding: 20px; color: #777;">
+              No open positions. Select a stock from the left NIFTY 500 panel to place a paper order.
+            </td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Autonomous Morning Intraday Suite (Top 10 Picks & Trailing SL Algo Trader) -->
+<div class="algo-desk-card" style="border: 2px solid #000080; box-shadow: 0 4px 12px rgba(0, 0, 128, 0.08);">
+  <div class="algo-desk-card-header" style="background: linear-gradient(90deg, #000080, #1e3a8a); color: #ffffff; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <span style="font-size: 13px; font-weight: 800; letter-spacing: 0.5px;">🤖 AUTONOMOUS MORNING INTRADAY SUITE (TOP 10 STOCKS)</span>
+      <span class="badge-signal-bullish" style="background: #059669; color: #fff; font-size: 10px; padding: 2px 8px; border-radius: 3px;">
+        APScheduler: 09:16 IST Mon-Fri
+      </span>
+    </div>
+    <div style="display: flex; gap: 8px; align-items: center;">
+      <button onclick="runMorningScreenerNow()" id="btn-run-morning-screener" class="term-btn" style="background: #fbbf24; color: #000; font-weight: 800; border: 1px solid #d97706; padding: 4px 10px; font-size: 11px; cursor: pointer;">
+        ⚡ Run Screener & Pick Now
+      </button>
+      <button onclick="triggerTrailingSlCheck()" id="btn-tick-update" class="term-btn" style="background: #ffffff; color: #000080; font-weight: 700; border: 1px solid #ffffff; padding: 4px 10px; font-size: 11px; cursor: pointer;">
+        🔄 SL Check
+      </button>
+      <button onclick="triggerSquareOffAll()" id="btn-square-off" class="term-btn" style="background: #fee2e2; color: #cc0000; font-weight: 700; border: 1px solid #cc0000; padding: 4px 8px; font-size: 11px; cursor: pointer;">
+        🛑 Square-Off All
+      </button>
+    </div>
+  </div>
+
+  <!-- Operational Telemetry Bar -->
+  <div style="background: #f1f5f9; border-bottom: 1px solid #cbd5e1; padding: 8px 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 11px;">
+    <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+      <span><strong>Market Engine:</strong> <span id="auto-market-status" style="color: #059669;">Active (Market Days)</span></span>
+      <span><strong>Today's Date:</strong> <span id="auto-today-date" style="font-family: var(--font-mono); font-weight: 700;">--</span></span>
+      <span><strong>Today's Picks:</strong> <span id="auto-picks-count" style="font-weight: 700; color: #000080;">0</span> / 10</span>
+      <span><strong>Open Positions:</strong> <span id="auto-open-count" style="font-weight: 700;">0</span></span>
+      <span><strong>Closed Trades:</strong> <span id="auto-closed-count" style="font-weight: 700;">0</span></span>
+    </div>
+    <div style="display: flex; gap: 14px; font-weight: 800; font-size: 11.5px;">
+      <span>Win Rate: <span id="auto-win-rate" style="color: #059669;">--</span></span>
+      <span>Net P&L: <span id="auto-net-pnl" style="color: #059669;">₹0.00</span></span>
+      <span style="font-size: 10px; color: #64748b; font-weight: normal; align-self: center;">(₹40 Zerodha roundtrip + STT + GST deducted)</span>
+    </div>
+  </div>
+
+  <!-- Section 1: Screened Picks Table -->
+  <div style="padding: 10px 14px 6px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+      <span style="font-size: 11px; font-weight: 800; color: #1e293b; text-transform: uppercase;">
+        📌 Morning Screened Picks (Conviction Scoring & Risk Gates)
+      </span>
+      <span style="font-size: 10px; color: #64748b;">Target: +2.0% | Initial SL: -1.0% | Trailing: +0.75% Breakeven step & 0.5% steps</span>
+    </div>
+
+    <div class="table-container-box" style="margin: 0 0 12px; max-height: 280px; overflow-y: auto;">
+      <table class="terminal-table" style="font-size: 10.5px;">
+        <thead style="position: sticky; top: 0; background: #f8fafc; z-index: 1;">
+          <tr>
+            <th style="width: 45px;">Rank</th>
+            <th>Symbol</th>
+            <th>Company Name</th>
+            <th>Conviction</th>
+            <th>RVOL</th>
+            <th>Entry Price</th>
+            <th>Initial SL</th>
+            <th>Target Price</th>
+            <th>Trailing Step</th>
+            <th>Strategy</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="auto-picks-tbody">
+          <tr>
+            <td colspan="11" style="text-align: center; padding: 12px; color: #64748b;">Loading morning picks...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Section 2: Trades & Trailing SL Log Table -->
+  <div style="padding: 0 14px 12px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+      <span style="font-size: 11px; font-weight: 800; color: #1e293b; text-transform: uppercase;">
+        📈 Paper Algo Trades & Dynamic Trailing Stop-Loss Log
+      </span>
+      <span style="font-size: 10px; color: #64748b;">Persisted in SQLite (<code style="background:#e2e8f0; padding:1px 4px;">daily_intraday_trades</code>)</span>
+    </div>
+
+    <div class="table-container-box" style="margin: 0; max-height: 220px; overflow-y: auto;">
+      <table class="terminal-table" style="font-size: 10.5px;">
+        <thead style="position: sticky; top: 0; background: #f8fafc; z-index: 1;">
+          <tr>
+            <th style="width: 40px;">#</th>
+            <th>Time</th>
+            <th>Symbol</th>
+            <th>Side</th>
+            <th>Qty</th>
+            <th>Entry</th>
+            <th>Highest</th>
+            <th>Trailed SL</th>
+            <th>Target</th>
+            <th>Exit Price</th>
+            <th>Exit Reason</th>
+            <th>Gross PnL</th>
+            <th>Brokerage & Tax</th>
+            <th>Net P&L</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="auto-trades-tbody">
+          <tr>
+            <td colspan="15" style="text-align: center; padding: 12px; color: #64748b;">Loading trade log...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Strategy Control Cards -->
+<div class="algo-desk-card">
+  <div class="algo-desk-card-header">
+    <span>⚙️ Registered Intraday Strategies</span>
+    <a href="/strategies" class="link-blue" style="font-size: 11px;">[ Manage All ]</a>
+  </div>
+
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    {% for strat in strategies %}
+    <div style="background: #f9f9f9; border: 1px solid var(--border-light); padding: 10px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+        <span style="font-weight: 800; font-size: 11.5px; color: var(--navy-header);">{{ strat.name }}</span>
+        <span class="badge-signal-bullish" style="font-size: 9.5px; padding: 1px 4px;">ARMED</span>
+      </div>
+      <p style="font-size: 10.5px; color: #555; margin-bottom: 6px;">{{ strat.description }}</p>
+      <div style="font-size: 10px; color: #777; display: flex; justify-content: space-between;">
+        <span>Universe: NIFTY 500</span>
+        <span>Timeframe: 5m</span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- Order History & Execution Log -->
+<div class="algo-desk-card">
+  <div class="algo-desk-card-header">
+    <span>📜 Recent Executions & Paper Order History</span>
+    <span style="font-size: 10px; color: #666;">Showing last 15 fills</span>
+  </div>
+
+  <div class="table-container-box" style="margin: 0;">
+    <table class="terminal-table">
+      <thead>
+        <tr>
+          <th>Timestamp</th>
+          <th>Order ID</th>
+          <th>Symbol</th>
+          <th>Side</th>
+          <th>Filled Qty</th>
+          <th>Price</th>
+          <th>P&L</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if trades %}
+          {% for t in trades %}
+          <tr>
+            <td style="font-size: 10px; color: #666;">{{ t.get('timestamp', '--') }}</td>
+            <td style="font-family: var(--font-mono); font-size: 10px;">{{ t.get('order_id', '--') }}</td>
+            <td style="font-weight: 800;">{{ t.get('symbol', '--') }}</td>
+            <td style="font-weight: 700; color: {% if t.get('side') == 'BUY' %}#059669{% else %}#cc0000{% endif %};">
+              {{ t.get('side', '--') }}
+            </td>
+            <td>{{ t.get('qty', '--') }}</td>
+            <td>₹{{ "%.2f"|format(t.get('price', 0)) }}</td>
+            <td style="font-weight: 700; color: {% if t.get('pnl', 0) >= 0 %}#059669{% else %}#cc0000{% endif %};">
+              {% if t.get('pnl') is not none %}
+                {% if t.get('pnl') >= 0 %}+{% endif %}₹{{ "%.2f"|format(t.get('pnl')) }}
+              {% else %}
+                --
+              {% endif %}
+            </td>
+            <td><span class="badge-signal-bullish" style="font-size: 9.5px;">FILLED</span></td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="8" style="text-align: center; padding: 16px; color: #777;">
+              No recent trade fills recorded today.
+            </td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+  async function closePosition(symbol) {
+    if (!confirm(`Are you sure you want to close position for ${symbol}?`)) return;
+    try {
+      const res = await fetch('/api/order/place', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbol: symbol,
+          side: 'SELL',
+          quantity: 1,
+          order_type: 'MARKET',
+          product: 'MIS'
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'success') {
+        showToast(`Closed position for ${symbol}`);
+        setTimeout(() => window.location.reload(), 800);
+      } else {
+        alert('Failed to close position: ' + (data.detail || 'Error'));
+      }
+    } catch (e) {
+      alert(e.message);
+    }
+  }
+
+  // =========================================================================
+  // Autonomous Morning Intraday Suite Real-Time Client
+  // =========================================================================
+  async function loadAutomationTelemetry() {
+    try {
+      const res = await fetch('/api/automation/top3/status');
+      if (!res.ok) return;
+      const data = await res.json();
+
+      // Top telemetry
+      const mktEl = document.getElementById('auto-market-status');
+      if (mktEl) {
+        mktEl.innerText = data.is_market_day ? 'Active (Market Day)' : 'Non-Trading Day (Weekend/Holiday)';
+        mktEl.style.color = data.is_market_day ? '#059669' : '#d97706';
+      }
+
+      const dateEl = document.getElementById('auto-today-date');
+      if (dateEl) dateEl.innerText = data.today_date || '--';
+
+      const picksCountEl = document.getElementById('auto-picks-count');
+      if (picksCountEl) picksCountEl.innerText = (data.today_picks || []).length;
+
+      const openCountEl = document.getElementById('auto-open-count');
+      if (openCountEl) openCountEl.innerText = (data.open_trades || []).length;
+
+      const closedCountEl = document.getElementById('auto-closed-count');
+      if (closedCountEl) closedCountEl.innerText = (data.performance_summary?.closed_trades ?? 0);
+
+      const winRateEl = document.getElementById('auto-win-rate');
+      if (winRateEl) {
+        const wr = data.performance_summary?.win_rate ?? 0.0;
+        winRateEl.innerText = `${wr}%`;
+        winRateEl.style.color = wr >= 50 ? '#059669' : '#cc0000';
+      }
+
+      const netPnlEl = document.getElementById('auto-net-pnl');
+      if (netPnlEl) {
+        const pnl = data.performance_summary?.total_net_pnl ?? 0.0;
+        const sign = pnl >= 0 ? '+' : '';
+        netPnlEl.innerText = `${sign}₹${pnl.toFixed(2)}`;
+        netPnlEl.style.color = pnl >= 0 ? '#059669' : '#cc0000';
+      }
+
+      // Render Picks Table
+      const picksTbody = document.getElementById('auto-picks-tbody');
+      if (picksTbody) {
+        if (!data.today_picks || data.today_picks.length === 0) {
+          picksTbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding:16px; color:#64748b;">No stocks picked yet today. Screener runs automatically at 09:16 AM IST or click "⚡ Run Screener & Pick Now".</td></tr>`;
+        } else {
+          let html = '';
+          data.today_picks.forEach(p => {
+            const scoreColor = p.conviction_score >= 80 ? '#059669' : (p.conviction_score >= 65 ? '#2563eb' : '#d97706');
+            html += `<tr>
+              <td style="font-weight:800; text-align:center;"><span style="background:#e2e8f0; border-radius:50%; width:20px; height:20px; display:inline-flex; align-items:center; justify-content:center;">#${p.rank}</span></td>
+              <td style="font-weight:800; color:#000080;">${p.symbol}</td>
+              <td style="color:#334155;">${p.company_name || '--'}</td>
+              <td><span style="font-weight:800; color:${scoreColor};">${p.conviction_score?.toFixed(1) || '--'}</span> / 100</td>
+              <td><span style="font-family:var(--font-mono);">${p.rvol ? p.rvol.toFixed(2) + 'x' : '--'}</span></td>
+              <td style="font-weight:700;">₹${Number(p.price || 0).toFixed(2)}</td>
+              <td style="color:#cc0000; font-family:var(--font-mono);">₹${Number(p.initial_sl || 0).toFixed(2)}</td>
+              <td style="color:#059669; font-family:var(--font-mono); font-weight:700;">₹${Number(p.target_price || 0).toFixed(2)}</td>
+              <td style="font-size:10px; color:#64748b;">+${p.trailing_step_pct || 0.5}% step</td>
+              <td><span style="font-size:9.5px; background:#e0e7ff; color:#3730a3; padding:2px 5px; border-radius:3px;">${p.strategy_name || 'ORB_Breakout'}</span></td>
+              <td><span class="badge-signal-bullish" style="font-size:9.5px; background:${p.status === 'TRADED' ? '#059669' : '#3b82f6'};">${p.status}</span></td>
+            </tr>`;
+          });
+          picksTbody.innerHTML = html;
+        }
+      }
+
+      // Render Trades Table
+      const tradesTbody = document.getElementById('auto-trades-tbody');
+      if (tradesTbody) {
+        const trades = data.recent_trades || [];
+        if (trades.length === 0) {
+          tradesTbody.innerHTML = `<tr><td colspan="15" style="text-align:center; padding:16px; color:#64748b;">No trades executed yet. Morning algo initiates trades automatically upon stock selection.</td></tr>`;
+        } else {
+          let html = '';
+          trades.forEach(t => {
+            const isWin = (t.net_pnl || 0) >= 0;
+            const pnlColor = isWin ? '#059669' : '#cc0000';
+            const sign = isWin ? '+' : '';
+            const statusBadge = t.status === 'OPEN' 
+              ? `<span style="background:#fef3c7; color:#92400e; font-weight:800; font-size:9.5px; padding:2px 6px; border-radius:3px; border:1px solid #f59e0b;">ACTIVE OPEN</span>`
+              : `<span style="background:#e2e8f0; color:#334155; font-weight:700; font-size:9.5px; padding:2px 6px; border-radius:3px;">CLOSED</span>`;
+
+            html += `<tr>
+              <td style="font-family:var(--font-mono); font-size:10px;">${t.id}</td>
+              <td style="font-size:10px; color:#64748b;">${(t.entry_time || '').split(' ')[1] || t.entry_time || '--'}</td>
+              <td style="font-weight:800; color:#000080;">${t.symbol}</td>
+              <td><span style="font-weight:700; color:#059669;">${t.side}</span></td>
+              <td style="font-weight:700;">${t.qty}</td>
+              <td>₹${Number(t.entry_price || 0).toFixed(2)}</td>
+              <td style="font-family:var(--font-mono); color:#1e293b;">₹${Number(t.highest_price || t.entry_price || 0).toFixed(2)}</td>
+              <td style="font-family:var(--font-mono); font-weight:700; color:#b91c1c;">₹${Number(t.current_sl || t.initial_sl || 0).toFixed(2)}</td>
+              <td style="font-family:var(--font-mono); font-weight:700; color:#059669;">₹${Number(t.target_price || 0).toFixed(2)}</td>
+              <td>${t.exit_price ? '₹' + Number(t.exit_price).toFixed(2) : '--'}</td>
+              <td style="font-size:10px;"><span style="background:#f1f5f9; padding:2px 4px; border-radius:2px;">${t.exit_reason || '--'}</span></td>
+              <td style="font-weight:700; color:${pnlColor};">${t.gross_pnl !== null ? sign + '₹' + Number(t.gross_pnl).toFixed(2) : '--'}</td>
+              <td style="color:#64748b; font-size:10px;">${t.brokerage_and_taxes !== null ? '-₹' + Number(t.brokerage_and_taxes).toFixed(2) : '--'}</td>
+              <td style="font-weight:800; color:${pnlColor}; font-size:11.5px;">${t.net_pnl !== null ? sign + '₹' + Number(t.net_pnl).toFixed(2) : '--'}</td>
+              <td>${statusBadge}</td>
+            </tr>`;
+          });
+          tradesTbody.innerHTML = html;
+        }
+      }
+
+    } catch (e) {
+      console.error("Failed to load automation telemetry:", e);
+    }
+  }
+
+  async function runMorningScreenerNow() {
+    const btn = document.getElementById('btn-run-morning-screener');
+    const origText = btn.innerHTML;
+    btn.innerHTML = '⏳ Screening & Trading...';
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/automation/top10/run-now?top_n=10', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.status === 'success') {
+        alert(`✅ Morning Routine Complete!\nScreened: ${data.picks.length} stocks\nPicks: ${data.picks.map(p => p.symbol + ' (Score ' + p.conviction_score + ')').join(', ')}\nInitiated ${data.trades.length} Paper Trades!`);
+        await loadAutomationTelemetry();
+      } else {
+        alert('⚠️ ' + (data.detail || data.message || 'Error executing morning screener'));
+      }
+    } catch (e) {
+      alert('Error: ' + e.message);
+    } finally {
+      btn.innerHTML = origText;
+      btn.disabled = false;
+    }
+  }
+
+  async function triggerTrailingSlCheck() {
+    const btn = document.getElementById('btn-tick-update');
+    btn.innerHTML = '⏳ Checking...';
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/automation/top10/tick-update', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        await loadAutomationTelemetry();
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      btn.innerHTML = '🔄 SL Check';
+      btn.disabled = false;
+    }
+  }
+
+  async function triggerSquareOffAll() {
+    if (!confirm('Are you sure you want to FORCE SQUARE-OFF all open intraday positions right now?')) return;
+    const btn = document.getElementById('btn-square-off');
+    btn.innerHTML = '⏳ Closing...';
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/automation/top10/square-off', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`✅ Square-off executed! Closed ${data.closed?.length || 0} positions.`);
+        await loadAutomationTelemetry();
+      }
+    } catch (e) {
+      alert('Error: ' + e.message);
+    } finally {
+      btn.innerHTML = '🛑 Square-Off All';
+      btn.disabled = false;
+    }
+  }
+
+  // Load telemetry on load and poll every 10 seconds
+  document.addEventListener('DOMContentLoaded', () => {
+    loadAutomationTelemetry();
+    setInterval(loadAutomationTelemetry, 10000);
+  });
+</script>
+
+{% endblock %}

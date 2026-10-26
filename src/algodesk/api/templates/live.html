@@ -1,0 +1,901 @@
+{% extends "base.html" %}
+
+{% block title %}AlgoDesk MarketX — REAL LIVE Trading Desk (Zerodha NSE){% endblock %}
+
+{% block content %}
+
+<!-- Real Trading High-Visibility Risk Warning Banner -->
+<div style="background: #fff5f5; border: 2px solid #ef4444; border-radius: 4px; padding: 12px 16px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 8px rgba(239, 68, 68, 0.15);">
+  <div style="display: flex; align-items: center; gap: 14px;">
+    <div style="font-size: 26px;">🔴</div>
+    <div>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <strong style="color: #991b1b; font-size: 13.5px; letter-spacing: 0.5px;">REAL TRADING DESK — ZERODHA NSE LIVE BROKERAGE GATEWAY</strong>
+        <span style="background: #ef4444; color: #fff; font-size: 9.5px; font-weight: 800; padding: 2px 6px; border-radius: 2px;">LIVE CAPITAL</span>
+      </div>
+      <p style="color: #7f1d1d; font-size: 11px; margin: 3px 0 0 0;">
+        Real funds at risk. Orders placed on this tab execute directly on the National Stock Exchange (NSE) via your Zerodha account
+        <strong>({{ kite_user_id or 'KU4756' }}{% if kite_user_name %} • {{ kite_user_name }}{% endif %})</strong>.
+      </p>
+    </div>
+  </div>
+
+  <div style="display: flex; gap: 8px; align-items: center;">
+    {% if not kite_active %}
+    <button onclick="openKiteLoginModal()" class="term-btn" style="background:#fee2e2; color:#cc0000; border-color:#cc0000; font-weight:800; padding:6px 12px;">
+      ⚡ Re-login Zerodha
+    </button>
+    {% else %}
+    <button onclick="refreshLiveTelemetry()" class="term-btn" style="padding: 5px 10px; font-size: 11px; font-weight: 700; background: #fff;" title="Poll latest margins & positions from Zerodha">
+      🔄 Refresh Telemetry
+    </button>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Kill Switch Banner (if active) -->
+{% if kill_switch %}
+<div style="background: #fee2e2; border: 2px solid #cc0000; padding: 10px 14px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+  <div>
+    <strong style="color: #cc0000; font-size: 13px;">🛑 EMERGENCY KILL SWITCH IS ACTIVE</strong>
+    <p style="color: #991b1b; font-size: 11px; margin-top: 2px;">
+      Reason: {{ kill_switch_reason or 'Triggered by operator' }}. All new live order submissions are blocked.
+    </p>
+  </div>
+  <form method="post" action="/api/kill-switch" style="margin:0;">
+    <input type="hidden" name="active" value="false">
+    <button class="term-btn-green" style="font-weight: 800;">[ RE-ENABLE PLATFORM ]</button>
+  </form>
+</div>
+{% endif %}
+
+<!-- Selected Stock Candlestick Chart Card -->
+<div class="main-chart-card" id="main-chart-card" style="margin-bottom: 12px;">
+  <!-- Chart Header Row -->
+  <div class="chart-header-row">
+    <div class="chart-symbol-group">
+      <h3 id="chart-stock-symbol">RELIANCE.NS</h3>
+      <span id="chart-stock-price">₹1,190.00</span>
+      <span id="chart-stock-change" class="badge-signal-bullish">+0.51%</span>
+    </div>
+
+    <div class="chart-meta-group">
+      <span id="chart-data-source">⚡ Zerodha KiteConnect Live</span>
+      <span id="chart-candles-count" style="font-size: 10.5px; color: #555;">-- candles</span>
+    </div>
+  </div>
+
+  <!-- Timeframe & Interval Selector Bar -->
+  <div class="chart-controls-row">
+    <div class="chart-interval-tabs">
+      <button class="time-tab" onclick="switchChartInterval('1m')">1m</button>
+      <button class="time-tab" onclick="switchChartInterval('5m')">5m</button>
+      <button class="time-tab" onclick="switchChartInterval('15m')">15m</button>
+      <button class="time-tab" onclick="switchChartInterval('1h')">1h</button>
+      <button class="time-tab active" onclick="switchChartInterval('1d')">1D</button>
+      <button class="time-tab" onclick="switchChartInterval('1w')">1W</button>
+      <button class="time-tab" onclick="switchChartInterval('1mo')">1M</button>
+    </div>
+
+    <div class="chart-period-tabs">
+      <span class="range-lbl">Range:</span>
+      <button class="time-tab" onclick="switchChartPeriod('1d')">1D</button>
+      <button class="time-tab" onclick="switchChartPeriod('5d')">5D</button>
+      <button class="time-tab" onclick="switchChartPeriod('1mo')">1M</button>
+      <button class="time-tab active" onclick="switchChartPeriod('6mo')">6M</button>
+      <button class="time-tab" onclick="switchChartPeriod('1y')">1Y</button>
+      <button class="time-tab" onclick="switchChartPeriod('max')">MAX</button>
+    </div>
+  </div>
+
+  <!-- Live Candlestick & Volume Chart Container -->
+  <div id="mainStockChartContainer" style="height: 330px; position: relative;">
+    <div id="tvChartContainer" style="width: 100%; height: 100%;"></div>
+    <canvas id="mainStockChartCanvas" style="display: none;"></canvas>
+  </div>
+</div>
+
+<!-- Real Brokerage Margins & Capital Telemetry Banner -->
+<div class="algo-metric-banner" style="border-top: 3px solid #ef4444;">
+  <div class="algo-stat-cell">
+    <span class="stat-lbl">Real Available Cash</span>
+    <span class="stat-val" id="live-stat-cash" style="color: #059669; font-weight: 800;">
+      ₹{{ "{:,.2f}".format(margins.available_cash or 0.0) }}
+    </span>
+  </div>
+  <div class="algo-stat-cell">
+    <span class="stat-lbl">Margin Utilized / Debits</span>
+    <span class="stat-val" id="live-stat-used" style="color: {% if (margins.used_margin or 0) > 0 %}#b45309{% else %}#333{% endif %};">
+      ₹{{ "{:,.2f}".format(margins.used_margin or 0.0) }}
+    </span>
+  </div>
+  <div class="algo-stat-cell">
+    <span class="stat-lbl">Live Unrealized P&L</span>
+    <span class="stat-val" id="live-stat-unrealized" style="font-weight: 800; color: {% if (positions.unrealized_pnl or 0) >= 0 %}#059669{% else %}#cc0000{% endif %};">
+      {% if (positions.unrealized_pnl or 0) >= 0 %}+{% endif %}₹{{ "{:,.2f}".format(positions.unrealized_pnl or 0.0) }}
+    </span>
+  </div>
+  <div class="algo-stat-cell">
+    <span class="stat-lbl">Realized P&L Today</span>
+    <span class="stat-val" id="live-stat-realized" style="font-weight: 800; color: {% if (positions.realized_pnl or 0) >= 0 %}#059669{% else %}#cc0000{% endif %};">
+      {% if (positions.realized_pnl or 0) >= 0 %}+{% endif %}₹{{ "{:,.2f}".format(positions.realized_pnl or 0.0) }}
+    </span>
+  </div>
+  <div class="algo-stat-cell">
+    <span class="stat-lbl">Live Open Positions</span>
+    <span class="stat-val" id="live-stat-pos-count" style="color: {% if (positions.open_count or 0) > 0 %}#ef4444{% else %}#555{% endif %};">
+      {{ positions.open_count or 0 }} Open
+    </span>
+  </div>
+  <div class="algo-stat-cell">
+    <span class="stat-lbl">Account Gateway</span>
+    <span class="stat-val" style="font-size: 13px; color: #cc0000; font-weight: 800;">
+      ZERODHA NSE
+    </span>
+  </div>
+</div>
+
+<!-- Real Active Open Positions Table -->
+<div class="algo-desk-card">
+  <div class="algo-desk-card-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <div>
+      <span style="font-weight: 800; color: #991b1b;">📋 Live Open Net Positions (Zerodha)</span>
+      <span style="font-size: 10px; color: #666; margin-left: 6px;">Live MTM Streaming</span>
+    </div>
+    <div>
+      <button onclick="emergencySquareOffAll()" class="term-btn" style="background: #fee2e2; color: #cc0000; border-color: #cc0000; font-size: 10.5px; font-weight: 800; padding: 3px 8px;">
+        ⚠️ SQUARE OFF ALL MIS POSITIONS
+      </button>
+    </div>
+  </div>
+
+  <div class="table-container-box" style="margin: 0;">
+    <table class="terminal-table" id="live-positions-table">
+      <thead>
+        <tr>
+          <th>Symbol</th>
+          <th>Product</th>
+          <th>Side</th>
+          <th>Net Qty</th>
+          <th>Buy Avg</th>
+          <th>Sell Avg</th>
+          <th>LTP (₹)</th>
+          <th>Unrealized P&L</th>
+          <th>Realized P&L</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="live-positions-tbody">
+        {% if positions and positions.net and (positions.net|length > 0) %}
+          {% set open_found = false %}
+          {% for pos in positions.net %}
+            {% if pos.quantity != 0 %}
+              {% set open_found = true %}
+              <tr>
+                <td style="font-weight: 800; font-family: var(--font-mono);">{{ pos.tradingsymbol }}</td>
+                <td><span style="background: #e0e7ff; color: #3730a3; padding: 1px 5px; font-size: 9.5px; font-weight: 700; border-radius: 2px;">{{ pos.product }}</span></td>
+                <td>
+                  <span class="{% if pos.quantity > 0 %}change-green{% else %}change-red{% endif %}" style="font-weight: 800;">
+                    {% if pos.quantity > 0 %}BUY (LONG){% else %}SELL (SHORT){% endif %}
+                  </span>
+                </td>
+                <td style="font-weight: 700;">{{ pos.quantity|abs }}</td>
+                <td>₹{{ "%.2f"|format(pos.buy_price or 0.0) }}</td>
+                <td>₹{{ "%.2f"|format(pos.sell_price or 0.0) }}</td>
+                <td style="font-weight: 700;">₹{{ "%.2f"|format(pos.last_price or 0.0) }}</td>
+                <td style="font-weight: 800; color: {% if (pos.unrealised or 0.0) >= 0 %}#059669{% else %}#cc0000{% endif %};">
+                  {% if (pos.unrealised or 0.0) >= 0 %}+{% endif %}₹{{ "%.2f"|format(pos.unrealised or 0.0) }}
+                </td>
+                <td style="font-weight: 700; color: {% if (pos.realised or 0.0) >= 0 %}#059669{% else %}#cc0000{% endif %};">
+                  {% if (pos.realised or 0.0) >= 0 %}+{% endif %}₹{{ "%.2f"|format(pos.realised or 0.0) }}
+                </td>
+                <td>
+                  <button onclick="requestCloseLivePosition('{{ pos.tradingsymbol }}', '{{ pos.product }}', {{ pos.quantity }})" class="term-btn" style="background:#fee2e2; color:#cc0000; border-color:#cc0000; padding: 2px 8px; font-size: 10px; font-weight: 700;">
+                    Square Off (MKT)
+                  </button>
+                </td>
+              </tr>
+            {% endif %}
+          {% endfor %}
+          {% if not open_found %}
+            <tr>
+              <td colspan="10" style="text-align: center; padding: 18px; color: #777;">
+                No open net positions currently held in your Zerodha account. All previous positions are closed.
+              </td>
+            </tr>
+          {% endif %}
+        {% else %}
+          <tr>
+            <td colspan="10" style="text-align: center; padding: 18px; color: #777;">
+              No open positions. Use the right Real Order Panel to submit an intraday or delivery order.
+            </td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Real Orders Execution Book (Zerodha) -->
+<div class="algo-desk-card">
+  <div class="algo-desk-card-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <div>
+      <span style="font-weight: 800; color: var(--navy-header);">📜 Today's Live Order Book (Zerodha Gateway)</span>
+      <span style="font-size: 10px; color: #666; margin-left: 6px;">Shows all live, filled, rejected & cancelled orders</span>
+    </div>
+    <div>
+      <button onclick="cancelAllOpenOrders()" class="term-btn" style="font-size: 10.5px; font-weight: 700; padding: 3px 8px;">
+        🛑 Cancel All Open Orders
+      </button>
+    </div>
+  </div>
+
+  <div class="table-container-box" style="margin: 0; max-height: 300px; overflow-y: auto;">
+    <table class="terminal-table" id="live-orders-table">
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Order ID</th>
+          <th>Symbol</th>
+          <th>Type</th>
+          <th>Prod</th>
+          <th>Side</th>
+          <th>Qty</th>
+          <th>Price</th>
+          <th>Status</th>
+          <th>Message</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="live-orders-tbody">
+        {% if orders and (orders|length > 0) %}
+          {% for o in orders %}
+          <tr>
+            <td style="font-size: 10px; color: #666; white-space: nowrap;">
+              {{ o.order_timestamp or o.exchange_timestamp or '--' }}
+            </td>
+            <td style="font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;">
+              {{ o.order_id }}
+            </td>
+            <td style="font-weight: 800;">{{ o.tradingsymbol }}</td>
+            <td style="font-size: 10px;">{{ o.order_type }}</td>
+            <td><span style="background: #f1f5f9; padding: 1px 4px; font-size: 9.5px; font-weight: 700;">{{ o.product }}</span></td>
+            <td style="font-weight: 800; color: {% if o.transaction_type == 'BUY' %}#059669{% else %}#cc0000{% endif %};">
+              {{ o.transaction_type }}
+            </td>
+            <td style="font-weight: 700;">{{ o.filled_quantity }}/{{ o.quantity }}</td>
+            <td>₹{{ "%.2f"|format(o.average_price or o.price or 0.0) }}</td>
+            <td>
+              {% if o.status == 'COMPLETE' %}
+                <span class="badge-signal-bullish" style="font-size: 9.5px; padding: 1px 5px;">COMPLETE</span>
+              {% elif o.status == 'OPEN' or o.status == 'TRIGGER PENDING' %}
+                <span style="background: #fef3c7; color: #b45309; border: 1px solid #d97706; padding: 1px 5px; font-size: 9.5px; font-weight: 800; border-radius: 2px;">OPEN</span>
+              {% elif o.status == 'REJECTED' %}
+                <span style="background: #fee2e2; color: #cc0000; border: 1px solid #cc0000; padding: 1px 5px; font-size: 9.5px; font-weight: 800; border-radius: 2px;">REJECTED</span>
+              {% elif o.status == 'CANCELLED' %}
+                <span style="background: #f3f4f6; color: #6b7280; padding: 1px 5px; font-size: 9.5px; font-weight: 700; border-radius: 2px;">CANCELLED</span>
+              {% else %}
+                <span style="font-size: 10px;">{{ o.status }}</span>
+              {% endif %}
+            </td>
+            <td style="font-size: 10px; color: #666; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ o.status_message or '' }}">
+              {{ o.status_message or '--' }}
+            </td>
+            <td>
+              {% if o.status == 'OPEN' or o.status == 'TRIGGER PENDING' %}
+              <button onclick="cancelLiveOrder('{{ o.order_id }}')" class="term-btn" style="background:#fee2e2; color:#cc0000; border-color:#cc0000; padding: 1px 6px; font-size: 9.5px; font-weight: 700;">
+                Cancel
+              </button>
+              {% else %}
+              <span style="color: #bbb; font-size: 10px;">--</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="11" style="text-align: center; padding: 18px; color: #777;">
+              No orders placed today on Zerodha gateway.
+            </td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block inspector %}
+<!-- Dedicated Real Order Execution Inspector Column -->
+<div class="inspector-header-box" style="border-left: 3px solid #ef4444;">
+  <div class="inspector-symbol-row">
+    <h3 id="panel-ticker">RELIANCE.NS</h3>
+    <span class="price-val" id="panel-price">₹1,190.00</span>
+  </div>
+  <div class="inspector-company-row">
+    <span id="panel-company" style="font-weight:700;">Reliance Industries Ltd.</span>
+    <span class="change-green" id="panel-change">+0.51%</span>
+  </div>
+  <div style="font-size:11px; color:#555; margin-top:3px;" id="panel-sector">
+    Energy & Power • NIFTY 500 Large Cap
+  </div>
+</div>
+
+<!-- Real Order Entry Card -->
+<div class="algo-desk-card" style="border: 2px solid #ef4444; background: #fffcfc;">
+  <div class="algo-desk-card-header" style="background: #fee2e2; border-bottom: 1px solid #f87171; display: flex; justify-content: space-between; align-items: center;">
+    <span style="color: #991b1b; font-weight: 800; font-size: 11.5px;">🔴 REAL ORDER ENTRY (NSE)</span>
+    <span style="background: #ef4444; color: #fff; font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 2px;">LIVE</span>
+  </div>
+
+  <form id="live-order-form" onsubmit="event.preventDefault();" style="padding: 10px 8px;">
+    <!-- Stock Symbol & Exchange -->
+    <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 6px; margin-bottom: 8px;">
+      <div>
+        <label style="font-size: 10px; font-weight: 700; color: #555;">Symbol</label>
+        <input type="text" id="order-symbol-input" value="RELIANCE" class="nifty-search-input" style="font-weight: 800; font-family: var(--font-mono); color: #000;" readonly>
+      </div>
+      <div>
+        <label style="font-size: 10px; font-weight: 700; color: #555;">Exchange</label>
+        <input type="text" value="NSE" class="nifty-search-input" readonly style="background: #f1f5f9; text-align: center; font-weight: 700;">
+      </div>
+    </div>
+
+    <!-- Product & Order Type -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px;">
+      <div>
+        <label style="font-size: 10px; font-weight: 700; color: #555;">Product</label>
+        <select id="live-product-select" class="nifty-sector-select" onchange="calculateLiveMargin()">
+          <option value="MIS">MIS (Intraday)</option>
+          <option value="CNC">CNC (Delivery Cash)</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size: 10px; font-weight: 700; color: #555;">Order Type</label>
+        <select id="live-type-select" class="nifty-sector-select" onchange="onLiveOrderTypeChange()">
+          <option value="MARKET">Market</option>
+          <option value="LIMIT">Limit</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Quantity & Price -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px;">
+      <div>
+        <label style="font-size: 10px; font-weight: 700; color: #555;">Quantity</label>
+        <input type="number" id="order-qty-input" value="1" min="1" step="1" class="nifty-search-input" style="font-weight: 700;" oninput="calculateLiveMargin()">
+      </div>
+      <div>
+        <label style="font-size: 10px; font-weight: 700; color: #555;">Limit Price (₹)</label>
+        <input type="number" id="order-price-input" step="0.05" placeholder="Mkt Price" class="nifty-search-input" disabled oninput="calculateLiveMargin()">
+      </div>
+    </div>
+
+    <!-- Quick Quantity Helper Chips -->
+    <div style="display: flex; gap: 4px; margin-bottom: 10px;">
+      <span style="font-size: 9.5px; color: #777; align-self: center;">Qty:</span>
+      <button type="button" class="term-btn" style="padding: 1px 5px; font-size: 9.5px;" onclick="setLiveQty(1)">1</button>
+      <button type="button" class="term-btn" style="padding: 1px 5px; font-size: 9.5px;" onclick="setLiveQty(5)">5</button>
+      <button type="button" class="term-btn" style="padding: 1px 5px; font-size: 9.5px;" onclick="setLiveQty(10)">10</button>
+      <button type="button" class="term-btn" style="padding: 1px 5px; font-size: 9.5px;" onclick="setLiveQty(25)">25</button>
+      <button type="button" class="term-btn" style="padding: 1px 5px; font-size: 9.5px;" onclick="setLiveQty(50)">50</button>
+    </div>
+
+    <!-- Estimated Value & Margin Calculation Box -->
+    <div style="background: #f8fafc; border: 1px dashed #cbd5e1; padding: 6px 8px; margin-bottom: 10px; font-size: 10.5px;">
+      <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+        <span style="color: #64748b;">Est. Order Value:</span>
+        <span style="font-weight: 700;" id="live-est-value">₹0.00</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+        <span style="color: #64748b;">Est. Margin Required:</span>
+        <span style="font-weight: 800; color: #000080;" id="live-est-margin">₹0.00</span>
+      </div>
+      <div style="display: flex; justify-content: space-between;">
+        <span style="color: #64748b;">Available Cash:</span>
+        <span style="font-weight: 700; color: #059669;">₹{{ "{:,.2f}".format(margins.available_cash or 0.0) }}</span>
+      </div>
+    </div>
+
+    <!-- Real Action Buttons -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+      <button type="button" onclick="promptLiveOrder('BUY')" class="term-btn-green" style="padding: 8px 4px; font-weight: 800; cursor: pointer; text-align: center;">
+        ▲ REAL BUY (LONG)
+      </button>
+      <button type="button" onclick="promptLiveOrder('SELL')" class="term-btn" style="background:#fee2e2; color:#cc0000; border-color:#cc0000; padding: 8px 4px; font-weight: 800; cursor: pointer; text-align: center;">
+        ▼ REAL SELL (SHORT)
+      </button>
+    </div>
+  </form>
+</div>
+
+<!-- Zerodha Margin Utilization Card -->
+<div class="algo-desk-card">
+  <div class="algo-desk-card-header">
+    <span>🛡️ Zerodha Account Margins</span>
+    <span style="font-size: 9.5px; font-weight: 800; color: #059669;">LIVE EQUITY</span>
+  </div>
+  <div style="font-size: 11px; display: flex; flex-direction: column; gap: 5px; padding: 4px 2px;">
+    <div style="display: flex; justify-content: space-between;">
+      <span style="color:#666;">Available Cash:</span>
+      <span style="font-weight:800; color:#059669;" id="card-live-cash">₹{{ "{:,.2f}".format(margins.available_cash or 0.0) }}</span>
+    </div>
+    <div style="display: flex; justify-content: space-between;">
+      <span style="color:#666;">Used Margin:</span>
+      <span style="font-weight:700;" id="card-live-used">₹{{ "{:,.2f}".format(margins.used_margin or 0.0) }}</span>
+    </div>
+    <div style="display: flex; justify-content: space-between;">
+      <span style="color:#666;">Collateral:</span>
+      <span style="font-weight:700;">₹{{ "{:,.2f}".format(margins.collateral or 0.0) }}</span>
+    </div>
+    <div style="display: flex; justify-content: space-between;">
+      <span style="color:#666;">Opening Balance:</span>
+      <span style="font-weight:700;">₹{{ "{:,.2f}".format(margins.opening_balance or 0.0) }}</span>
+    </div>
+    <div style="display: flex; justify-content: space-between;">
+      <span style="color:#666;">Exchange Gateway:</span>
+      <span style="font-weight:700; color:#000080;">NSE Equities</span>
+    </div>
+  </div>
+</div>
+
+<!-- Secondary Chart -->
+<div class="fin-section-card" id="right-bottom-chart-card">
+  <div class="fin-section-header">
+    <h4>📈 Trend Indicator</h4>
+    <span class="fin-badge">⚡ Real-time</span>
+  </div>
+  <div class="panel-chart-box" style="height: 180px; position: relative;">
+    <canvas id="panelStockChart"></canvas>
+  </div>
+</div>
+
+<!-- Real Order Confirmation Modal -->
+<div id="live-order-confirm-modal" class="terminal-modal-backdrop" style="display: none;">
+  <div class="terminal-modal-box" style="max-width: 440px; border: 2px solid #ef4444;">
+    <div class="terminal-modal-header" style="background: #fee2e2; border-bottom: 2px solid #ef4444;">
+      <span style="color: #991b1b; font-weight: 800;">🚨 CONFIRM REAL ZERODHA ORDER</span>
+      <button class="terminal-modal-close" onclick="closeLiveConfirmModal()">✕</button>
+    </div>
+
+    <div class="terminal-modal-body" style="padding: 14px 16px;">
+      <p style="font-size: 11.5px; color: #333; line-height: 1.4; margin-bottom: 12px;">
+        You are about to submit a <strong>REAL order</strong> using your live Zerodha brokerage account. Real money will be debited or credited.
+      </p>
+
+      <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; padding: 10px; margin-bottom: 12px; font-family: var(--font-mono); font-size: 11.5px;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+          <span style="color: #64748b;">Symbol:</span>
+          <strong id="modal-conf-symbol">--</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+          <span style="color: #64748b;">Transaction:</span>
+          <strong id="modal-conf-side" style="color: #059669;">--</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+          <span style="color: #64748b;">Quantity:</span>
+          <strong id="modal-conf-qty">--</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+          <span style="color: #64748b;">Product:</span>
+          <strong id="modal-conf-product">--</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+          <span style="color: #64748b;">Order Type:</span>
+          <strong id="modal-conf-type">--</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+          <span style="color: #64748b;">Price:</span>
+          <strong id="modal-conf-price">--</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between; padding-top: 6px; border-top: 1px dashed #cbd5e1; font-size: 12px;">
+          <span style="color: #333; font-weight: 700;">Est. Value:</span>
+          <strong id="modal-conf-est-val" style="color: #cc0000;">--</strong>
+        </div>
+      </div>
+
+      <div style="margin-bottom: 14px;">
+        <label style="font-size: 11px; display: flex; align-items: center; gap: 6px; cursor: pointer;">
+          <input type="checkbox" id="modal-confirm-checkbox" style="cursor: pointer;">
+          <span style="color: #991b1b; font-weight: 700;">I confirm and understand this order involves real capital.</span>
+        </label>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 8px;">
+        <button class="term-btn" onclick="closeLiveConfirmModal()" style="padding: 6px 12px;">Cancel</button>
+        <button class="term-btn-green" id="btn-submit-real-order" onclick="executeRealOrderConfirmed()" style="background: #dc2626; border-color: #b91c1c; font-weight: 800; padding: 6px 14px;">
+          ⚡ SUBMIT ORDER TO ZERODHA
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Live Desk JavaScript Logic -->
+<script>
+  let pendingLiveOrder = null;
+
+  function setLiveQty(qty) {
+    const input = document.getElementById('order-qty-input');
+    if (input) {
+      input.value = qty;
+      calculateLiveMargin();
+    }
+  }
+
+  function onLiveOrderTypeChange() {
+    const type = document.getElementById('live-type-select').value;
+    const priceInput = document.getElementById('order-price-input');
+    if (!priceInput) return;
+    if (type === 'LIMIT') {
+      priceInput.disabled = false;
+      if (selectedStock && selectedStock.close > 0 && !priceInput.value) {
+        priceInput.value = selectedStock.close.toFixed(2);
+      }
+    } else {
+      priceInput.disabled = true;
+    }
+    calculateLiveMargin();
+  }
+
+  function calculateLiveMargin() {
+    const qtyInput = document.getElementById('order-qty-input');
+    const priceInput = document.getElementById('order-price-input');
+    const prodSelect = document.getElementById('live-product-select');
+    const typeSelect = document.getElementById('live-type-select');
+    const estValEl = document.getElementById('live-est-value');
+    const estMarginEl = document.getElementById('live-est-margin');
+
+    const qty = parseInt(qtyInput ? qtyInput.value : 1, 10) || 1;
+    let price = 0;
+    if (typeSelect && typeSelect.value === 'LIMIT' && priceInput && priceInput.value) {
+      price = parseFloat(priceInput.value) || 0;
+    } else if (selectedStock && selectedStock.close > 0) {
+      price = selectedStock.close;
+    }
+
+    const totalVal = qty * price;
+    const product = prodSelect ? prodSelect.value : 'MIS';
+    // MIS Intraday margin approx 20% (5x leverage), CNC requires 100%
+    const requiredMargin = product === 'MIS' ? (totalVal * 0.20) : totalVal;
+
+    if (estValEl) estValEl.textContent = `₹${totalVal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    if (estMarginEl) estMarginEl.textContent = `₹${requiredMargin.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+
+  function promptLiveOrder(side) {
+    const sym = document.getElementById('order-symbol-input').value.trim();
+    const qty = parseInt(document.getElementById('order-qty-input').value, 10) || 1;
+    const product = document.getElementById('live-product-select').value;
+    const orderType = document.getElementById('live-type-select').value;
+    let price = 0.0;
+
+    if (orderType === 'LIMIT') {
+      price = parseFloat(document.getElementById('order-price-input').value) || 0.0;
+      if (price <= 0) {
+        alert('Please enter a valid Limit Price.');
+        return;
+      }
+    } else {
+      if (selectedStock && selectedStock.close > 0) {
+        price = selectedStock.close;
+      }
+    }
+
+    if (!sym) {
+      alert('Please select a stock first.');
+      return;
+    }
+
+    const estTotal = qty * price;
+
+    pendingLiveOrder = {
+      symbol: sym,
+      side: side,
+      quantity: qty,
+      product: product,
+      order_type: orderType,
+      price: price
+    };
+
+    document.getElementById('modal-conf-symbol').textContent = sym;
+    const sideEl = document.getElementById('modal-conf-side');
+    sideEl.textContent = side === 'BUY' ? 'BUY (LONG)' : 'SELL (SHORT)';
+    sideEl.style.color = side === 'BUY' ? '#059669' : '#cc0000';
+    document.getElementById('modal-conf-qty').textContent = qty;
+    document.getElementById('modal-conf-product').textContent = product === 'MIS' ? 'MIS (Intraday)' : 'CNC (Delivery)';
+    document.getElementById('modal-conf-type').textContent = orderType;
+    document.getElementById('modal-conf-price').textContent = orderType === 'LIMIT' ? `₹${price.toFixed(2)}` : 'MARKET PRICE';
+    document.getElementById('modal-conf-est-val').textContent = `₹${estTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+    const chk = document.getElementById('modal-confirm-checkbox');
+    if (chk) chk.checked = false;
+
+    const modal = document.getElementById('live-order-confirm-modal');
+    if (modal) modal.style.display = 'flex';
+  }
+
+  function closeLiveConfirmModal() {
+    const modal = document.getElementById('live-order-confirm-modal');
+    if (modal) modal.style.display = 'none';
+    pendingLiveOrder = null;
+  }
+
+  async function executeRealOrderConfirmed() {
+    const chk = document.getElementById('modal-confirm-checkbox');
+    if (chk && !chk.checked) {
+      alert('Please check the confirmation box to authorize this REAL order execution.');
+      return;
+    }
+
+    if (!pendingLiveOrder) return;
+
+    const btn = document.getElementById('btn-submit-real-order');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Submitting to Zerodha...';
+    }
+
+    try {
+      const res = await fetch('/api/live/order/place', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(pendingLiveOrder)
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'success') {
+        closeLiveConfirmModal();
+        showToast(`🎉 REAL ORDER SUBMITTED! Order ID: ${data.order_id}`);
+        setTimeout(() => refreshLiveTelemetry(), 1000);
+      } else {
+        alert('Order Submission Failed: ' + (data.detail || data.message || 'Unknown error'));
+      }
+    } catch (err) {
+      alert('Error communicating with Zerodha: ' + err.message);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '⚡ SUBMIT ORDER TO ZERODHA';
+      }
+    }
+  }
+
+  async function cancelLiveOrder(orderId) {
+    if (!confirm(`Are you sure you want to cancel order ${orderId}?`)) return;
+    try {
+      const res = await fetch('/api/live/order/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order_id: orderId })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'success') {
+        showToast(`Order ${orderId} cancelled successfully.`);
+        setTimeout(() => refreshLiveTelemetry(), 800);
+      } else {
+        alert('Failed to cancel order: ' + (data.detail || data.message || 'Error'));
+      }
+    } catch (err) {
+      alert('Error cancelling order: ' + err.message);
+    }
+  }
+
+  async function cancelAllOpenOrders() {
+    if (!confirm('Are you sure you want to CANCEL ALL open orders on Zerodha?')) return;
+    const table = document.getElementById('live-orders-tbody');
+    const cancelButtons = table ? table.querySelectorAll('button') : [];
+    if (cancelButtons.length === 0) {
+      alert('No open cancellable orders found.');
+      return;
+    }
+    showToast(`Cancelling ${cancelButtons.length} open orders...`);
+    for (const b of cancelButtons) {
+      b.click();
+    }
+  }
+
+  async function requestCloseLivePosition(symbol, product, qty) {
+    const side = qty > 0 ? 'SELL' : 'BUY';
+    const msg = "🚨 SQUARE OFF LIVE POSITION:\nAre you sure you want to close position in " + symbol + " (" + product + ") at MARKET price?\nThis will submit a " + side + " market order for " + Math.abs(qty) + " shares.";
+    if (!confirm(msg)) {
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/live/position/close', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: symbol, product: product })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'success') {
+        showToast(`Square-off order submitted for ${symbol}! Order ID: ${data.order_id}`);
+        setTimeout(() => refreshLiveTelemetry(), 1000);
+      } else {
+        alert('Failed to square off position: ' + (data.detail || data.message || 'Error'));
+      }
+    } catch (err) {
+      alert('Error squaring off: ' + err.message);
+    }
+  }
+
+  async function emergencySquareOffAll() {
+    const msg = "⚠️ CRITICAL WARNING:\nAre you sure you want to emergency square-off ALL open MIS intraday positions in your Zerodha account at MARKET price?";
+    if (!confirm(msg)) {
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/live/positions/square-off-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'success') {
+        showToast(`⚡ Emergency Square-off Executed! Closed ${data.closed_count} positions.`);
+        setTimeout(() => refreshLiveTelemetry(), 1200);
+      } else {
+        alert('Square-off all returned error: ' + (data.detail || 'Error'));
+      }
+    } catch (err) {
+      alert('Error triggering square-off all: ' + err.message);
+    }
+  }
+
+  async function refreshLiveTelemetry() {
+    try {
+      const res = await fetch('/api/live/telemetry');
+      const data = await res.json();
+      if (res.ok && data.status === 'success') {
+        // Update margins
+        const m = data.margins || {};
+        const cashEl = document.getElementById('live-stat-cash');
+        const usedEl = document.getElementById('live-stat-used');
+        const cardCashEl = document.getElementById('card-live-cash');
+        const cardUsedEl = document.getElementById('card-live-used');
+
+        if (cashEl) cashEl.textContent = `₹${(m.available_cash || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+        if (cardCashEl) cardCashEl.textContent = `₹${(m.available_cash || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+        if (usedEl) usedEl.textContent = `₹${(m.used_margin || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+        if (cardUsedEl) cardUsedEl.textContent = `₹${(m.used_margin || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+
+        // Update positions telemetry
+        const p = data.positions || {};
+        const unrealEl = document.getElementById('live-stat-unrealized');
+        const realEl = document.getElementById('live-stat-realized');
+        const countEl = document.getElementById('live-stat-pos-count');
+
+        if (unrealEl) {
+          const val = p.unrealized_pnl || 0;
+          unrealEl.textContent = `${val >= 0 ? '+' : ''}₹${val.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+          unrealEl.style.color = val >= 0 ? '#059669' : '#cc0000';
+        }
+        if (realEl) {
+          const val = p.realized_pnl || 0;
+          realEl.textContent = `${val >= 0 ? '+' : ''}₹${val.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+          realEl.style.color = val >= 0 ? '#059669' : '#cc0000';
+        }
+        if (countEl) countEl.textContent = `${p.open_count || 0} Open`;
+
+        // Render Positions Table
+        renderPositionsTable(p.net || []);
+
+        // Render Orders Table
+        renderOrdersTable(data.orders || []);
+      }
+    } catch (err) {
+      console.warn('Telemetry polling error:', err);
+    }
+  }
+
+  function renderPositionsTable(positions) {
+    const tbody = document.getElementById('live-positions-tbody');
+    if (!tbody) return;
+    const openPos = positions.filter(p => p.quantity !== 0);
+    if (openPos.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="10" style="text-align: center; padding: 18px; color: #777;">
+            No open net positions currently held in your Zerodha account. All previous positions are closed.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    let html = '';
+    for (const pos of openPos) {
+      const isLong = pos.quantity > 0;
+      const unPnl = pos.unrealised || 0;
+      const rePnl = pos.realised || 0;
+      html += `
+        <tr>
+          <td style="font-weight: 800; font-family: var(--font-mono);">${pos.tradingsymbol}</td>
+          <td><span style="background: #e0e7ff; color: #3730a3; padding: 1px 5px; font-size: 9.5px; font-weight: 700; border-radius: 2px;">${pos.product}</span></td>
+          <td><span class="${isLong ? 'change-green' : 'change-red'}" style="font-weight: 800;">${isLong ? 'BUY (LONG)' : 'SELL (SHORT)'}</span></td>
+          <td style="font-weight: 700;">${Math.abs(pos.quantity)}</td>
+          <td>₹${(pos.buy_price || 0).toFixed(2)}</td>
+          <td>₹${(pos.sell_price || 0).toFixed(2)}</td>
+          <td style="font-weight: 700;">₹${(pos.last_price || 0).toFixed(2)}</td>
+          <td style="font-weight: 800; color: ${unPnl >= 0 ? '#059669' : '#cc0000'};">
+            ${unPnl >= 0 ? '+' : ''}₹${unPnl.toFixed(2)}
+          </td>
+          <td style="font-weight: 700; color: ${rePnl >= 0 ? '#059669' : '#cc0000'};">
+            ${rePnl >= 0 ? '+' : ''}₹${rePnl.toFixed(2)}
+          </td>
+          <td>
+            <button onclick="requestCloseLivePosition('${pos.tradingsymbol}', '${pos.product}', ${pos.quantity})" class="term-btn" style="background:#fee2e2; color:#cc0000; border-color:#cc0000; padding: 2px 8px; font-size: 10px; font-weight: 700;">
+              Square Off (MKT)
+            </button>
+          </td>
+        </tr>
+      `;
+    }
+    tbody.innerHTML = html;
+  }
+
+  function renderOrdersTable(orders) {
+    const tbody = document.getElementById('live-orders-tbody');
+    if (!tbody) return;
+    if (orders.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="11" style="text-align: center; padding: 18px; color: #777;">
+            No orders placed today on Zerodha gateway.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    let html = '';
+    for (const o of orders) {
+      const isBuy = o.transaction_type === 'BUY';
+      let statusBadge = `<span style="font-size:10px;">${o.status}</span>`;
+      if (o.status === 'COMPLETE') {
+        statusBadge = `<span class="badge-signal-bullish" style="font-size: 9.5px; padding: 1px 5px;">COMPLETE</span>`;
+      } else if (o.status === 'OPEN' || o.status === 'TRIGGER PENDING') {
+        statusBadge = `<span style="background: #fef3c7; color: #b45309; border: 1px solid #d97706; padding: 1px 5px; font-size: 9.5px; font-weight: 800; border-radius: 2px;">OPEN</span>`;
+      } else if (o.status === 'REJECTED') {
+        statusBadge = `<span style="background: #fee2e2; color: #cc0000; border: 1px solid #cc0000; padding: 1px 5px; font-size: 9.5px; font-weight: 800; border-radius: 2px;">REJECTED</span>`;
+      } else if (o.status === 'CANCELLED') {
+        statusBadge = `<span style="background: #f3f4f6; color: #6b7280; padding: 1px 5px; font-size: 9.5px; font-weight: 700; border-radius: 2px;">CANCELLED</span>`;
+      }
+
+      let actionBtn = '<span style="color: #bbb; font-size: 10px;">--</span>';
+      if (o.status === 'OPEN' || o.status === 'TRIGGER PENDING') {
+        actionBtn = `<button onclick="cancelLiveOrder('${o.order_id}')" class="term-btn" style="background:#fee2e2; color:#cc0000; border-color:#cc0000; padding: 1px 6px; font-size: 9.5px; font-weight: 700;">Cancel</button>`;
+      }
+
+      html += `
+        <tr>
+          <td style="font-size: 10px; color: #666; white-space: nowrap;">${o.order_timestamp || o.exchange_timestamp || '--'}</td>
+          <td style="font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;">${o.order_id}</td>
+          <td style="font-weight: 800;">${o.tradingsymbol}</td>
+          <td style="font-size: 10px;">${o.order_type}</td>
+          <td><span style="background: #f1f5f9; padding: 1px 4px; font-size: 9.5px; font-weight: 700;">${o.product}</span></td>
+          <td style="font-weight: 800; color: ${isBuy ? '#059669' : '#cc0000'};">${o.transaction_type}</td>
+          <td style="font-weight: 700;">${o.filled_quantity || 0}/${o.quantity}</td>
+          <td>₹${((o.average_price || o.price || 0)).toFixed(2)}</td>
+          <td>${statusBadge}</td>
+          <td style="font-size: 10px; color: #666; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${o.status_message || ''}">
+            ${o.status_message || '--'}
+          </td>
+          <td>${actionBtn}</td>
+        </tr>
+      `;
+    }
+    tbody.innerHTML = html;
+  }
+
+  // Poll live telemetry every 6 seconds while on live tab
+  setInterval(refreshLiveTelemetry, 6000);
+
+  // Hook stock selection in live tab to update margin calculations
+  const originalSelectStock = window.selectStock;
+  window.addEventListener('DOMContentLoaded', () => {
+    calculateLiveMargin();
+  });
+</script>
+{% endblock %}

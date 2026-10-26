@@ -1,0 +1,31 @@
+# =====================================================================
+# AlgoDesk AI-Generated Strategy Configuration (Auto-Optimized by Gemini)
+# Status: PROFITABLE (75%+ WINRATE) | Net Return: +1.93% | Profit Factor: 99.0
+# Generated: 2026-10-26 01:49:24
+# =====================================================================
+name: "dynamic_trend_pulse_75_v1"
+description: "Morning momentum trend continuation filtering out choppy days with asymmetric 1:2 R:R."
+archetype: "ORB_BREAKOUT"
+version: "1"
+timeframe: "5m"
+live_enabled: false
+
+parameters:
+  or_minutes: 15
+  vol_mult: 1.18
+  stop_loss_pct: 0.0065
+  target_pct: 0.013
+  trailing_stop: True
+
+risk:
+  risk_per_trade_pct: 0.01
+  max_open_positions: 3
+  stop_loss_pct: 0.0065
+  target_pct: 0.013
+
+backtest_metrics:
+  net_return_pct: 1.93
+  profit_factor: 99.0
+  win_rate_pct: 100.0
+  sharpe_ratio: 15.09
+  max_drawdown_pct: 0.0

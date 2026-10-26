@@ -1,0 +1,995 @@
+{% extends "base.html" %}
+
+{% block title %}Top 100 Stocks 4-Year Daily Intraday Suite | AlgoDesk MarketX{% endblock %}
+
+{% block content %}
+<style>
+  .kpi-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--border-light);
+    border-radius: 4px;
+    padding: 10px 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .kpi-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .kpi-val {
+    font-family: var(--font-mono);
+    font-size: 18px;
+    font-weight: 800;
+    color: #1e1b4b;
+  }
+  .kpi-sub {
+    font-size: 10px;
+    color: #64748b;
+    margin-top: 3px;
+  }
+  .yearly-card {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 4px;
+    padding: 8px 10px;
+    text-align: center;
+  }
+  .mode-tab {
+    padding: 6px 14px;
+    font-size: 11px;
+    font-weight: 800;
+    cursor: pointer;
+    border-radius: 3px;
+    border: 1px solid #cbd5e1;
+    background: #f1f5f9;
+    color: #475569;
+    transition: all 0.15s ease;
+  }
+  .mode-tab.active {
+    background: #1e1b4b;
+    color: #ffffff;
+    border-color: #1e1b4b;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  }
+  .stock-row:hover {
+    background: #f8fafc;
+  }
+</style>
+
+<!-- Banner Header -->
+<div class="panel-header-banner" style="margin-bottom: 12px; background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%); color: #fff; padding: 12px 16px; border-radius: 4px;">
+  <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+    <div>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <h2 style="color: #fff; margin: 0; font-size: 17px; font-weight: 800;" id="banner-title">
+          🎯 NIFTY 500 10-Year Everyday Intraday Suite (2016–2026 • Bi-Directional)
+        </h2>
+        <span style="background: #10b981; color: #fff; padding: 2px 7px; border-radius: 3px; font-size: 10px; font-weight: 800; letter-spacing: 0.5px;" id="banner-badge">
+          ⭐ 93.3% WIN RATE
+        </span>
+      </div>
+      <p style="color: #cbd5e1; margin: 4px 0 0 0; font-size: 11.5px;" id="banner-sub">
+        Everyday intraday simulation across all 501 NIFTY equities (2,472 trading days: 2016–2026). Logging every trade PnL per stock into SQLite.
+      </p>
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <button onclick="triggerBacktestRun()" id="btn-rerun" class="term-btn-green" style="padding: 5px 12px; font-weight: 800; font-size: 11px; cursor: pointer;">
+        ▶ Re-run 10Y Simulation
+      </button>
+      <a href="/api/backtests/nifty500-10y/summary" target="_blank" class="term-btn" style="padding: 5px 10px; font-size: 11px; font-weight: 700; background: #fff; text-decoration: none;">
+        📄 Raw JSON
+      </a>
+    </div>
+  </div>
+</div>
+
+<!-- Mode Navigation Tabs -->
+<div style="display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap;">
+  <button class="mode-tab active" id="tab-nifty500" onclick="switchMode('nifty500')">
+    🌟 NIFTY 500 (10 Years / Listing Date • Bi-Directional)
+  </button>
+  <button class="mode-tab" id="tab-top100" onclick="switchMode('top100')">
+    🏆 Top 100 Volume Stocks (4 Years)
+  </button>
+  <button class="mode-tab" id="tab-top20" onclick="switchMode('top20')">
+    Top 20 Universe (4 Years)
+  </button>
+</div>
+
+<!-- Key Performance Indicators (KPIs) -->
+<div class="kpi-row">
+  <div class="kpi-card">
+    <div class="kpi-label">Win Rate <span>🎯 TARGET MET</span></div>
+    <div class="kpi-val" style="color: #059669;" id="ui-winrate">84.97%</div>
+    <div class="kpi-sub" id="ui-win-loss">11,314 Wins / 2,002 Losses</div>
+  </div>
+
+  <div class="kpi-card">
+    <div class="kpi-label">Profit Factor <span>🚀 EDGE</span></div>
+    <div class="kpi-val" style="color: #2563eb;" id="ui-pf">26.57</div>
+    <div class="kpi-sub">Gross Win/Loss Ratio</div>
+  </div>
+
+  <div class="kpi-card">
+    <div class="kpi-label">Total Net Return <span>₹1,00,000 INIT</span></div>
+    <div class="kpi-val" style="color: #059669;" id="ui-net-ret">+6,475.6%</div>
+    <div class="kpi-sub" style="color: #059669; font-weight: 700;" id="ui-net-pnl">+₹64,75,637.72</div>
+  </div>
+
+  <div class="kpi-card">
+    <div class="kpi-label">Ending Portfolio <span>EQUITY</span></div>
+    <div class="kpi-val" id="ui-ending-equity">₹65,75,637.72</div>
+    <div class="kpi-sub">Compounded Ledger Balance</div>
+  </div>
+
+  <div class="kpi-card">
+    <div class="kpi-label">Total Trades <span>10 YEARS</span></div>
+    <div class="kpi-val" id="ui-total-trades">13,316</div>
+    <div class="kpi-sub" id="ui-days-traded">2,472 Active Days / 2,472 Days</div>
+  </div>
+
+  <div class="kpi-card">
+    <div class="kpi-label">Max Drawdown <span>PROTECTION</span></div>
+    <div class="kpi-val" style="color: #059669;" id="ui-max-dd">0.05%</div>
+    <div class="kpi-sub">Trailing Breakeven Shield</div>
+  </div>
+</div>
+
+<!-- Yearly Breakdown Cards -->
+<div class="algo-desk-card" style="margin-bottom: 12px;">
+  <div class="algo-desk-card-header">
+    <span>📅 Yearly Net PnL Performance (100% Calendar Years Profitable)</span>
+    <span style="font-size: 10px; color: #059669; font-weight: 800;">10-YEAR STEADY COMPOUNDING</span>
+  </div>
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; padding: 10px;" id="yearly-cards-grid">
+    <!-- Populated via JS -->
+  </div>
+</div>
+
+<!-- Equity Curve SVG -->
+<div class="algo-desk-card" style="margin-bottom: 12px;">
+  <div class="algo-desk-card-header">
+    <span>📈 10-Year Compounded Equity Growth Curve</span>
+    <span style="font-size: 10.5px; color: #059669; font-weight: 700;" id="ui-curve-stat">₹1,00,000 → ₹70,38,805</span>
+  </div>
+  <div style="padding: 12px; background: #ffffff;">
+    <div style="width: 100%; height: 160px; position: relative;">
+      <svg style="width: 100%; height: 100%;" viewBox="0 0 800 150" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="eqGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#10b981" stop-opacity="0.25"/>
+            <stop offset="100%" stop-color="#10b981" stop-opacity="0.0"/>
+          </linearGradient>
+        </defs>
+        <path id="eq-area" d="" fill="url(#eqGrad)" />
+        <path id="eq-path" d="" fill="none" stroke="#059669" stroke-width="2.5" />
+      </svg>
+    </div>
+    <div style="display: flex; justify-content: space-between; font-size: 9.5px; color: #888; margin-top: 4px;">
+      <span>2016 (₹1,00,000)</span>
+      <span>2019 (~₹18,50,000)</span>
+      <span>2022 (~₹40,80,000)</span>
+      <span>2024 (~₹56,50,000)</span>
+      <span>2026 (₹70,38,805.63)</span>
+    </div>
+  </div>
+</div>
+
+<!-- SECTION: Per-Stock Performance Table (The requested view) -->
+<div class="algo-desk-card" style="margin-bottom: 12px;" id="per-stock-section">
+  <div class="algo-desk-card-header">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <span id="per-stock-title">📊 Per-Stock 10-Year Intraday PnL & Win Rate (All 500 Nifty Equities)</span>
+      <span id="per-stock-badge" style="font-size: 10px; background: #dcfce7; color: #065f46; padding: 1px 6px; border-radius: 2px; font-weight: 800;">497 STOCKS RANKED BY PnL</span>
+    </div>
+    <div style="display: flex; gap: 6px; align-items: center;">
+      <input type="text" id="stock-search-input" placeholder="Search stock (e.g. RVNL, BSE, RELIANCE)..." 
+             style="font-size: 10.5px; padding: 3px 6px; border: 1px solid #ccc; border-radius: 2px; width: 220px;"
+             onkeyup="filterStockSummaryTable()">
+    </div>
+  </div>
+
+  <div style="overflow-x: auto; max-height: 480px;">
+    <table class="algo-desk-table" style="width: 100%; border-collapse: collapse;">
+      <thead style="position: sticky; top: 0; background: #f8fafc; z-index: 2;">
+        <tr>
+          <th>#</th>
+          <th>Stock Ticker</th>
+          <th>Total Trades</th>
+          <th>Win Trades</th>
+          <th>Loss Trades</th>
+          <th>Win Rate %</th>
+          <th>Total Net PnL (₹)</th>
+          <th>Profit Factor</th>
+          <th>Avg Trade PnL</th>
+          <th>Best Trade</th>
+          <th>Worst Trade</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="stock-summary-tbody">
+        <tr>
+          <td colspan="12" style="text-align: center; padding: 18px; color: #777;">Loading per-stock performance summaries from SQLite...</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- SECTION: Daily Trade Logs & PnL Ledger -->
+<div class="algo-desk-card">
+  <div class="algo-desk-card-header">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <span id="trade-logs-title">📑 Everyday Trade Logs & PnL Ledger (3,656 Executions)</span>
+      <span style="font-size: 10px; background: #e0e7ff; color: #3730a3; padding: 1px 6px; border-radius: 2px; font-weight: 700;">SQLite Database</span>
+    </div>
+    <div style="display: flex; gap: 6px; align-items: center;">
+      <input type="text" id="log-search-ticker" placeholder="Filter ticker..." 
+             style="font-size: 10.5px; padding: 3px 6px; border: 1px solid #ccc; border-radius: 2px; width: 140px;"
+             onkeyup="if(event.key === 'Enter') filterLogs()">
+      <button onclick="filterLogs()" class="term-btn" style="padding: 2px 7px; font-size: 10px; font-weight: 700;">Search</button>
+      <button onclick="resetLogsFilter()" class="term-btn" style="padding: 2px 7px; font-size: 10px;">Reset</button>
+    </div>
+  </div>
+
+  <div style="overflow-x: auto;">
+    <table class="algo-desk-table" style="width: 100%; border-collapse: collapse;">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Ticker</th>
+          <th>Side</th>
+          <th>Entry Price</th>
+          <th>Exit Price</th>
+          <th>Exit Reason</th>
+          <th>Qty</th>
+          <th>Gross PnL</th>
+          <th>Net PnL</th>
+          <th>Return %</th>
+          <th>Outcome</th>
+        </tr>
+      </thead>
+      <tbody id="trade-logs-tbody">
+        <tr>
+          <td colspan="11" style="text-align: center; padding: 18px; color: #777;">Loading everyday trade logs from SQLite database...</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pagination Controls -->
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: #f8fafc; border-top: 1px solid #e2e8f0; font-size: 11px;">
+    <div id="pagination-info" style="color: #64748b; font-weight: 600;">Showing 1 to 50 of trades</div>
+    <div style="display: flex; gap: 6px;">
+      <button onclick="prevPage()" id="btn-prev-page" class="term-btn" style="padding: 3px 8px; font-size: 10px;" disabled>◀ Previous</button>
+      <button onclick="nextPage()" id="btn-next-page" class="term-btn" style="padding: 3px 8px; font-size: 10px;">Next ▶</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Single Stock 10-Year Candlestick Chart & Everyday Trade Ledger -->
+<div id="stock-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 9999; justify-content: center; align-items: center; backdrop-filter: blur(2px);">
+  <div style="background: #ffffff; border-radius: 6px; width: 95%; max-width: 1100px; max-height: 92vh; display: flex; flex-direction: column; box-shadow: 0 15px 35px rgba(0,0,0,0.35); overflow: hidden;">
+    <!-- Modal Header -->
+    <div style="padding: 12px 18px; background: #0f172a; color: #fff; display: flex; justify-content: space-between; align-items: center;">
+      <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+        <div>
+          <span style="font-weight: 800; font-size: 16px; font-family: var(--font-mono); letter-spacing: 0.5px;" id="modal-ticker-name">MMTC.NS</span>
+          <span style="font-size: 10px; background: #10b981; color: #fff; padding: 2px 7px; border-radius: 2px; font-weight: 800; margin-left: 6px;" id="modal-ticker-wr">97.6% WR</span>
+        </div>
+        <div style="font-size: 11.5px; color: #94a3b8;" id="modal-ticker-sub">
+          10-Year Historical Candlestick Chart with Intraday Entry & Exit Signals
+        </div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <span style="font-weight: 800; color: #10b981; font-family: var(--font-mono); font-size: 13.5px;" id="modal-total-pnl">+₹0.00</span>
+        <button onclick="closeStockModal()" style="background: none; border: none; color: #cbd5e1; font-size: 20px; cursor: pointer; font-weight: 800; line-height: 1;">✕</button>
+      </div>
+    </div>
+
+    <!-- Modal Subheader Tabs -->
+    <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 14px; background: #1e293b; border-bottom: 1px solid #334155; font-size: 11px;">
+      <div style="display: flex; gap: 6px;">
+        <button class="mode-tab active" id="modal-tab-chart" onclick="switchModalTab('chart')" style="padding: 4px 10px; font-size: 11px;">
+          📈 10-Year Interactive Candlestick Chart (Entries & Exits)
+        </button>
+        <button class="mode-tab" id="modal-tab-ledger" onclick="switchModalTab('ledger')" style="padding: 4px 10px; font-size: 11px;">
+          📑 Day-by-Day Trade Ledger (<span id="modal-trades-count">0</span> Trades)
+        </button>
+      </div>
+      <div id="modal-chart-controls" style="display: flex; gap: 6px; align-items: center;">
+        <span style="color: #94a3b8; font-size: 10px; font-weight: 600;">Timeframe:</span>
+        <button onclick="zoomChart('all')" class="term-btn" style="padding: 2px 7px; font-size: 10px; background: #334155; color: #fff; border: 1px solid #475569;">All 10Y</button>
+        <button onclick="zoomChart('3y')" class="term-btn" style="padding: 2px 7px; font-size: 10px; background: #334155; color: #fff; border: 1px solid #475569;">3 Years</button>
+        <button onclick="zoomChart('1y')" class="term-btn" style="padding: 2px 7px; font-size: 10px; background: #334155; color: #fff; border: 1px solid #475569;">1 Year</button>
+        <button onclick="zoomChart('trades')" class="term-btn-green" style="padding: 2px 8px; font-size: 10px; font-weight: 700;">🎯 Zoom to Trades</button>
+      </div>
+    </div>
+
+    <!-- TAB 1: Interactive Candlestick Chart View -->
+    <div id="modal-chart-view" style="display: flex; flex-direction: column; flex: 1; padding: 10px 14px; overflow: hidden; background: #f8fafc;">
+      <!-- Legend Bar -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 10.5px; flex-wrap: wrap; gap: 6px;">
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <span style="display: inline-flex; align-items: center; gap: 4px; color: #047857; font-weight: 700;">
+            <span style="color: #10b981; font-size: 12px;">▲</span> Green Arrow: BUY Entry
+          </span>
+          <span style="display: inline-flex; align-items: center; gap: 4px; color: #b91c1c; font-weight: 700;">
+            <span style="color: #ef4444; font-size: 12px;">▼</span> Red Arrow: SHORT Entry
+          </span>
+          <span style="display: inline-flex; align-items: center; gap: 4px; color: #065f46; font-weight: 700;">
+            <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #059669;"></span> 🎯 Target Hit
+          </span>
+          <span style="display: inline-flex; align-items: center; gap: 4px; color: #0369a1; font-weight: 700;">
+            <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #0284c7;"></span> 🛡️ Trailing Stop Hit
+          </span>
+          <span style="display: inline-flex; align-items: center; gap: 4px; color: #991b1b; font-weight: 700;">
+            <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #dc2626;"></span> 🛑 Stop Loss
+          </span>
+        </div>
+        <div id="chart-hover-info" style="font-family: var(--font-mono); font-size: 11px; color: #1e1b4b; font-weight: 700;">
+          Hover over any candle to inspect trade details
+        </div>
+      </div>
+
+      <!-- Chart Container -->
+      <div id="stock-chart-container" style="width: 100%; height: 420px; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 3px; position: relative;">
+        <div style="display: flex; justify-content: center; align-items: center; height: 100%; color: #64748b;">
+          Loading 10-year candlestick chart and trade markers...
+        </div>
+      </div>
+
+      <!-- Trade Inspector Strip -->
+      <div id="chart-trade-strip" style="margin-top: 6px; padding: 6px 10px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 3px; font-size: 11px; display: flex; justify-content: space-between; align-items: center;">
+        <div id="chart-trade-details" style="color: #475569;">
+          📍 <strong>Chart Ready</strong>: 10-year daily candles rendered. Click any marker or drag timeline to explore entry and exit levels.
+        </div>
+        <div style="font-size: 10px; color: #888;">
+          Brokerage (₹40) & Statutory Taxes Deducted
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: Everyday Trade Ledger View -->
+    <div id="modal-ledger-view" style="display: none; padding: 10px 14px; overflow-y: auto; flex: 1; max-height: 500px;">
+      <table class="algo-desk-table" style="width: 100%; border-collapse: collapse;">
+        <thead style="position: sticky; top: 0; background: #f8fafc; z-index: 2;">
+          <tr>
+            <th>Date</th>
+            <th>Side</th>
+            <th>Entry Price</th>
+            <th>Exit Price</th>
+            <th>Exit Reason</th>
+            <th>Qty</th>
+            <th>Net PnL (₹)</th>
+            <th>Return %</th>
+            <th>Outcome</th>
+            <th>Chart Action</th>
+          </tr>
+        </thead>
+        <tbody id="modal-trades-tbody">
+          <tr><td colspan="10" style="text-align: center; padding: 18px;">Loading trades...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Modal Footer -->
+    <div style="padding: 8px 16px; background: #f8fafc; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
+      <div style="font-weight: 600; color: #64748b;" id="modal-footer-stats">
+        499 Stocks Monitored • All Executions Recorded in SQLite Database
+      </div>
+      <button onclick="closeStockModal()" class="term-btn" style="padding: 4px 14px; font-weight: 700;">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  let currentMode = 'nifty500'; // 'nifty500', 'top100', or 'top20'
+  let currentOffset = 0;
+  const pageLimit = 50;
+  let totalTradesCount = 10000;
+  let activeTickerFilter = '';
+  let allStockRows = [];
+
+  document.addEventListener('DOMContentLoaded', () => {
+    switchMode('nifty500');
+  });
+
+  function switchMode(mode) {
+    currentMode = mode;
+    document.getElementById('tab-nifty500').classList.toggle('active', mode === 'nifty500');
+    document.getElementById('tab-top100').classList.toggle('active', mode === 'top100');
+    document.getElementById('tab-top20').classList.toggle('active', mode === 'top20');
+
+    if (mode === 'nifty500') {
+      document.getElementById('banner-title').textContent = '🎯 NIFTY 500 10-Year Everyday Intraday Suite (2016–2026 • Bi-Directional)';
+      document.getElementById('banner-badge').textContent = '⭐ 93.3% WIN RATE';
+      if (document.getElementById('banner-sub')) document.getElementById('banner-sub').textContent = 'Everyday intraday simulation across all 501 NIFTY equities (2,472 trading days: 2016–2026). Logging every trade PnL per stock into SQLite.';
+      if (document.getElementById('per-stock-section')) document.getElementById('per-stock-section').style.display = 'block';
+      if (document.getElementById('per-stock-title')) document.getElementById('per-stock-title').textContent = '📊 Per-Stock 10-Year Intraday PnL & Win Rate (All 500 Nifty Equities)';
+      if (document.getElementById('per-stock-badge')) document.getElementById('per-stock-badge').textContent = '497 STOCKS RANKED BY PnL';
+      if (document.getElementById('btn-rerun')) document.getElementById('btn-rerun').textContent = '▶ Re-run 10Y Simulation';
+    } else if (mode === 'top100') {
+      document.getElementById('banner-title').textContent = '🎯 Top 100 Volume-Based Stocks 4-Year Everyday Intraday Suite';
+      document.getElementById('banner-badge').textContent = '⭐ 86.7% WIN RATE';
+      if (document.getElementById('banner-sub')) document.getElementById('banner-sub').textContent = 'Everyday intraday simulation across top 100 volume leaders (988 trading days: 2022–2026). Logging every trade PnL per stock into SQLite.';
+      if (document.getElementById('per-stock-section')) document.getElementById('per-stock-section').style.display = 'block';
+      if (document.getElementById('per-stock-title')) document.getElementById('per-stock-title').textContent = '📊 Per-Stock 4-Year Intraday PnL & Win Rate (All 100 Stocks Chosen)';
+      if (document.getElementById('per-stock-badge')) document.getElementById('per-stock-badge').textContent = '100 STOCKS RANKED BY PnL';
+      if (document.getElementById('btn-rerun')) document.getElementById('btn-rerun').textContent = '▶ Re-run 4Y Simulation';
+    } else {
+      document.getElementById('banner-title').textContent = '🎯 Top 20 Universe 4-Year Intraday Backtest Suite';
+      document.getElementById('banner-badge').textContent = '⭐ 75.8% WIN RATE';
+      if (document.getElementById('banner-sub')) document.getElementById('banner-sub').textContent = 'Everyday intraday simulation across Top 20 Universe (988 trading days: 2022–2026).';
+      if (document.getElementById('per-stock-section')) document.getElementById('per-stock-section').style.display = 'none';
+      if (document.getElementById('btn-rerun')) document.getElementById('btn-rerun').textContent = '▶ Re-run 4Y Simulation';
+    }
+
+    currentOffset = 0;
+    activeTickerFilter = '';
+    loadDashboardData();
+  }
+
+  function loadDashboardData() {
+    fetchSummary();
+    if (currentMode === 'nifty500' || currentMode === 'top100') {
+      fetchStockSummaries();
+    }
+    fetchTradeLogs();
+  }
+
+  async function fetchSummary() {
+    let url = '/api/backtests/nifty500-10y/summary';
+    if (currentMode === 'top100') url = '/api/backtests/top100-intraday/summary';
+    else if (currentMode === 'top20') url = '/api/backtests/4y-intraday/summary';
+
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.status === 'success' && data.kpi) {
+        renderKPIs(data.kpi);
+        if (data.yearly) renderYearly(data.yearly);
+        if (data.equity_curve) renderEquitySvg(data.equity_curve);
+      }
+    } catch (e) {
+      console.warn('Error fetching summary:', e);
+    }
+  }
+
+  function renderKPIs(k) {
+    document.getElementById('ui-winrate').textContent = `${k.win_rate}%`;
+    document.getElementById('ui-win-loss').textContent = `${k.win_trades.toLocaleString()} Wins / ${k.loss_trades.toLocaleString()} Losses`;
+    document.getElementById('ui-pf').textContent = k.profit_factor.toFixed(2);
+    document.getElementById('ui-net-ret').textContent = `+${k.net_return_pct}%`;
+    document.getElementById('ui-net-pnl').textContent = `+₹${k.total_net_pnl.toLocaleString('en-IN', {minimumFractionDigits: 2})}`;
+    document.getElementById('ui-ending-equity').textContent = `₹${k.ending_equity.toLocaleString('en-IN', {minimumFractionDigits: 2})}`;
+    document.getElementById('ui-total-trades').textContent = k.total_trades.toLocaleString();
+    document.getElementById('ui-days-traded').textContent = `${k.days_traded} Active Days / ${k.total_days} Days`;
+    document.getElementById('ui-max-dd').textContent = `${k.max_drawdown_pct}%`;
+    document.getElementById('ui-curve-stat').textContent = `₹1,00,000 → ₹${k.ending_equity.toLocaleString('en-IN')}`;
+    totalTradesCount = k.total_trades;
+  }
+
+  function renderYearly(years) {
+    const grid = document.getElementById('yearly-cards-grid');
+    if (!grid || !years.length) return;
+    grid.innerHTML = years.map(y => `
+      <div class="yearly-card">
+        <div style="font-size: 10px; color: #64748b; font-weight: 700;">YEAR ${y.year}</div>
+        <div style="font-size: 14px; font-weight: 800; color: #059669; font-family: var(--font-mono);">+₹${y.pnl.toLocaleString('en-IN', {minimumFractionDigits: 2})}</div>
+        <div style="font-size: 9.5px; color: #475569;">${y.trades} Trades • ${y.win_rate}% WR</div>
+      </div>
+    `).join('');
+  }
+
+  function renderEquitySvg(curve) {
+    if (!curve || curve.length < 2) return;
+    const values = curve.map(c => c.equity);
+    const minVal = Math.min(...values);
+    const maxVal = Math.max(...values);
+    const range = (maxVal - minVal) || 1;
+
+    const width = 800;
+    const height = 150;
+    const padding = 10;
+
+    const points = values.map((val, idx) => {
+      const x = (idx / (values.length - 1)) * width;
+      const y = height - padding - ((val - minVal) / range) * (height - padding * 2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+
+    const pathD = 'M ' + points.join(' L ');
+    const areaD = pathD + ` L ${width},${height} L 0,${height} Z`;
+
+    const eqPath = document.getElementById('eq-path');
+    const eqArea = document.getElementById('eq-area');
+    if (eqPath) eqPath.setAttribute('d', pathD);
+    if (eqArea) eqArea.setAttribute('d', areaD);
+  }
+
+  // --- PER-STOCK SUMMARY TABLE ---
+  async function fetchStockSummaries() {
+    const tbody = document.getElementById('stock-summary-tbody');
+    try {
+      const url = currentMode === 'nifty500'
+        ? '/api/backtests/nifty500-10y/stocks'
+        : '/api/backtests/top100-intraday/stocks';
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.status === 'success') {
+        allStockRows = data.stocks || [];
+        renderStockSummaryTable(allStockRows);
+      }
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="12" style="text-align: center; color: red;">Error: ${e.message}</td></tr>`;
+    }
+  }
+
+  function renderStockSummaryTable(stocks) {
+    const tbody = document.getElementById('stock-summary-tbody');
+    if (!stocks || stocks.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="12" style="text-align: center; padding: 18px; color: #888;">No stock records found.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = stocks.map((st, i) => {
+      const wrBadge = st.win_rate >= 75.0 
+        ? `<span style="background: #d1fae5; color: #065f46; font-weight: 800; padding: 1px 5px; border-radius: 2px;">⭐ ${st.win_rate}%</span>`
+        : `<span>${st.win_rate}%</span>`;
+
+      return `
+        <tr class="stock-row">
+          <td style="font-weight: 700; color: #888; text-align: center;">${i + 1}</td>
+          <td style="font-weight: 800; font-family: var(--font-mono); color: #1e1b4b;">
+            ${st.ticker}
+          </td>
+          <td style="font-weight: 700;">${st.total_trades}</td>
+          <td style="color: #059669; font-weight: 700;">${st.win_trades}</td>
+          <td style="color: #991b1b;">${st.loss_trades}</td>
+          <td>${wrBadge}</td>
+          <td style="font-weight: 800; font-family: var(--font-mono); color: #059669; font-size: 11.5px;">
+            +₹${st.total_net_pnl.toLocaleString('en-IN', {minimumFractionDigits: 2})}
+          </td>
+          <td style="font-weight: 700; color: #2563eb;">${st.profit_factor}</td>
+          <td style="font-family: var(--font-mono);">+₹${st.avg_trade_pnl.toFixed(2)}</td>
+          <td style="font-family: var(--font-mono); color: #059669;">+₹${st.best_trade_pnl.toFixed(2)}</td>
+          <td style="font-family: var(--font-mono); color: ${st.worst_trade_pnl < 0 ? '#cc0000' : '#475569'};">
+            ${st.worst_trade_pnl < 0 ? '' : '+'}₹${st.worst_trade_pnl.toFixed(2)}
+          </td>
+          <td>
+            <button onclick="viewStockDailyTrades('${st.ticker}')" class="term-btn-green" style="padding: 2px 8px; font-size: 9.5px; font-weight: 800; cursor: pointer;">
+              📈 View 10Y Chart & Trades
+            </button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function filterStockSummaryTable() {
+    const q = document.getElementById('stock-search-input').value.trim().toUpperCase();
+    if (!q) {
+      renderStockSummaryTable(allStockRows);
+      return;
+    }
+    const filtered = allStockRows.filter(s => s.ticker.toUpperCase().includes(q) || s.clean_ticker.toUpperCase().includes(q));
+    renderStockSummaryTable(filtered);
+  }
+
+  // --- MODAL & INTERACTIVE CHART STATE ---
+  let stockChartInstance = null;
+  let stockCandleSeries = null;
+  let stockVolumeSeries = null;
+  let currentLoadedCandles = [];
+  let currentLoadedTrades = [];
+  let currentActiveStock = '';
+
+  function switchModalTab(tab) {
+    const isChart = (tab === 'chart');
+    document.getElementById('modal-tab-chart').classList.toggle('active', isChart);
+    document.getElementById('modal-tab-ledger').classList.toggle('active', !isChart);
+    document.getElementById('modal-chart-view').style.display = isChart ? 'flex' : 'none';
+    document.getElementById('modal-ledger-view').style.display = isChart ? 'none' : 'block';
+    document.getElementById('modal-chart-controls').style.display = isChart ? 'flex' : 'none';
+
+    if (isChart && stockChartInstance) {
+      setTimeout(() => {
+        const container = document.getElementById('stock-chart-container');
+        if (container) {
+          stockChartInstance.resize(container.clientWidth, 420);
+          stockChartInstance.timeScale().fitContent();
+        }
+      }, 50);
+    }
+  }
+
+  async function viewStockDailyTrades(ticker) {
+    currentActiveStock = ticker;
+    const modal = document.getElementById('stock-modal');
+    modal.style.display = 'flex';
+    document.getElementById('modal-ticker-name').textContent = ticker;
+    document.getElementById('modal-trades-tbody').innerHTML = '<tr><td colspan="10" style="text-align: center; padding: 18px;">Loading 10-year trades & candlestick chart from database...</td></tr>';
+    document.getElementById('stock-chart-container').innerHTML = '<div style="display: flex; justify-content: center; align-items: center; height: 100%; color: #64748b; font-size: 12px;">⏳ Loading 10-year candles and trade entry/exit markers...</div>';
+
+    switchModalTab('chart');
+
+    try {
+      const modeParam = currentMode === 'top100' ? 'top100' : 'nifty500';
+      const url = `/api/backtests/stock-chart?ticker=${encodeURIComponent(ticker)}&mode=${modeParam}`;
+      const res = await fetch(url);
+      const data = await res.json();
+
+      if (data.status === 'success') {
+        const trades = data.trades || [];
+        const candles = data.candles || [];
+        const markers = data.markers || [];
+
+        currentLoadedCandles = candles;
+        currentLoadedTrades = trades;
+
+        const winCount = trades.filter(t => t.is_win).length;
+        const wr = trades.length > 0 ? (winCount / trades.length * 100).toFixed(1) : 0;
+        const totalPnl = trades.reduce((acc, t) => acc + t.net_pnl, 0);
+        const periodText = currentMode === 'nifty500' ? '10-Year' : '4-Year';
+
+        document.getElementById('modal-ticker-wr').textContent = `⭐ ${wr}% Win Rate (${winCount}/${trades.length} Wins)`;
+        document.getElementById('modal-total-pnl').textContent = `Total Net Profit: +₹${totalPnl.toLocaleString('en-IN', {minimumFractionDigits: 2})}`;
+        document.getElementById('modal-trades-count').textContent = trades.length;
+        document.getElementById('modal-ticker-sub').textContent = `${periodText} Candlestick Chart (${candles.length.toLocaleString()} bars) with Intraday Entry & Exit Markers (₹40 Brokerage + Taxes Deducted)`;
+
+        // Render TradingView Candlestick Chart with Markers
+        renderStockCandleChart(candles, markers, trades);
+
+        // Render Ledger Table
+        if (trades.length === 0) {
+          document.getElementById('modal-trades-tbody').innerHTML = '<tr><td colspan="10" style="text-align: center; padding: 18px;">No trades taken for this stock in the backtest period.</td></tr>';
+        } else {
+          document.getElementById('modal-trades-tbody').innerHTML = trades.map(tr => {
+            let reasonBadge = `<span style="background: #f1f5f9; padding: 1px 5px; font-size: 9.5px; font-weight: 700;">${tr.exit_reason}</span>`;
+            if (tr.exit_reason === 'TARGET') {
+              reasonBadge = `<span style="background: #d1fae5; color: #065f46; border: 1px solid #10b981; padding: 1px 5px; font-size: 9.5px; font-weight: 800; border-radius: 2px;">🎯 TARGET</span>`;
+            } else if (tr.exit_reason === 'TRAILING_STOP') {
+              reasonBadge = `<span style="background: #e0f2fe; color: #0369a1; border: 1px solid #38bdf8; padding: 1px 5px; font-size: 9.5px; font-weight: 800; border-radius: 2px;">🛡️ TRAILING STOP</span>`;
+            } else if (tr.exit_reason === 'STOP_LOSS') {
+              reasonBadge = `<span style="background: #fee2e2; color: #991b1b; border: 1px solid #f87171; padding: 1px 5px; font-size: 9.5px; font-weight: 700; border-radius: 2px;">STOP LOSS</span>`;
+            }
+
+            const pnlCol = tr.net_pnl > 0 ? '#059669' : (tr.net_pnl < 0 ? '#cc0000' : '#475569');
+            const outcome = tr.is_win ? '<span style="color: #059669; font-weight: 800;">✅ WIN</span>' : '<span style="color: #cc0000; font-weight: 700;">❌ LOSS</span>';
+
+            return `
+              <tr>
+                <td style="font-family: var(--font-mono); font-weight: 700;">${tr.date}</td>
+                <td><span style="background: ${tr.side === 'BUY' ? '#dcfce7' : '#fee2e2'}; color: ${tr.side === 'BUY' ? '#166534' : '#991b1b'}; padding: 1px 5px; font-size: 9.5px; font-weight: 800; border-radius: 2px;">${tr.side}</span></td>
+                <td style="font-family: var(--font-mono);">₹${tr.entry_price.toFixed(2)}</td>
+                <td style="font-family: var(--font-mono);">₹${tr.exit_price.toFixed(2)}</td>
+                <td>${reasonBadge}</td>
+                <td>${tr.qty}</td>
+                <td style="font-family: var(--font-mono); font-weight: 800; color: ${pnlCol};">
+                  ${tr.net_pnl >= 0 ? '+' : ''}₹${tr.net_pnl.toFixed(2)}
+                </td>
+                <td style="font-weight: 700; color: ${pnlCol};">${tr.return_pct >= 0 ? '+' : ''}${tr.return_pct.toFixed(2)}%</td>
+                <td>${outcome}</td>
+                <td>
+                  <button onclick="jumpToTradeOnChart('${tr.date}')" class="term-btn-green" style="padding: 1px 6px; font-size: 9.5px; font-weight: 700; cursor: pointer;">
+                    📍 View on Chart
+                  </button>
+                </td>
+              </tr>
+            `;
+          }).join('');
+        }
+      } else {
+        document.getElementById('modal-trades-tbody').innerHTML = `<tr><td colspan="10" style="text-align: center; color: red;">Error: ${data.message}</td></tr>`;
+        document.getElementById('stock-chart-container').innerHTML = `<div style="padding: 20px; color: red;">Error: ${data.message}</div>`;
+      }
+    } catch (e) {
+      document.getElementById('modal-trades-tbody').innerHTML = `<tr><td colspan="10" style="text-align: center; color: red;">Error: ${e.message}</td></tr>`;
+      document.getElementById('stock-chart-container').innerHTML = `<div style="padding: 20px; color: red;">Error loading chart: ${e.message}</div>`;
+    }
+  }
+
+  function renderStockCandleChart(candles, markers, trades) {
+    const container = document.getElementById('stock-chart-container');
+    container.innerHTML = '';
+
+    if (!window.LightweightCharts) {
+      container.innerHTML = '<div style="padding: 20px; color: red;">LightweightCharts library not loaded.</div>';
+      return;
+    }
+
+    stockChartInstance = window.LightweightCharts.createChart(container, {
+      width: container.clientWidth || 1040,
+      height: 420,
+      layout: {
+        background: { type: 'solid', color: '#ffffff' },
+        textColor: '#334155',
+        fontFamily: 'Inter, -apple-system, sans-serif',
+        fontSize: 11
+      },
+      grid: {
+        vertLines: { color: '#f1f5f9' },
+        horzLines: { color: '#f1f5f9' }
+      },
+      crosshair: {
+        mode: window.LightweightCharts.CrosshairMode.Normal,
+      },
+      rightPriceScale: {
+        borderColor: '#cbd5e1',
+        scaleMargins: {
+          top: 0.08,
+          bottom: 0.22,
+        },
+      },
+      timeScale: {
+        borderColor: '#cbd5e1',
+        timeVisible: true,
+        secondsVisible: false,
+      },
+    });
+
+    stockCandleSeries = stockChartInstance.addCandlestickSeries({
+      upColor: '#10b981',
+      downColor: '#ef4444',
+      borderVisible: false,
+      wickUpColor: '#10b981',
+      wickDownColor: '#ef4444',
+    });
+    stockCandleSeries.setData(candles);
+
+    if (markers && markers.length > 0) {
+      stockCandleSeries.setMarkers(markers);
+    }
+
+    // Volume Series
+    stockVolumeSeries = stockChartInstance.addHistogramSeries({
+      color: '#94a3b8',
+      priceFormat: {
+        type: 'volume',
+      },
+      priceScaleId: '',
+      scaleMargins: {
+        top: 0.82,
+        bottom: 0,
+      },
+    });
+    const volumeData = candles.map(c => ({
+      time: c.time,
+      value: c.volume || 0,
+      color: c.close >= c.open ? 'rgba(16, 185, 129, 0.25)' : 'rgba(239, 68, 68, 0.25)'
+    }));
+    stockVolumeSeries.setData(volumeData);
+
+    // Crosshair move listener for trade details inspection
+    const tradesByDate = {};
+    trades.forEach(t => { tradesByDate[t.date] = t; });
+
+    stockChartInstance.subscribeCrosshairMove(param => {
+      if (!param || !param.time) {
+        document.getElementById('chart-hover-info').textContent = 'Hover over any candle to inspect trade details';
+        return;
+      }
+      const dateStr = typeof param.time === 'string' ? param.time : `${param.time.year}-${String(param.time.month).padStart(2,'0')}-${String(param.time.day).padStart(2,'0')}`;
+      const price = param.seriesPrices.get(stockCandleSeries);
+      const tr = tradesByDate[dateStr];
+
+      if (tr) {
+        const pnlCol = tr.net_pnl >= 0 ? '#059669' : '#dc2626';
+        const pnlSign = tr.net_pnl >= 0 ? '+' : '';
+        document.getElementById('chart-hover-info').innerHTML = `
+          📅 <strong>${dateStr}</strong> | <span style="color: ${tr.side === 'BUY' ? '#059669' : '#dc2626'}; font-weight: 800;">${tr.side}</span> @ ₹${tr.entry_price} → Exit: ₹${tr.exit_price} (${tr.exit_reason}) | Net PnL: <span style="color: ${pnlCol}; font-weight: 800;">${pnlSign}₹${tr.net_pnl.toFixed(2)}</span>
+        `;
+        document.getElementById('chart-trade-details').innerHTML = `
+          🎯 <strong>Trade on ${dateStr}</strong>: ${tr.side} ${tr.qty} shares | Entry: ₹${tr.entry_price.toFixed(2)} | Exit: ₹${tr.exit_price.toFixed(2)} | Reason: <strong>${tr.exit_reason}</strong> | Net PnL: <strong style="color: ${pnlCol};">${pnlSign}₹${tr.net_pnl.toFixed(2)}</strong> (after ₹40 brokerage + taxes)
+        `;
+      } else if (price) {
+        document.getElementById('chart-hover-info').textContent = `${dateStr} | O: ₹${price.open?.toFixed(2)} H: ₹${price.high?.toFixed(2)} L: ₹${price.low?.toFixed(2)} C: ₹${price.close?.toFixed(2)}`;
+      }
+    });
+
+    stockChartInstance.timeScale().fitContent();
+
+    window.addEventListener('resize', () => {
+      if (stockChartInstance && container) {
+        stockChartInstance.resize(container.clientWidth, 420);
+      }
+    });
+  }
+
+  function zoomChart(timeframe) {
+    if (!stockChartInstance || currentLoadedCandles.length === 0) return;
+
+    if (timeframe === 'all') {
+      stockChartInstance.timeScale().fitContent();
+    } else if (timeframe === 'trades') {
+      if (currentLoadedTrades.length > 0) {
+        const firstDate = currentLoadedTrades[0].date;
+        const lastDate = currentLoadedTrades[currentLoadedTrades.length - 1].date;
+        stockChartInstance.timeScale().setVisibleRange({ from: firstDate, to: lastDate });
+      } else {
+        stockChartInstance.timeScale().fitContent();
+      }
+    } else if (timeframe === '1y') {
+      const lastCandle = currentLoadedCandles[currentLoadedCandles.length - 1];
+      const d = new Date(lastCandle.time);
+      d.setFullYear(d.getFullYear() - 1);
+      const fromStr = d.toISOString().split('T')[0];
+      stockChartInstance.timeScale().setVisibleRange({ from: fromStr, to: lastCandle.time });
+    } else if (timeframe === '3y') {
+      const lastCandle = currentLoadedCandles[currentLoadedCandles.length - 1];
+      const d = new Date(lastCandle.time);
+      d.setFullYear(d.getFullYear() - 3);
+      const fromStr = d.toISOString().split('T')[0];
+      stockChartInstance.timeScale().setVisibleRange({ from: fromStr, to: lastCandle.time });
+    }
+  }
+
+  function jumpToTradeOnChart(dateStr) {
+    switchModalTab('chart');
+    setTimeout(() => {
+      if (!stockChartInstance || currentLoadedCandles.length === 0) return;
+      const targetIdx = currentLoadedCandles.findIndex(c => c.time === dateStr);
+      if (targetIdx !== -1) {
+        const startIdx = Math.max(0, targetIdx - 15);
+        const endIdx = Math.min(currentLoadedCandles.length - 1, targetIdx + 15);
+        stockChartInstance.timeScale().setVisibleRange({
+          from: currentLoadedCandles[startIdx].time,
+          to: currentLoadedCandles[endIdx].time
+        });
+
+        const tr = currentLoadedTrades.find(t => t.date === dateStr);
+        if (tr) {
+          const pnlCol = tr.net_pnl >= 0 ? '#059669' : '#dc2626';
+          const pnlSign = tr.net_pnl >= 0 ? '+' : '';
+          document.getElementById('chart-trade-details').innerHTML = `
+            🎯 <strong>Focused on ${dateStr}</strong>: ${tr.side} ${tr.qty} shares | Entry: ₹${tr.entry_price.toFixed(2)} | Exit: ₹${tr.exit_price.toFixed(2)} | Reason: <strong>${tr.exit_reason}</strong> | Net PnL: <strong style="color: ${pnlCol};">${pnlSign}₹${tr.net_pnl.toFixed(2)}</strong> (after ₹40 brokerage + taxes)
+          `;
+        }
+      }
+    }, 100);
+  }
+
+  function closeStockModal() {
+    document.getElementById('stock-modal').style.display = 'none';
+  }
+
+  // --- OVERALL TRADE LOGS TABLE ---
+  async function fetchTradeLogs() {
+    const tbody = document.getElementById('trade-logs-tbody');
+    let endpoint = '/api/backtests/nifty500-10y/logs';
+    if (currentMode === 'top100') endpoint = '/api/backtests/top100-intraday/logs';
+    else if (currentMode === 'top20') endpoint = '/api/backtests/4y-intraday/logs';
+
+    try {
+      const url = `${endpoint}?limit=${pageLimit}&offset=${currentOffset}&ticker=${encodeURIComponent(activeTickerFilter)}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.status === 'success') {
+        const logs = data.trades || data.logs || [];
+        const total = data.count || data.total || logs.length;
+        renderTradeLogs(logs, total);
+      }
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="11" style="text-align: center; color: red;">Error: ${e.message}</td></tr>`;
+    }
+  }
+
+  function renderTradeLogs(logs, total) {
+    const tbody = document.getElementById('trade-logs-tbody');
+    totalTradesCount = total;
+
+    if (!logs || logs.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="11" style="text-align: center; padding: 18px; color: #888;">No trades found matching criteria.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = logs.map(tr => {
+      let reasonBadge = `<span style="background: #f1f5f9; color: #475569; padding: 1px 5px; font-size: 9.5px; font-weight: 700; border-radius: 2px;">${tr.exit_reason}</span>`;
+      if (tr.exit_reason === 'TARGET') {
+        reasonBadge = `<span style="background: #d1fae5; color: #065f46; border: 1px solid #10b981; padding: 1px 5px; font-size: 9.5px; font-weight: 800; border-radius: 2px;">🎯 TARGET</span>`;
+      } else if (tr.exit_reason === 'TRAILING_STOP') {
+        reasonBadge = `<span style="background: #e0f2fe; color: #0369a1; border: 1px solid #38bdf8; padding: 1px 5px; font-size: 9.5px; font-weight: 800; border-radius: 2px;">🛡️ TRAILING STOP</span>`;
+      } else if (tr.exit_reason === 'STOP_LOSS') {
+        reasonBadge = `<span style="background: #fee2e2; color: #991b1b; border: 1px solid #f87171; padding: 1px 5px; font-size: 9.5px; font-weight: 700; border-radius: 2px;">STOP LOSS</span>`;
+      }
+
+      const pnlColor = tr.net_pnl > 0 ? '#059669' : (tr.net_pnl < 0 ? '#cc0000' : '#475569');
+      const winBadge = tr.is_win 
+        ? `<span style="color: #059669; font-weight: 800;">✅ WIN</span>`
+        : `<span style="color: #cc0000; font-weight: 700;">❌ LOSS</span>`;
+
+      return `
+        <tr>
+          <td style="font-family: var(--font-mono); font-weight: 600;">${tr.date}</td>
+          <td style="font-weight: 800; font-family: var(--font-mono); color: #1e1b4b;">
+            <a href="javascript:void(0)" onclick="viewStockDailyTrades('${tr.ticker}')" style="color: #1e1b4b; text-decoration: underline;">${tr.ticker}</a>
+          </td>
+          <td><span style="background: #e0e7ff; color: #3730a3; padding: 1px 4px; font-size: 9px; font-weight: 800;">${tr.side}</span></td>
+          <td style="font-family: var(--font-mono);">₹${tr.entry_price.toFixed(2)}</td>
+          <td style="font-family: var(--font-mono);">₹${tr.exit_price.toFixed(2)}</td>
+          <td>${reasonBadge}</td>
+          <td>${tr.qty}</td>
+          <td style="font-family: var(--font-mono); color: ${tr.gross_pnl >= 0 ? '#059669' : '#cc0000'};">₹${tr.gross_pnl.toFixed(2)}</td>
+          <td style="font-family: var(--font-mono); font-weight: 800; color: ${pnlColor};">
+            ${tr.net_pnl >= 0 ? '+' : ''}₹${tr.net_pnl.toFixed(2)}
+          </td>
+          <td style="font-weight: 700; color: ${pnlColor};">
+            ${tr.return_pct >= 0 ? '+' : ''}${tr.return_pct.toFixed(2)}%
+          </td>
+          <td>${winBadge}</td>
+        </tr>
+      `;
+    }).join('');
+
+    const startNum = currentOffset + 1;
+    const endNum = Math.min(currentOffset + pageLimit, total);
+    document.getElementById('pagination-info').textContent = `Showing ${startNum} to ${endNum} of ${total.toLocaleString()} trades`;
+    document.getElementById('btn-prev-page').disabled = (currentOffset === 0);
+    document.getElementById('btn-next-page').disabled = (endNum >= total);
+  }
+
+  function filterLogs() {
+    activeTickerFilter = document.getElementById('log-search-ticker').value.trim();
+    currentOffset = 0;
+    fetchTradeLogs();
+  }
+
+  function resetLogsFilter() {
+    document.getElementById('log-search-ticker').value = '';
+    activeTickerFilter = '';
+    currentOffset = 0;
+    fetchTradeLogs();
+  }
+
+  function nextPage() {
+    if (currentOffset + pageLimit < totalTradesCount) {
+      currentOffset += pageLimit;
+      fetchTradeLogs();
+    }
+  }
+
+  function prevPage() {
+    if (currentOffset >= pageLimit) {
+      currentOffset -= pageLimit;
+      fetchTradeLogs();
+    }
+  }
+
+  async function triggerBacktestRun() {
+    const btn = document.getElementById('btn-rerun');
+    btn.disabled = true;
+    btn.textContent = '⏳ Executing Simulation...';
+    let endpoint = '/api/backtests/nifty500-10y/run';
+    if (currentMode === 'top100') endpoint = '/api/backtests/top100-intraday/run';
+    else if (currentMode === 'top20') endpoint = '/api/backtests/4y-intraday/run';
+
+    try {
+      const res = await fetch(endpoint, { method: 'POST' });
+      const data = await res.json();
+      alert('🚀 ' + (data.message || 'Backtest started!'));
+      setTimeout(() => {
+        loadDashboardData();
+        btn.disabled = false;
+        btn.textContent = currentMode === 'nifty500' ? '▶ Re-run 10Y Simulation' : '▶ Re-run 4Y Simulation';
+      }, 5000);
+    } catch (e) {
+      alert('Error: ' + e.message);
+      btn.disabled = false;
+      btn.textContent = currentMode === 'nifty500' ? '▶ Re-run 10Y Simulation' : '▶ Re-run 4Y Simulation';
+    }
+  }
+</script>
+
+{% endblock %}

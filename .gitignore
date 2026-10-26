@@ -24,6 +24,23 @@ scratch/
 .pytest_cache/
 database/*.db-wal
 database/*.db-shm
-data/*.db
+# Results & Data
+results/
+data/*.csv
+!data/ind_nifty500list.csv
+*.parquet
+data/*.parquet
 *.db
+*.db-wal
+*.db-shm
+*.sqlite
+data/*.db
+data/nifty500_10y_cache/
+data/top100_cache/
+data/gemini_quant_optimizer_state.json
+
+# Secrets & Local Configs
+.env
 .kite_token
+scratchpad.txt
+

@@ -1,0 +1,1267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}AlgoDesk MarketX — Quantitative Algorithmic Trading Workstation{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,600;0,700;0,800;1,400&family=Libre+Baskerville:wght@700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/chart.js"></script>
+  <script src="/lightweight-charts.js"></script>
+</head>
+<body>
+
+  <!-- Top Retro Bloomberg Terminal Navbar -->
+  <header class="terminal-navbar">
+    <div style="display: flex; align-items: center; gap: 18px;">
+      <div class="brand-title" onclick="window.location.href='/dashboard'" title="AlgoDesk MarketX Home">
+        AlgoDesk <span class="brand-blue">MarketX</span>
+      </div>
+
+      <nav class="top-nav-links">
+        <a href="/screener" class="top-link {% if active_page == 'screener' %}active{% endif %}">📊 Screener</a>
+        <a href="/dashboard" class="top-link {% if active_page == 'dashboard' or not active_page %}active{% endif %}">⚡ Algo Desk</a>
+        <a href="/live" class="top-link {% if active_page == 'live' %}active{% endif %}" style="{% if active_page == 'live' %}background: #fee2e2; border-color: #cc0000; color: #cc0000; font-weight: 800;{% else %}color: #cc0000; font-weight: 700;{% endif %}">🔴 Real Trading</a>
+        <a href="/backtests" class="top-link {% if active_page == 'backtests' %}active{% endif %}">🧪 Backtester</a>
+        <a href="/strategies" class="top-link {% if active_page == 'strategies' %}active{% endif %}">📋 Strategies</a>
+        <a href="/ai" class="top-link {% if active_page == 'ai' %}active{% endif %}">🤖 Gemini AI Quant</a>
+      </nav>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <!-- Mode Badge -->
+      {% if active_page == 'live' %}
+      <span class="badge-signal-bearish" style="padding: 3px 8px; font-weight: 800; font-size: 11px; background: #fee2e2; color: #cc0000; border: 1px solid #cc0000; letter-spacing: 0.5px;">
+        [ 🔴 REAL BROKERAGE (LIVE) ]
+      </span>
+      {% else %}
+      <span class="badge-signal-bullish" style="padding: 3px 8px; font-weight: 800; font-size: 11px;">
+        [ {{ (mode or 'PAPER') }} MODE ]
+      </span>
+      {% endif %}
+
+      <!-- Emergency Kill Switch Button -->
+      {% if kill_switch %}
+      <form method="post" action="/api/kill-switch" style="display:inline; margin:0;">
+        <input type="hidden" name="active" value="false">
+        <button class="term-btn-green" style="font-weight: 800; padding: 4px 10px;">[ RE-ENABLE PLATFORM ]</button>
+      </form>
+      {% else %}
+      <form method="post" action="/api/kill-switch" style="display:inline; margin:0;" onsubmit="return confirm('WARNING: Are you sure you want to trigger EMERGENCY KILL SWITCH? All open positions will be flattened and orders rejected.');">
+        <input type="hidden" name="active" value="true">
+        <input type="hidden" name="reason" value="Operator triggered emergency kill switch from dashboard">
+        <button class="term-btn" style="background:#fee2e2; color:#cc0000; border-color:#cc0000; font-weight: 800; padding: 4px 10px;">[ 🛑 KILL SWITCH ]</button>
+      </form>
+      {% endif %}
+
+      <!-- Zerodha Kite Session Badge & Login Trigger -->
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <div id="kite-auth-badge-container" class="kite-auth-container">
+          {% if kite_active %}
+          <button onclick="openKiteLoginModal('status')" class="kite-session-btn active" id="kite-badge-btn" title="Zerodha KiteConnect Live API is connected">
+            <span class="kite-dot green"></span>
+            <span>🟢 Kite Live{% if kite_user_id %} ({{ kite_user_id }}){% endif %}</span>
+          </button>
+          {% else %}
+          <button onclick="openKiteLoginModal('request_token')" class="kite-session-btn expired" id="kite-badge-btn" title="Click to manage Zerodha Kite session">
+            <span class="kite-dot amber"></span>
+            <span>⚡ Kite Expired — Re-login</span>
+          </button>
+          {% endif %}
+        </div>
+        <button onclick="openKiteLoginModal('request_token')" class="kite-manual-login-btn" id="nav-manual-token-btn" title="Paste request_token or Zerodha redirect URL manually to authenticate">
+          🔑 Enter Request Token
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main 3-Column Workstation Container -->
+  <div class="terminal-workstation">
+
+    <!-- Column 1: Left Sidebar with Categorized NIFTY 500 Equities -->
+    <aside id="panel-sidebar" class="terminal-sidebar">
+
+      <div class="nifty-universe-container">
+        <div class="nifty-universe-header">
+          <span>&gt; NIFTY 500 EQUITIES</span>
+          <span class="header-count-badge" id="nifty-count-badge">501 Stocks</span>
+        </div>
+
+        <!-- Market Cap Filter Tabs -->
+        <div class="market-cap-tabs">
+          <button class="mcap-btn active" onclick="setMarketCapFilter(this, 'all')">ALL</button>
+          <button class="mcap-btn" onclick="setMarketCapFilter(this, 'large cap')">LARGE</button>
+          <button class="mcap-btn" onclick="setMarketCapFilter(this, 'mid cap')">MID</button>
+          <button class="mcap-btn" onclick="setMarketCapFilter(this, 'small cap')">SMALL</button>
+        </div>
+
+        <!-- Filter Controls -->
+        <div class="nifty-filter-controls">
+          <input type="text" id="nifty-search-input" class="nifty-search-input" placeholder="Filter symbol/name (e.g. RELIANCE)..." onkeyup="handleNiftySearch(this.value)">
+          <select id="nifty-sector-select" class="nifty-sector-select" onchange="handleNiftySector(this.value)">
+            <option value="all">-- All Sectors (14 Industry Types) --</option>
+            <option value="Financials">Financial Services (98)</option>
+            <option value="Capital Goods">Capital Goods (70)</option>
+            <option value="Healthcare">Healthcare & Pharma (44)</option>
+            <option value="Automobile">Automobile & Auto Parts (40)</option>
+            <option value="Consumer">Consumer Services & Durables (39)</option>
+            <option value="Infra & Realty">Infra, Realty & Materials (38)</option>
+            <option value="Energy & Power">Energy, Power & Oil/Gas (38)</option>
+            <option value="FMCG">FMCG (28)</option>
+            <option value="Chemicals">Chemicals (26)</option>
+            <option value="Technology">Information Technology (25)</option>
+            <option value="Metals & Mining">Metals & Mining (20)</option>
+            <option value="Telecom & Media">Telecom & Media (15)</option>
+            <option value="Services">Services (14)</option>
+          </select>
+        </div>
+
+        <!-- Scrollable NIFTY 500 Stock List -->
+        <div id="nifty-stock-list" class="nifty-stock-list">
+          <div style="padding: 16px; text-align: center; color: #666;">Loading NIFTY 500 constituents...</div>
+        </div>
+      </div>
+
+      <!-- Live Market News Headlines Wire -->
+      <div class="sidebar-news-container">
+        <div class="sidebar-news-header">
+          <div class="news-header-title">
+            <span class="news-live-dot"></span>
+            <span>&gt; Market Wire [LIVE]</span>
+          </div>
+          <button class="news-refresh-btn" onclick="loadMarketNews(true)" title="Refresh Breaking News">⟳</button>
+        </div>
+        <div id="sidebar-news-list" class="sidebar-news-list">
+          <div class="news-loading-msg">Fetching latest market headlines...</div>
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- Column 2: Center Main Workstation Panel -->
+    <main id="panel-main" class="terminal-main-panel">
+      {% block content %}{% endblock %}
+    </main>
+
+    <!-- Column 3: Right Inspector & Risk Panel -->
+    <aside id="panel-inspector" class="terminal-inspector-panel">
+      {% block inspector %}
+      <!-- Default Inspector: Selected Stock Details & Live Risk Engine -->
+      <div class="inspector-header-box">
+        <div class="inspector-symbol-row">
+          <h3 id="panel-ticker">RELIANCE.NS</h3>
+          <span class="price-val" id="panel-price">₹2,845.00</span>
+        </div>
+        <div class="inspector-company-row">
+          <span id="panel-company" style="font-weight:700;">Reliance Industries Ltd.</span>
+          <span class="change-green" id="panel-change">+0.85%</span>
+        </div>
+        <div style="font-size:11px; color:#555; margin-top:3px;" id="panel-sector">
+          Energy & Power • NIFTY 500 Large Cap
+        </div>
+      </div>
+
+      <!-- Quick Metrics Grid -->
+      <div class="panel-metrics-grid">
+        <div class="metric-cell">
+          <div class="lbl">Market Cap Type</div>
+          <div class="val" id="panel-mcap-type" style="color: #3730a3; font-weight: 800;">Large Cap</div>
+        </div>
+        <div class="metric-cell">
+          <div class="lbl">Series / Segment</div>
+          <div class="val">EQ (MIS Intraday)</div>
+        </div>
+        <div class="metric-cell">
+          <div class="lbl">Last Day Return</div>
+          <div class="val" id="panel-ret-day">--</div>
+        </div>
+        <div class="metric-cell">
+          <div class="lbl">Day Volume</div>
+          <div class="val" id="panel-vol">--</div>
+        </div>
+      </div>
+
+      <!-- Quick Paper Order Placement Widget -->
+      <div class="algo-desk-card">
+        <div class="algo-desk-card-header">
+          <span>⚡ Quick Order Entry (MIS)</span>
+          <span style="font-size: 10px; color: #059669; font-weight: 700;">● PAPER BROKER</span>
+        </div>
+        <form id="quick-order-form" onsubmit="submitQuickOrder(event)">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px;">
+            <div>
+              <label style="font-size: 10px; font-weight: 700; color: #555;">Symbol</label>
+              <input type="text" id="order-symbol-input" value="RELIANCE" class="nifty-search-input" readonly>
+            </div>
+            <div>
+              <label style="font-size: 10px; font-weight: 700; color: #555;">Quantity</label>
+              <input type="number" id="order-qty-input" value="5" min="1" class="nifty-search-input">
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px;">
+            <div>
+              <label style="font-size: 10px; font-weight: 700; color: #555;">Order Type</label>
+              <select id="order-type-input" class="nifty-sector-select">
+                <option value="MARKET">Market</option>
+                <option value="LIMIT">Limit</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size: 10px; font-weight: 700; color: #555;">Limit Price (₹)</label>
+              <input type="number" id="order-price-input" step="0.05" placeholder="Market" class="nifty-search-input">
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+            <button type="button" onclick="placeOrder('BUY')" class="term-btn-green" style="padding: 7px; font-weight: 800; cursor: pointer;">
+              ▲ BUY (LONG)
+            </button>
+            <button type="button" onclick="placeOrder('SELL')" class="term-btn" style="background:#fee2e2; color:#cc0000; border-color:#cc0000; padding: 7px; font-weight: 800; cursor: pointer;">
+              ▼ SELL (SHORT)
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Risk Engine Telemetry -->
+      <div class="algo-desk-card">
+        <div class="algo-desk-card-header">
+          <span>🛡️ Risk Engine Limits</span>
+          <span style="font-size: 10px; font-weight: 700; color: #000080;">ENFORCED</span>
+        </div>
+        <div style="font-size: 11px; display: flex; flex-direction: column; gap: 5px;">
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color:#666;">Max Daily Loss:</span>
+            <span style="font-weight:700;">₹5,000.00</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color:#666;">Max Open Positions:</span>
+            <span style="font-weight:700;">3 stocks</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color:#666;">Auto Intraday Square-off:</span>
+            <span style="font-weight:700; color:#b45309;">15:15 IST</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color:#666;">Kill Switch Status:</span>
+            <span style="font-weight:800; color:{% if kill_switch %}#cc0000{% else %}#059669{% endif %};">
+              {% if kill_switch %}🛑 ACTIVE (BLOCKING){% else %}🟢 ARMED{% endif %}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Secondary Chart -->
+      <div class="fin-section-card" id="right-bottom-chart-card">
+        <div class="fin-section-header">
+          <h4>📈 Trend Indicator</h4>
+          <span class="fin-badge">⚡ Real-time</span>
+        </div>
+        <div class="panel-chart-box" style="height: 180px; position: relative;">
+          <canvas id="panelStockChart"></canvas>
+        </div>
+      </div>
+      {% endblock %}
+    </aside>
+
+  </div>
+
+  <!-- Interactive Zerodha Kite Login Modal -->
+  <div id="kite-login-modal" class="terminal-modal-backdrop" style="display: none;" onclick="if(event.target === this) closeKiteLoginModal()">
+    <div class="terminal-modal-box" style="width: 580px; max-width: 95%;">
+      <div class="terminal-modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span>🔑 Zerodha KiteConnect Session & Login</span>
+        </div>
+        <button class="terminal-modal-close" onclick="closeKiteLoginModal()" title="Close">✕</button>
+      </div>
+
+      <div class="terminal-modal-body">
+        <!-- Live Status Pill -->
+        <div id="kite-modal-status-banner" style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; font-size: 11.5px;">
+          <span style="font-weight: 700; color: #475569;">Broker Session Status:</span>
+          <span id="kite-modal-status-text" style="font-weight: 800; color: #b45309;">⚡ Checking status...</span>
+        </div>
+
+        <!-- Mode Navigation Tabs -->
+        <div class="kite-modal-tabs">
+          <button type="button" class="kite-modal-tab-btn active" id="tab-btn-request-token" onclick="switchKiteModalTab('request_token')">
+            📋 Paste Request Token (Manual)
+          </button>
+          <button type="button" class="kite-modal-tab-btn" id="tab-btn-access-token" onclick="switchKiteModalTab('access_token')">
+            ⚡ Direct Access Token
+          </button>
+          <button type="button" class="kite-modal-tab-btn" id="tab-btn-oauth" onclick="switchKiteModalTab('oauth')">
+            🌐 Zerodha Web Portal
+          </button>
+        </div>
+
+        <!-- TAB 1: Paste Request Token Manually -->
+        <div id="kite-tab-request-token" class="kite-tab-panel">
+          <div class="kite-login-choice-card" style="border-left: 3px solid #0284c7;">
+            <h4 style="margin: 0; color: #0369a1; font-size: 12.5px;">📋 Option: Paste Request Token manually</h4>
+            <p style="font-size: 11px; color: #475569; margin: 4px 0 0 0; line-height: 1.4;">
+              Log into Zerodha in your browser. Copy either the <strong>request_token</strong> or the <strong>entire redirect URL</strong> from your address bar and paste it below:
+            </p>
+
+            <div style="margin-top: 8px;">
+              <input type="text" id="modal-request-token-input" placeholder="Paste request_token or full redirect URL (e.g. ?request_token=...)" class="kite-token-input" oninput="handleTokenInputChange(this.value)" autocomplete="off">
+              <div id="modal-token-extracted-preview" class="kite-token-extracted-badge" style="display: none;"></div>
+            </div>
+
+            <div style="display: flex; gap: 8px; align-items: center; margin-top: 6px; flex-wrap: wrap;">
+              <button onclick="submitManualRequestToken()" class="btn-activate-token" style="padding: 7px 14px; font-weight: 800; font-size: 11.5px;">
+                ⚡ Exchange Request Token & Log In
+              </button>
+              <a href="{{ kite_url or 'https://kite.zerodha.com/connect/login?api_key=zgktuz1hr11f8scf&v=3' }}" target="_blank" class="kite-oauth-btn" style="padding: 6px 12px; font-size: 11px; text-decoration: none;">
+                🌐 Open Zerodha Login in New Tab ↗
+              </a>
+            </div>
+
+            <!-- 3-Step Quick Guide -->
+            <div style="background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 4px; padding: 8px 10px; margin-top: 8px; font-size: 10.5px; color: #475569; line-height: 1.5;">
+              <strong style="color: #1e1b4b;">How to get your request_token:</strong>
+              <div style="margin-top: 2px;">1. Click <em>'Open Zerodha Login in New Tab ↗'</em> above and authenticate with your Zerodha credentials & TOTP.</div>
+              <div>2. Zerodha redirects you to your callback URL (e.g. <code>http://127.0.0.1:8000/callback?...request_token=XXXXX</code>).</div>
+              <div>3. Copy that redirected URL or just the <code>request_token</code> value, paste it above, and click <strong>'Exchange Request Token & Log In'</strong>.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 2: Direct Access Token -->
+        <div id="kite-tab-access-token" class="kite-tab-panel" style="display: none;">
+          <div class="kite-login-choice-card" style="border-left: 3px solid #059669;">
+            <h4 style="margin: 0; color: #047857; font-size: 12.5px;">⚡ Option: Direct Access Token</h4>
+            <p style="font-size: 11px; color: #475569; margin: 4px 0 0 0; line-height: 1.4;">
+              If you already have a valid active 32-character <code>access_token</code> generated today for this API key, paste it here:
+            </p>
+            <div style="margin-top: 8px;">
+              <input type="text" id="modal-access-token-input" placeholder="Paste 32-character daily Access Token directly..." class="kite-token-input" autocomplete="off">
+            </div>
+            <div style="margin-top: 6px;">
+              <button onclick="submitDirectAccessToken()" class="btn-activate-token" style="padding: 7px 14px; font-weight: 800; font-size: 11.5px; background: #0284c7; border-color: #0369a1;">
+                Save & Connect Access Token
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 3: Zerodha Web Portal -->
+        <div id="kite-tab-oauth" class="kite-tab-panel" style="display: none;">
+          <div class="kite-login-choice-card" style="border-left: 3px solid #d97706;">
+            <h4 style="margin: 0; color: #b45309; font-size: 12.5px;">🌐 1-Click Zerodha Web OAuth Login</h4>
+            <p style="font-size: 11px; color: #475569; margin: 4px 0 0 0; line-height: 1.4;">
+              Click below to initiate the standard Zerodha 2FA authentication flow in a new browser window.
+            </p>
+            <div style="margin-top: 10px;">
+              <a href="{{ kite_url or 'https://kite.zerodha.com/connect/login?api_key=zgktuz1hr11f8scf&v=3' }}" target="_blank" class="kite-oauth-btn" style="display: inline-flex; width: auto; padding: 8px 16px;">
+                ⚡ Open Zerodha Kite Portal
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <!-- Feedback & Status Output -->
+        <div id="modal-token-feedback" style="min-height: 20px; font-size: 11px; font-weight: 700;"></div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid #cbd5e1; padding-top: 8px;">
+          <button class="term-btn" onclick="closeKiteLoginModal()">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Shared Terminal JavaScript Logic -->
+  <script>
+    let allNiftyStocks = [];
+    let currentMarketCapFilter = 'all';
+    let currentSectorFilter = 'all';
+    let currentSearchTerm = '';
+    let selectedStock = null;
+    let mainChartInstance = null;
+    let rightChartInstance = null;
+
+    // Initialize on Page Load
+    document.addEventListener('DOMContentLoaded', () => {
+      checkKiteStatus();
+      loadNifty500Stocks();
+      loadMarketNews();
+      initDefaultCharts();
+
+      // Check URL query parameters for Kite auth callback redirect
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('kite_auth') === 'success') {
+        showToast('🎉 Zerodha KiteConnect Session Activated! Live API Feeds Connected.');
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } else if (urlParams.get('kite_auth') === 'error') {
+        showToast('⚠️ Kite Connect Login Error: ' + (urlParams.get('msg') || 'Authentication failed.'));
+      }
+    });
+
+    // -----------------------------------------------------------------------
+    // Zerodha KiteConnect Session Management & Manual Request Token
+    // -----------------------------------------------------------------------
+    async function checkKiteStatus() {
+      const container = document.getElementById('kite-auth-badge-container');
+      try {
+        const res = await fetch('/api/kite/status');
+        const data = await res.json();
+        if (container) {
+          if (data.active) {
+            const userStr = data.user_id ? ` (${data.user_id})` : '';
+            container.innerHTML = `
+              <button onclick="openKiteLoginModal('status')" class="kite-session-btn active" title="Zerodha KiteConnect Live API is connected">
+                <span class="kite-dot green"></span>
+                <span>🟢 Kite Live${userStr}</span>
+              </button>
+            `;
+          } else {
+            container.innerHTML = `
+              <button onclick="openKiteLoginModal('request_token')" class="kite-session-btn expired" title="Kite session expired. Click to log into Zerodha.">
+                <span class="kite-dot amber"></span>
+                <span>⚡ Kite Expired — Re-login</span>
+              </button>
+            `;
+          }
+        }
+        updateKiteModalStatus(data);
+      } catch (err) {
+        console.warn('Could not query Kite status:', err);
+      }
+    }
+
+    function updateKiteModalStatus(data) {
+      const statusEl = document.getElementById('kite-modal-status-text');
+      if (!statusEl) return;
+      if (data && data.active) {
+        const u = data.user_id ? ` (${data.user_id})` : '';
+        statusEl.innerHTML = `<span style="color: #059669;">🟢 CONNECTED${u}</span>`;
+      } else {
+        const err = (data && data.error) ? ` — ${data.error}` : '';
+        statusEl.innerHTML = `<span style="color: #b45309;">⚡ DISCONNECTED (Daily login required)${err}</span>`;
+      }
+    }
+
+    function switchKiteModalTab(tabName) {
+      const target = tabName.replace('_', '-');
+      ['request-token', 'access-token', 'oauth'].forEach(t => {
+        const panel = document.getElementById(`kite-tab-${t}`);
+        const btn = document.getElementById(`tab-btn-${t}`);
+        if (panel) panel.style.display = (t === target) ? 'block' : 'none';
+        if (btn) btn.classList.toggle('active', t === target);
+      });
+      const fb = document.getElementById('modal-token-feedback');
+      if (fb) fb.innerHTML = '';
+      if (tabName === 'request_token' || target === 'request-token') {
+        setTimeout(() => {
+          const inp = document.getElementById('modal-request-token-input');
+          if (inp) inp.focus();
+        }, 100);
+      } else if (tabName === 'access_token' || target === 'access-token') {
+        setTimeout(() => {
+          const inp = document.getElementById('modal-access-token-input');
+          if (inp) inp.focus();
+        }, 100);
+      }
+    }
+
+    function openKiteLoginModal(tab = 'request_token') {
+      const modal = document.getElementById('kite-login-modal');
+      if (modal) {
+        modal.style.display = 'flex';
+        switchKiteModalTab(tab === 'status' ? 'request_token' : tab);
+        fetch('/api/kite/status?force=true')
+          .then(r => r.json())
+          .then(d => updateKiteModalStatus(d))
+          .catch(() => {});
+      }
+    }
+
+    function closeKiteLoginModal() {
+      const modal = document.getElementById('kite-login-modal');
+      if (modal) modal.style.display = 'none';
+      const fb = document.getElementById('modal-token-feedback');
+      if (fb) fb.innerHTML = '';
+    }
+
+    function extractRequestToken(raw) {
+      if (!raw) return '';
+      raw = raw.trim();
+      const match = raw.match(/request_token=([a-zA-Z0-9_-]+)/);
+      if (match) return match[1];
+      if (raw.startsWith('http://') || raw.startsWith('https://')) {
+        try {
+          const u = new URL(raw);
+          const tok = u.searchParams.get('request_token');
+          if (tok) return tok;
+        } catch (e) {}
+      }
+      return raw;
+    }
+
+    function handleTokenInputChange(val) {
+      const preview = document.getElementById('modal-token-extracted-preview');
+      if (!preview) return;
+      const extracted = extractRequestToken(val);
+      if (val.includes('request_token=') && extracted) {
+        preview.style.display = 'flex';
+        preview.innerHTML = `<span>✓ Extracted request_token: <strong>${extracted}</strong></span>`;
+      } else if (val.trim().length === 32) {
+        preview.style.display = 'flex';
+        preview.innerHTML = `<span>✓ Valid 32-character token format detected</span>`;
+      } else {
+        preview.style.display = 'none';
+      }
+    }
+
+    async function submitManualRequestToken() {
+      const input = document.getElementById('modal-request-token-input');
+      const fb = document.getElementById('modal-token-feedback');
+      const rawVal = input ? input.value.trim() : '';
+      const token = extractRequestToken(rawVal);
+      if (!token) {
+        if (fb) fb.innerHTML = '<span style="color:#cc0000;">⚠️ Please paste your request_token or Zerodha redirect URL.</span>';
+        return;
+      }
+
+      fb.innerHTML = '<span style="color:#0284c7;">⚡ Exchanging request_token with Zerodha Kite API...</span>';
+      try {
+        const res = await fetch('/api/kite/set-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: token, is_request_token: true })
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'success') {
+          fb.innerHTML = `<span style="color:#059669;">🎉 ${data.message || 'Login Successful! Kite Session Connected.'}</span>`;
+          if (input) input.value = '';
+          const preview = document.getElementById('modal-token-extracted-preview');
+          if (preview) preview.style.display = 'none';
+          setTimeout(() => {
+            closeKiteLoginModal();
+            checkKiteStatus();
+            showToast(`🎉 Kite Live Session Activated: ${data.user_id || 'Connected'}`);
+          }, 1200);
+        } else {
+          fb.innerHTML = `<span style="color:#cc0000;">❌ Error: ${data.detail || 'Failed to exchange request token.'}</span>`;
+        }
+      } catch (err) {
+        fb.innerHTML = `<span style="color:#cc0000;">❌ Network Error: ${err.message}</span>`;
+      }
+    }
+
+    async function submitDirectAccessToken() {
+      const input = document.getElementById('modal-access-token-input');
+      const fb = document.getElementById('modal-token-feedback');
+      const token = input ? input.value.trim() : '';
+      if (!token) {
+        if (fb) fb.innerHTML = '<span style="color:#cc0000;">⚠️ Please enter an access_token.</span>';
+        return;
+      }
+
+      fb.innerHTML = '<span style="color:#0284c7;">⚡ Validating and saving access token...</span>';
+      try {
+        const res = await fetch('/api/kite/set-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: token, is_request_token: false })
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'success') {
+          fb.innerHTML = `<span style="color:#059669;">🎉 ${data.message || 'Access token activated!'}</span>`;
+          if (input) input.value = '';
+          setTimeout(() => {
+            closeKiteLoginModal();
+            checkKiteStatus();
+            showToast('Zerodha KiteConnect Access Token Activated!');
+          }, 1200);
+        } else {
+          fb.innerHTML = `<span style="color:#cc0000;">❌ Error: ${data.detail || 'Failed to activate token.'}</span>`;
+        }
+      } catch (err) {
+        fb.innerHTML = `<span style="color:#cc0000;">❌ Network Error: ${err.message}</span>`;
+      }
+    }
+
+    // Keep backwards compatibility for any other triggers
+    async function submitDirectToken() {
+      return submitManualRequestToken();
+    }
+
+    // -----------------------------------------------------------------------
+    // NIFTY 500 Equities Loading & Market-Type Filtering
+    // -----------------------------------------------------------------------
+    async function loadNifty500Stocks() {
+      const listEl = document.getElementById('nifty-stock-list');
+      try {
+        const res = await fetch('/api/nifty500/stocks');
+        const data = await res.json();
+        allNiftyStocks = data.stocks || [];
+        renderNiftyStockList();
+        
+        // Select first stock by default (e.g. RELIANCE)
+        if (allNiftyStocks.length > 0) {
+          const defaultStock = allNiftyStocks.find(s => s.symbol === 'RELIANCE') || allNiftyStocks[0];
+          selectStock(defaultStock);
+        }
+      } catch (err) {
+        if (listEl) listEl.innerHTML = '<div style="padding:16px; color:#cc0000; text-align:center;">Failed to load NIFTY 500 stocks.</div>';
+      }
+    }
+
+    function setMarketCapFilter(btn, capType) {
+      document.querySelectorAll('.mcap-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentMarketCapFilter = capType;
+      renderNiftyStockList();
+    }
+
+    function handleNiftySector(sector) {
+      currentSectorFilter = sector;
+      renderNiftyStockList();
+    }
+
+    function handleNiftySearch(val) {
+      currentSearchTerm = (val || '').toLowerCase().trim();
+      renderNiftyStockList();
+    }
+
+    function renderNiftyStockList() {
+      const listEl = document.getElementById('nifty-stock-list');
+      const badgeCount = document.getElementById('nifty-count-badge');
+      if (!listEl) return;
+
+      let filtered = allNiftyStocks;
+
+      if (currentMarketCapFilter !== 'all') {
+        filtered = filtered.filter(s => s.market_cap.toLowerCase() === currentMarketCapFilter.toLowerCase());
+      }
+
+      if (currentSectorFilter !== 'all') {
+        filtered = filtered.filter(s => s.sector_group === currentSectorFilter || s.industry === currentSectorFilter);
+      }
+
+      if (currentSearchTerm) {
+        filtered = filtered.filter(s => 
+          s.symbol.toLowerCase().includes(currentSearchTerm) ||
+          s.name.toLowerCase().includes(currentSearchTerm) ||
+          s.industry.toLowerCase().includes(currentSearchTerm)
+        );
+      }
+
+      if (badgeCount) badgeCount.textContent = `${filtered.length} Stocks`;
+
+      if (filtered.length === 0) {
+        listEl.innerHTML = '<div style="padding: 24px; text-align: center; color: #777;">No matching stocks found.</div>';
+        return;
+      }
+
+      let html = '';
+      for (const s of filtered) {
+        const isSelected = selectedStock && selectedStock.symbol === s.symbol;
+        let capBadgeClass = 'stock-badge-large';
+        if (s.market_cap === 'Mid Cap') capBadgeClass = 'stock-badge-mid';
+        if (s.market_cap === 'Small Cap') capBadgeClass = 'stock-badge-small';
+
+        let pctClass = 'pct-neutral';
+        let pctSign = '';
+        if (s.change_pct > 0) { pctClass = 'pct-positive'; pctSign = '+'; }
+        else if (s.change_pct < 0) { pctClass = 'pct-negative'; }
+
+        const closeVal = Number(s.close || 0);
+        const priceStr = closeVal > 0 ? `₹${closeVal.toFixed(2)}` : '--';
+        const changeVal = Number(s.change_pct != null ? s.change_pct : 0);
+        const pctStr = changeVal !== 0 ? `${changeVal > 0 ? '+' : ''}${changeVal.toFixed(2)}%` : '--';
+
+        html += `
+          <div class="nifty-stock-item ${isSelected ? 'active' : ''}" onclick="onStockItemClick('${s.symbol}')">
+            <div class="stock-item-left">
+              <div class="stock-item-sym-row">
+                <span class="stock-item-sym">${s.symbol}</span>
+                <span class="stock-badge-cap ${capBadgeClass}">${s.market_cap}</span>
+              </div>
+              <div class="stock-item-name" title="${s.name}">${s.name}</div>
+              <div class="stock-item-sector">${s.industry}</div>
+            </div>
+            <div class="stock-item-right">
+              <span class="stock-item-price">${priceStr}</span>
+              <span class="stock-item-pct ${pctClass}">${pctStr}</span>
+            </div>
+          </div>
+        `;
+      }
+      listEl.innerHTML = html;
+    }
+
+    function onStockItemClick(symbol) {
+      const stock = allNiftyStocks.find(s => s.symbol === symbol);
+      if (stock) {
+        selectStock(stock);
+        renderNiftyStockList();
+      }
+    }
+
+    function selectStock(stock) {
+      selectedStock = stock;
+
+      // Update Inspector Panel
+      const tTicker = document.getElementById('panel-ticker');
+      const tPrice = document.getElementById('panel-price');
+      const tCompany = document.getElementById('panel-company');
+      const tChange = document.getElementById('panel-change');
+      const tSector = document.getElementById('panel-sector');
+      const tMcapType = document.getElementById('panel-mcap-type');
+      const tVol = document.getElementById('panel-vol');
+      const tRetDay = document.getElementById('panel-ret-day');
+      const orderSym = document.getElementById('order-symbol-input');
+      const orderPrice = document.getElementById('order-price-input');
+
+      if (tTicker) tTicker.textContent = stock.ticker;
+      if (tPrice) tPrice.textContent = stock.close > 0 ? `₹${stock.close.toFixed(2)}` : '₹--';
+      if (tCompany) tCompany.textContent = stock.name;
+      if (tSector) tSector.textContent = `${stock.industry} • NIFTY 500 ${stock.market_cap}`;
+      if (tMcapType) tMcapType.textContent = stock.market_cap;
+      if (tVol) tVol.textContent = stock.volume > 0 ? stock.volume.toLocaleString('en-IN') : '--';
+      
+      const changeVal = Number(stock.change_pct != null ? stock.change_pct : 0);
+      let pctSign = changeVal > 0 ? '+' : '';
+      if (tChange) {
+        tChange.textContent = `${pctSign}${changeVal.toFixed(2)}%`;
+        tChange.className = changeVal >= 0 ? 'change-green' : 'change-red';
+      }
+      if (tRetDay) {
+        tRetDay.textContent = `${pctSign}${changeVal.toFixed(2)}%`;
+        tRetDay.style.color = changeVal >= 0 ? '#059669' : '#cc0000';
+      }
+
+      if (orderSym) orderSym.value = stock.symbol;
+      if (orderPrice && stock.close > 0) orderPrice.value = stock.close.toFixed(2);
+      if (typeof calculateLiveMargin === 'function') calculateLiveMargin();
+
+      // Update active banner on dashboard if present
+      const dashTicker = document.getElementById('chart-stock-symbol');
+      const dashPrice = document.getElementById('chart-stock-price');
+      const dashChange = document.getElementById('chart-stock-change');
+      if (dashTicker) dashTicker.textContent = stock.ticker;
+      if (dashPrice) dashPrice.textContent = stock.close > 0 ? `₹${stock.close.toFixed(2)}` : '₹--';
+      if (dashChange) {
+        dashChange.textContent = `${pctSign}${changeVal.toFixed(2)}%`;
+        dashChange.className = changeVal >= 0 ? 'badge-signal-bullish' : 'badge-signal-bearish';
+      }
+
+      // Update Real Market Candlestick Chart & Right Inspector Trend Chart
+      currentChartSymbol = stock.ticker || (stock.symbol + '.NS');
+      loadLiveMainChart(currentChartSymbol, currentChartInterval, currentChartPeriod);
+      updateRightChart(currentChartSymbol);
+    }
+
+    // -----------------------------------------------------------------------
+    // Real TradingView Lightweight Candlestick & Volume Chart Engine + Canvas Fallback
+    // -----------------------------------------------------------------------
+    let currentChartSymbol = 'RELIANCE.NS';
+    let currentChartInterval = '1d';
+    let currentChartPeriod = '6mo';
+    let tvChartInstance = null;
+    let tvCandlestickSeries = null;
+    let tvVolumeSeries = null;
+
+    function switchChartInterval(interval) {
+      currentChartInterval = interval;
+      document.querySelectorAll('.chart-interval-tabs .time-tab').forEach(b => {
+        b.classList.toggle('active', b.textContent.trim().toLowerCase() === interval.toLowerCase());
+      });
+      loadLiveMainChart(currentChartSymbol, currentChartInterval, currentChartPeriod);
+    }
+
+    function switchChartPeriod(period) {
+      currentChartPeriod = period;
+      document.querySelectorAll('.chart-period-tabs .time-tab').forEach(b => {
+        b.classList.toggle('active', b.textContent.trim().toLowerCase() === period.toLowerCase());
+      });
+      loadLiveMainChart(currentChartSymbol, currentChartInterval, currentChartPeriod);
+    }
+
+    async function loadLiveMainChart(symbol, interval = null, period = null) {
+      if (symbol) currentChartSymbol = symbol;
+      if (interval) currentChartInterval = interval;
+      if (period) currentChartPeriod = period;
+
+      const symbolEl = document.getElementById('chart-stock-symbol');
+      const priceEl = document.getElementById('chart-stock-price');
+      const changeEl = document.getElementById('chart-stock-change');
+      const sourceEl = document.getElementById('chart-data-source');
+      const countEl = document.getElementById('chart-candles-count');
+
+      if (symbolEl) symbolEl.textContent = currentChartSymbol;
+
+      try {
+        let url = `/api/chart/candles?symbol=${encodeURIComponent(currentChartSymbol)}&interval=${encodeURIComponent(currentChartInterval)}`;
+        if (currentChartPeriod) url += `&period=${encodeURIComponent(currentChartPeriod)}`;
+
+        const resp = await fetch(url);
+        if (!resp.ok) return;
+        const data = await resp.json();
+
+        if (symbolEl) symbolEl.textContent = data.symbol || currentChartSymbol;
+        if (priceEl && data.latest_close) priceEl.textContent = '₹' + Number(data.latest_close).toFixed(2);
+        if (changeEl && data.price_change_pct !== undefined) {
+          const isUp = Number(data.price_change_pct) >= 0;
+          changeEl.textContent = (isUp ? '+' : '') + Number(data.price_change_pct).toFixed(2) + '%';
+          changeEl.className = isUp ? 'badge-signal-bullish' : 'badge-signal-bearish';
+        }
+        if (sourceEl) sourceEl.textContent = '⚡ ' + (data.data_source || 'Zerodha KiteConnect Live');
+        if (countEl) countEl.textContent = `${data.total_candles || (data.candles ? data.candles.length : 0)} candles`;
+
+        renderMainCandlestickChart(data.candles || []);
+      } catch (err) {
+        console.warn('Error loading chart candles:', err);
+      }
+    }
+
+    function renderMainCandlestickChart(candles) {
+      const tvContainer = document.getElementById('tvChartContainer');
+      const canvasEl = document.getElementById('mainStockChartCanvas');
+      if (!candles || candles.length === 0) return;
+
+      let renderedWithTV = false;
+
+      // Try TradingView Lightweight Charts
+      if (typeof LightweightCharts !== 'undefined' && tvContainer) {
+        try {
+          tvContainer.style.display = 'block';
+          if (canvasEl) canvasEl.style.display = 'none';
+
+          const isIntraday = ['1m', '2m', '3m', '5m', '15m', '30m', '60m', '1h', '2h', '4h'].includes(currentChartInterval.toLowerCase());
+          const tvCandles = [];
+          const volumeData = [];
+
+          for (const c of candles) {
+            let tVal;
+            if (isIntraday) {
+              tVal = c.time || Math.floor(new Date(c.timestamp || c.date).getTime() / 1000);
+            } else {
+              tVal = c.date ? String(c.date).split(' ')[0] : (c.timestamp ? String(c.timestamp).split('T')[0] : '2026-01-01');
+            }
+
+            const openP = Number(c.open || 0);
+            const highP = Number(c.high || openP);
+            const lowP = Number(c.low || openP);
+            const closeP = Number(c.close || openP);
+
+            tvCandles.push({ time: tVal, open: openP, high: highP, low: lowP, close: closeP });
+
+            const isUp = closeP >= openP;
+            volumeData.push({
+              time: tVal,
+              value: Number(c.volume || 0),
+              color: isUp ? 'rgba(8, 153, 129, 0.4)' : 'rgba(242, 54, 69, 0.4)'
+            });
+          }
+
+          // Chronological Sort & Deduplicate
+          const candleMap = new Map();
+          tvCandles.forEach(item => candleMap.set(item.time, item));
+          const cleanCandles = Array.from(candleMap.values()).sort((a, b) => isIntraday ? (a.time - b.time) : String(a.time).localeCompare(String(b.time)));
+
+          const volMap = new Map();
+          volumeData.forEach(item => volMap.set(item.time, item));
+          const cleanVolume = Array.from(volMap.values()).sort((a, b) => isIntraday ? (a.time - b.time) : String(a.time).localeCompare(String(b.time)));
+
+          // Reset existing container
+          tvContainer.innerHTML = '';
+          if (tvChartInstance) {
+            try { tvChartInstance.remove(); } catch (e) {}
+            tvChartInstance = null;
+          }
+
+          const mainContainer = document.getElementById('mainStockChartContainer');
+          const w = (mainContainer && mainContainer.clientWidth > 100) ? mainContainer.clientWidth : 750;
+          const h = (mainContainer && mainContainer.clientHeight > 100) ? mainContainer.clientHeight : 340;
+
+          tvChartInstance = LightweightCharts.createChart(tvContainer, {
+            width: w,
+            height: h,
+            layout: {
+              background: { type: 'solid', color: '#ffffff' },
+              textColor: '#222222',
+              fontSize: 11,
+              fontFamily: "'JetBrains Mono', monospace"
+            },
+            grid: {
+              vertLines: { color: '#f0f3f6' },
+              horzLines: { color: '#f0f3f6' }
+            },
+            crosshair: {
+              mode: LightweightCharts.CrosshairMode.Normal,
+            },
+            rightPriceScale: {
+              borderColor: '#e0e0e0',
+              scaleMargins: { top: 0.08, bottom: 0.22 }
+            },
+            timeScale: {
+              borderColor: '#e0e0e0',
+              timeVisible: isIntraday,
+              secondsVisible: false
+            }
+          });
+
+          // Volume Histogram Series
+          const addHist = tvChartInstance.addHistogramSeries ? tvChartInstance.addHistogramSeries.bind(tvChartInstance) : (opts) => tvChartInstance.addSeries(LightweightCharts.HistogramSeries, opts);
+          tvVolumeSeries = addHist({
+            priceFormat: { type: 'volume' },
+            priceScaleId: 'volume_scale',
+            scaleMargins: { top: 0.8, bottom: 0 }
+          });
+          tvVolumeSeries.setData(cleanVolume);
+
+          // Candlestick Series
+          const addCandle = tvChartInstance.addCandlestickSeries ? tvChartInstance.addCandlestickSeries.bind(tvChartInstance) : (opts) => tvChartInstance.addSeries(LightweightCharts.CandlestickSeries, opts);
+          tvCandlestickSeries = addCandle({
+            upColor: '#089981',
+            downColor: '#f23645',
+            borderVisible: false,
+            wickUpColor: '#089981',
+            wickDownColor: '#f23645'
+          });
+          tvCandlestickSeries.setData(cleanCandles);
+
+          try { tvChartInstance.timeScale().fitContent(); } catch (e) {}
+
+          if (!window._tvResizeObserver && mainContainer) {
+            window._tvResizeObserver = new ResizeObserver(() => {
+              if (tvChartInstance && mainContainer) {
+                tvChartInstance.applyOptions({ width: mainContainer.clientWidth });
+              }
+            });
+            window._tvResizeObserver.observe(mainContainer);
+          }
+
+          renderedWithTV = true;
+        } catch (tvErr) {
+          console.warn('LightweightCharts error, falling back to Canvas:', tvErr);
+          renderedWithTV = false;
+        }
+      }
+
+      // Fallback: Custom HTML5 Canvas Candlestick & Volume Renderer
+      if (!renderedWithTV && canvasEl) {
+        if (tvContainer) tvContainer.style.display = 'none';
+        canvasEl.style.display = 'block';
+        renderCustomCanvasCandlesticks(candles, canvasEl);
+      }
+    }
+
+    function renderCustomCanvasCandlesticks(candles, canvasEl) {
+      if (!canvasEl || !candles || candles.length === 0) return;
+      const containerEl = document.getElementById('mainStockChartContainer');
+      const ctx = canvasEl.getContext('2d');
+
+      const totalH = 340;
+      canvasEl.style.display = 'block';
+      canvasEl.style.width = '100%';
+      canvasEl.style.height = totalH + 'px';
+
+      let parentW = containerEl && containerEl.clientWidth > 50 ? containerEl.clientWidth : (canvasEl.clientWidth || 750);
+      canvasEl.width = Math.floor(parentW);
+      canvasEl.height = totalH;
+      const w = canvasEl.width;
+      const h = canvasEl.height;
+
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, w, h);
+
+      const paddingRight = 65;
+      const paddingBottom = 26;
+      const paddingTop = 20;
+      const chartW = w - paddingRight;
+      const chartH = h - paddingBottom - paddingTop;
+
+      let minPrice = Infinity;
+      let maxPrice = -Infinity;
+      let maxVol = 0;
+
+      candles.forEach(c => {
+        const lo = Number(c.low || c.open || 0);
+        const hi = Number(c.high || c.open || 0);
+        const vo = Number(c.volume || 0);
+        if (lo < minPrice) minPrice = lo;
+        if (hi > maxPrice) maxPrice = hi;
+        if (vo > maxVol) maxVol = vo;
+      });
+
+      if (minPrice === maxPrice) { minPrice *= 0.95; maxPrice *= 1.05; }
+      const priceRange = maxPrice - minPrice;
+      const barWidth = Math.max(2, (chartW / candles.length) - 2);
+      const stepX = chartW / candles.length;
+
+      // Price Gridlines & Labels
+      ctx.strokeStyle = '#f0f3f6';
+      ctx.lineWidth = 1;
+      for (let i = 1; i <= 5; i++) {
+        const y = paddingTop + (chartH / 6) * i;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(chartW, y);
+        ctx.stroke();
+
+        const pVal = maxPrice - (priceRange / 6) * i;
+        ctx.fillStyle = '#666';
+        ctx.font = '10px JetBrains Mono, monospace';
+        ctx.fillText('₹' + pVal.toFixed(1), chartW + 5, y + 3);
+      }
+
+      // Draw Candlesticks & Volume
+      candles.forEach((c, idx) => {
+        const x = idx * stepX + stepX / 2;
+        const op = Number(c.open || 0);
+        const hi = Number(c.high || op);
+        const lo = Number(c.low || op);
+        const cl = Number(c.close || op);
+        const isUp = cl >= op;
+        const color = isUp ? '#089981' : '#f23645';
+
+        // Volume Bar (bottom 25%)
+        if (maxVol > 0) {
+          const volH = ((c.volume || 0) / maxVol) * (chartH * 0.25);
+          ctx.fillStyle = isUp ? 'rgba(8, 153, 129, 0.25)' : 'rgba(242, 54, 69, 0.25)';
+          ctx.fillRect(x - barWidth / 2, paddingTop + chartH - volH, barWidth, volH);
+        }
+
+        // Wick
+        const highY = paddingTop + chartH - ((hi - minPrice) / priceRange) * chartH;
+        const lowY = paddingTop + chartH - ((lo - minPrice) / priceRange) * chartH;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(x, highY);
+        ctx.lineTo(x, lowY);
+        ctx.stroke();
+
+        // Body
+        const openY = paddingTop + chartH - ((op - minPrice) / priceRange) * chartH;
+        const closeY = paddingTop + chartH - ((cl - minPrice) / priceRange) * chartH;
+        const bodyY = Math.min(openY, closeY);
+        const bodyH = Math.max(2, Math.abs(closeY - openY));
+
+        ctx.fillStyle = color;
+        ctx.fillRect(x - barWidth / 2, bodyY, barWidth, bodyH);
+      });
+    }
+
+    // -----------------------------------------------------------------------
+    // Right Inspector Trend Indicator Chart (Price + 20/50 SMA)
+    // -----------------------------------------------------------------------
+    async function updateRightChart(symbol) {
+      const canvasEl = document.getElementById('panelStockChart');
+      if (!canvasEl) return;
+      const sym = symbol || currentChartSymbol || 'RELIANCE.NS';
+
+      try {
+        const resp = await fetch(`/api/chart/candles?symbol=${encodeURIComponent(sym)}&interval=1d&period=3mo`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const candles = data.candles || [];
+        if (candles.length === 0) return;
+
+        if (rightChartInstance) {
+          try { rightChartInstance.destroy(); } catch (e) {}
+          rightChartInstance = null;
+        }
+
+        const labels = candles.map(c => c.date ? c.date.slice(5) : '');
+        const closes = candles.map(c => Number(c.close || 0));
+
+        // 20 SMA
+        const sma20 = [];
+        for (let i = 0; i < closes.length; i++) {
+          if (i >= 19) {
+            const avg = closes.slice(i - 19, i + 1).reduce((a, b) => a + b, 0) / 20;
+            sma20.push(Number(avg.toFixed(2)));
+          } else {
+            sma20.push(null);
+          }
+        }
+
+        // 50 SMA
+        const sma50 = [];
+        for (let i = 0; i < closes.length; i++) {
+          if (i >= 49) {
+            const avg = closes.slice(i - 49, i + 1).reduce((a, b) => a + b, 0) / 50;
+            sma50.push(Number(avg.toFixed(2)));
+          } else {
+            sma50.push(null);
+          }
+        }
+
+        const ctx = canvasEl.getContext('2d');
+        if (typeof Chart !== 'undefined') {
+          rightChartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+              labels: labels,
+              datasets: [
+                {
+                  label: 'Price',
+                  data: closes,
+                  borderColor: '#000080',
+                  borderWidth: 1.5,
+                  pointRadius: 0,
+                  fill: false,
+                  tension: 0.1
+                },
+                {
+                  label: 'SMA 20',
+                  data: sma20,
+                  borderColor: '#059669',
+                  borderWidth: 1.2,
+                  pointRadius: 0,
+                  fill: false,
+                  tension: 0.1
+                },
+                {
+                  label: 'SMA 50',
+                  data: sma50,
+                  borderColor: '#d97706',
+                  borderWidth: 1.2,
+                  pointRadius: 0,
+                  fill: false,
+                  tension: 0.1
+                }
+              ]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              animation: false,
+              plugins: {
+                legend: {
+                  display: true,
+                  position: 'top',
+                  labels: { boxWidth: 8, font: { size: 9, family: "'JetBrains Mono', monospace" } }
+                },
+                tooltip: {
+                  mode: 'index',
+                  intersect: false,
+                  bodyFont: { size: 10, family: "'JetBrains Mono', monospace" }
+                }
+              },
+              scales: {
+                x: {
+                  display: false
+                },
+                y: {
+                  position: 'right',
+                  ticks: { font: { size: 9, family: "'JetBrains Mono', monospace" } },
+                  grid: { color: '#f0f0f0' }
+                }
+              }
+            }
+          });
+        }
+      } catch (err) {
+        console.warn('Error loading right inspector chart:', err);
+      }
+    }
+
+    function initDefaultCharts() {
+      loadLiveMainChart('RELIANCE.NS', '1d', '6mo');
+      updateRightChart('RELIANCE.NS');
+    }
+
+
+    // -----------------------------------------------------------------------
+    // Paper Order Execution
+    // -----------------------------------------------------------------------
+    async function placeOrder(side) {
+      const sym = document.getElementById('order-symbol-input').value.trim();
+      const qty = parseInt(document.getElementById('order-qty-input').value, 10) || 1;
+      const orderType = document.getElementById('order-type-input').value;
+      const priceVal = parseFloat(document.getElementById('order-price-input').value) || 0.0;
+
+      if (!sym) {
+        alert('Please select a stock first.');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/order/place', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            symbol: sym,
+            side: side,
+            quantity: qty,
+            order_type: orderType,
+            price: priceVal,
+            product: 'MIS'
+          })
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'success') {
+          showToast(`⚡ ${side} Order Filled: ${qty} shares of ${sym} @ ₹${data.order.fill_price.toFixed(2)}`);
+          // Reload page after brief delay to reflect updated portfolio & positions
+          setTimeout(() => window.location.reload(), 1000);
+        } else {
+          alert(`Order Rejected: ${data.detail || 'Risk limit or broker error.'}`);
+        }
+      } catch (err) {
+        alert(`Failed to place order: ${err.message}`);
+      }
+    }
+
+    function submitQuickOrder(e) {
+      e.preventDefault();
+      placeOrder('BUY');
+    }
+
+    // -----------------------------------------------------------------------
+    // Market News Wire
+    // -----------------------------------------------------------------------
+    async function loadMarketNews(force = false) {
+      const list = document.getElementById('sidebar-news-list');
+      if (!list) return;
+      try {
+        const res = await fetch(`/api/market/news?limit=8${force ? '&force=true' : ''}`);
+        const data = await res.json();
+        const articles = data.articles || [];
+        if (articles.length === 0) {
+          list.innerHTML = '<div style="padding:10px; color:#777; font-size:11px;">No active wire headlines.</div>';
+          return;
+        }
+        let html = '';
+        for (const item of articles) {
+          html += `
+            <div class="news-item">
+              <a href="${item.link}" target="_blank" class="news-title">${item.title}</a>
+              <div class="news-meta">
+                <span class="news-source">${item.source}</span>
+                <span class="news-time">${item.published || item.pub_date || ''}</span>
+              </div>
+            </div>
+          `;
+        }
+        list.innerHTML = html;
+      } catch (err) {
+        list.innerHTML = '<div style="padding:10px; color:#cc0000; font-size:10.5px;">Live news feed unavailable.</div>';
+      }
+    }
+
+    function showToast(msg) {
+      const toast = document.createElement('div');
+      toast.className = 'kite-toast-banner';
+      toast.innerHTML = `<span>⚡</span> <span>${msg}</span>`;
+      document.body.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transition = 'opacity 0.5s ease';
+        setTimeout(() => toast.remove(), 500);
+      }, 4500);
+    }
+  </script>
+</body>
+</html>

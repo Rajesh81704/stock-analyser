@@ -1,0 +1,57 @@
+name: CI - Test & Validate
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Test & Lint (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Syntax & Compilation Check
+        run: |
+          echo "Compiling all Python files to verify syntax integrity..."
+          python -m compileall src/ tests/ web/ run.py
+
+      - name: Validate Strategy YAML Configurations
+        run: |
+          python -c "
+          import yaml, glob
+          configs = glob.glob('configs/*.yaml')
+          print(f'Validating {len(configs)} strategy YAML configuration files...')
+          for f in configs:
+              with open(f) as fp:
+                  data = yaml.safe_load(fp)
+                  assert isinstance(data, dict), f'Invalid YAML root in {f}'
+          print('All strategy configurations are valid.')
+          "
+
+      - name: Run Pytest Test Suite
+        env:
+          KITE_API_KEY: "dummy_test_api_key"
+          KITE_API_SECRET: "dummy_test_api_secret"
+        run: |
+          pytest -v tests/
