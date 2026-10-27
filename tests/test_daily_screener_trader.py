@@ -427,7 +427,44 @@ def test_5x_intraday_leverage_mechanics():
         # Gross exposure should be 5x margin utilized (approx ₹2,50,000)
         assert abs(pm["gross_exposure"] - 250000.0) <= 2000.0
         assert "5x MIS LEVERAGE" in pm["execution_mode"]
-
     finally:
         if os.path.exists(db_path):
             os.remove(db_path)
+
+
+def test_manual_capital_and_leverage_configuration(tmp_path):
+    """Tests that manual margin capital and leverage can be configured, persisted, and utilized."""
+    db_path = tmp_path / "test_manual_cfg.db"
+    trader = DailyIntradayAutoTrader(db_path=db_path, initial_capital=100000.0, leverage=5.0)
+
+    # 1. Update manual capital to ₹2,00,000 and leverage to 4x (25% margin)
+    res = trader.set_capital_and_leverage(capital=200000.0, leverage=4.0)
+    assert res["capital"] == 200000.0
+    assert res["leverage"] == 4.0
+    assert res["buying_power"] == 800000.0
+
+    # 2. Re-initialize a new trader instance on the same DB to ensure persistence
+    trader2 = DailyIntradayAutoTrader(db_path=db_path)
+    cfg = trader2.get_capital_and_leverage()
+    assert cfg["capital"] == 200000.0
+    assert cfg["leverage"] == 4.0
+    assert cfg["buying_power"] == 800000.0
+
+    # 3. Execute trades with custom 4x leverage
+    picks = [{"symbol": "RELIANCE", "price": 2500.0, "conviction_score": 90.0, "rvol": 2.0, "sector": "Energy", "strategy_name": "ORB"}]
+    trades = trader2.execute_paper_algo_trades(picks=picks, trade_date_str="2026-10-27", total_capital=100000.0, leverage=4.0)
+    assert len(trades) == 1
+    # 100k margin * 4x = 400k buying power -> 400,000 / 2500 = 160 shares
+    assert trades[0]["qty"] == 160
+
+    # 4. Status reflects custom capital & leverage
+    status = trader2.get_automation_status(auto_squareoff_past_3pm=False)
+    assert status["capital"] == 200000.0
+    assert status["leverage"] == 4.0
+    assert status["buying_power"] == 800000.0
+    pm = status["portfolio_metrics"]
+    assert pm["simulated_capital"] == 200000.0
+    assert pm["intraday_leverage"] == 4.0
+    assert pm["total_buying_power"] == 800000.0
+    assert "4x MIS LEVERAGE" in pm["execution_mode"]
+

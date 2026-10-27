@@ -72,7 +72,7 @@
 <!-- Portfolio Performance Metrics Banner -->
 <div class="algo-metric-banner">
   <div class="algo-stat-cell">
-    <span class="stat-lbl">Margin Capital (5x MIS)</span>
+    <span class="stat-lbl" id="kpi-margin-capital-lbl">Margin Capital (5x MIS)</span>
     <span class="stat-val" id="kpi-simulated-capital">₹{{ "{:,.2f}".format(portfolio_metrics.simulated_capital if portfolio_metrics else 100000.0) }}</span>
     <span style="font-size: 9.5px; color: #475569;" id="kpi-buying-power">5x Power: ₹{{ "{:,.2f}".format(portfolio_metrics.total_buying_power if (portfolio_metrics and portfolio_metrics.total_buying_power) else 500000.0) }}</span>
   </div>
@@ -123,9 +123,9 @@
         <tr>
           <th>Symbol</th>
           <th>Side</th>
-          <th>Qty (5x)</th>
+          <th id="th-active-qty">Qty (5x)</th>
           <th>Margin Capital</th>
-          <th>Gross Exposure (5x)</th>
+          <th id="th-active-exposure">Gross Exposure (5x)</th>
           <th>Entry Price</th>
           <th>Current Price</th>
           <th>Unrealized P&L</th>
@@ -201,14 +201,42 @@
       </span>
     </div>
     <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-      <div style="display: flex; align-items: center; background: rgba(255,255,255,0.18); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.35);">
+      <!-- Manual Capital Input -->
+      <div style="display: flex; align-items: center; background: rgba(255,255,255,0.18); padding: 2px 7px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.35);" title="Manual Intraday Margin Capital in ₹">
         <span style="font-size: 11px; font-weight: 700; color: #fff; margin-right: 4px;">Capital: ₹</span>
-        <input type="number" id="capital-input" value="100000" min="5000" step="10000" style="width: 85px; padding: 2px 4px; font-size: 11px; font-weight: 800; border: 1px solid #cbd5e1; border-radius: 2px; text-align: right; background: #fff; color: #000;" title="Enter total capital amount to smartly distribute using Gemini AI" />
+        <input type="number" id="capital-input" value="100000" min="1000" step="5000" oninput="onCapitalOrMarginChanged()" style="width: 82px; padding: 2px 4px; font-size: 11px; font-weight: 800; border: 1px solid #cbd5e1; border-radius: 2px; text-align: right; background: #fff; color: #000;" />
       </div>
-      <button onclick="previewSmartAllocation()" id="btn-preview-alloc" class="term-btn" style="background: #e0e7ff; color: #1e1b4b; font-weight: 800; border: 1px solid #818cf8; padding: 4px 10px; font-size: 11px; cursor: pointer;" title="Preview Gemini AI smart sizing weights">
-        🧠 Preview AI Sizing
+
+      <!-- Manual Margin / Leverage Input & Preset -->
+      <div style="display: flex; align-items: center; background: rgba(255,255,255,0.18); padding: 2px 7px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.35);" title="Manual Intraday Margin Leverage (e.g. 5x for 20% MIS, 1x for 100% Cash)">
+        <span style="font-size: 11px; font-weight: 700; color: #fff; margin-right: 4px;">Margin / Lev:</span>
+        <input type="number" id="leverage-input" value="5.0" min="1.0" max="20.0" step="0.5" oninput="onCapitalOrMarginChanged()" style="width: 46px; padding: 2px 4px; font-size: 11px; font-weight: 800; border: 1px solid #cbd5e1; border-radius: 2px; text-align: center; background: #fff; color: #000;" />
+        <span style="font-size: 11px; font-weight: 800; color: #fff; margin-left: 2px; margin-right: 6px;">x</span>
+        <select id="leverage-preset" onchange="onLeveragePresetChanged(this.value)" style="padding: 2px 4px; font-size: 10px; font-weight: 700; border-radius: 2px; border: 1px solid #cbd5e1; background: #fff; color: #0f172a; cursor: pointer;">
+          <option value="5.0" selected>5x (20% MIS)</option>
+          <option value="4.0">4x (25% MIS)</option>
+          <option value="3.0">3x (33% MIS)</option>
+          <option value="2.0">2x (50% MIS)</option>
+          <option value="1.0">1x (Cash/CNC)</option>
+          <option value="10.0">10x (10% MIS)</option>
+        </select>
+      </div>
+
+      <!-- Real-Time Total Buying Power Badge -->
+      <div style="background: rgba(16, 185, 129, 0.25); border: 1px solid #10b981; padding: 3px 8px; border-radius: 4px; color: #a7f3d0; font-size: 11px; font-weight: 800; font-family: var(--font-mono); display: flex; align-items: center; gap: 4px;" title="Intraday Buying Power = Capital × Leverage">
+        <span>⚡ Power:</span>
+        <span id="toolbar-buying-power" style="color: #ffffff; font-weight: 900;">₹5,00,000</span>
+      </div>
+
+      <!-- Save Defaults Button -->
+      <button onclick="saveManualCapitalAndMargin()" id="btn-save-cfg" class="term-btn" style="background: #10b981; color: #ffffff; font-weight: 800; border: 1px solid #059669; padding: 4px 8px; font-size: 11px; cursor: pointer;" title="Save these values as defaults in SQLite database for all morning auto-trades">
+        💾 Save
       </button>
-      <button onclick="runMorningScreenerNow()" id="btn-run-morning-screener" class="term-btn" style="background: #fbbf24; color: #000; font-weight: 800; border: 1px solid #d97706; padding: 4px 10px; font-size: 11px; cursor: pointer;">
+
+      <button onclick="previewSmartAllocation()" id="btn-preview-alloc" class="term-btn" style="background: #e0e7ff; color: #1e1b4b; font-weight: 800; border: 1px solid #818cf8; padding: 4px 10px; font-size: 11px; cursor: pointer;" title="Preview Gemini AI smart sizing weights with this capital and margin">
+        🧠 Preview AI
+      </button>
+      <button onclick="runMorningScreenerNow()" id="btn-run-morning-screener" class="term-btn" style="background: #fbbf24; color: #000; font-weight: 800; border: 1px solid #d97706; padding: 4px 10px; font-size: 11px; cursor: pointer;" title="Run screener and execute paper trades with this capital and margin">
         ⚡ AI Trade Now
       </button>
       <button onclick="triggerTrailingSlCheck()" id="btn-tick-update" class="term-btn" style="background: #ffffff; color: #000080; font-weight: 700; border: 1px solid #ffffff; padding: 4px 10px; font-size: 11px; cursor: pointer;">
@@ -524,14 +552,29 @@
       // Top Portfolio KPI Banner & Active Open Positions Updates
       // -----------------------------------------------------------------------
       const pm = data.portfolio_metrics || {};
+      const curLev = Number(pm.intraday_leverage || document.getElementById('leverage-input')?.value || 5.0);
+      const levStr = Number.isInteger(curLev) ? curLev + 'x' : curLev.toFixed(1) + 'x';
+
       const kpiCap = document.getElementById('kpi-simulated-capital');
       if (kpiCap) kpiCap.innerText = '₹' + Number(pm.simulated_capital || 100000).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
 
       const kpiPower = document.getElementById('kpi-buying-power');
       if (kpiPower) {
-        const bp = Number(pm.total_buying_power || ((pm.simulated_capital || 100000) * 5.0));
-        kpiPower.innerText = '5x Power: ₹' + bp.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        const bp = Number(pm.total_buying_power || ((pm.simulated_capital || 100000) * curLev));
+        kpiPower.innerText = `${levStr} Power: ₹` + bp.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
       }
+
+      const kpiCapLbl = document.getElementById('kpi-margin-capital-lbl');
+      if (kpiCapLbl) kpiCapLbl.innerText = `Margin Capital (${levStr} MIS)`;
+
+      const kpiMode = document.getElementById('kpi-execution-mode');
+      if (kpiMode && pm.execution_mode) kpiMode.innerText = pm.execution_mode;
+
+      const thQty = document.getElementById('th-active-qty');
+      if (thQty) thQty.innerText = `Qty (${levStr})`;
+
+      const thExp = document.getElementById('th-active-exposure');
+      if (thExp) thExp.innerText = `Gross Exposure (${levStr})`;
 
       const kpiUtil = document.getElementById('kpi-capital-utilized');
       if (kpiUtil) {
@@ -992,17 +1035,124 @@
     await deleteSingleDateTrades(todayDate);
   }
 
+  function onCapitalOrMarginChanged() {
+    const cap = parseFloat(document.getElementById('capital-input')?.value) || 0;
+    const lev = parseFloat(document.getElementById('leverage-input')?.value) || 1.0;
+    const bp = cap * lev;
+    const levStr = Number.isInteger(lev) ? lev + 'x' : lev.toFixed(1) + 'x';
+
+    // Update toolbar dynamic buying power badge
+    const badge = document.getElementById('toolbar-buying-power');
+    if (badge) badge.innerText = '₹' + Math.round(bp).toLocaleString('en-IN');
+
+    // Update preset selector if it matches
+    const presetSelect = document.getElementById('leverage-preset');
+    if (presetSelect) {
+      const match = Array.from(presetSelect.options).find(opt => parseFloat(opt.value) === lev);
+      if (match) presetSelect.value = match.value;
+      else presetSelect.value = "";
+    }
+
+    // Update top KPI banner live
+    const kpiCap = document.getElementById('kpi-simulated-capital');
+    if (kpiCap) kpiCap.innerText = '₹' + cap.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+    const kpiPower = document.getElementById('kpi-buying-power');
+    if (kpiPower) kpiPower.innerText = `${levStr} Power: ₹` + bp.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+    const kpiCapLbl = document.getElementById('kpi-margin-capital-lbl');
+    if (kpiCapLbl) kpiCapLbl.innerText = `Margin Capital (${levStr} MIS)`;
+
+    const kpiMode = document.getElementById('kpi-execution-mode');
+    if (kpiMode) kpiMode.innerText = `PAPER (AI ALGO • ${levStr} MIS LEVERAGE)`;
+
+    const thQty = document.getElementById('th-active-qty');
+    if (thQty) thQty.innerText = `Qty (${levStr})`;
+
+    const thExp = document.getElementById('th-active-exposure');
+    if (thExp) thExp.innerText = `Gross Exposure (${levStr})`;
+
+    // Store in localStorage for instant restore
+    try {
+      localStorage.setItem('algodesk_user_capital', String(cap));
+      localStorage.setItem('algodesk_user_leverage', String(lev));
+    } catch (e) {}
+  }
+
+  function onLeveragePresetChanged(val) {
+    if (!val) return;
+    const levInput = document.getElementById('leverage-input');
+    if (levInput) {
+      levInput.value = val;
+      onCapitalOrMarginChanged();
+    }
+  }
+
+  async function saveManualCapitalAndMargin() {
+    const cap = parseFloat(document.getElementById('capital-input')?.value) || 100000;
+    const lev = parseFloat(document.getElementById('leverage-input')?.value) || 5.0;
+    const btn = document.getElementById('btn-save-cfg');
+    const origText = btn.innerHTML;
+    btn.innerHTML = '⏳ Saving...';
+    btn.disabled = true;
+    try {
+      const res = await fetch(`/api/automation/config?capital=${cap}&leverage=${lev}`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.status === 'success') {
+        const bp = cap * lev;
+        const levStr = Number.isInteger(lev) ? lev + 'x' : lev.toFixed(1) + 'x';
+        alert(`✅ Saved Manual Margin & Capital Settings!\n\n• Capital (Margin): ₹${Number(cap).toLocaleString('en-IN')}\n• Intraday Leverage: ${levStr}\n• Total Buying Power: ₹${Number(bp).toLocaleString('en-IN')}\n\nThese values are now saved in SQLite as defaults for all manual actions and daily morning (09:16 AM) automation.`);
+        await loadAutomationTelemetry();
+      } else {
+        alert('⚠️ ' + (data.detail || data.message || 'Error saving settings'));
+      }
+    } catch (e) {
+      alert('Error: ' + e.message);
+    } finally {
+      btn.innerHTML = origText;
+      btn.disabled = false;
+    }
+  }
+
+  async function loadInitialCapitalAndMargin() {
+    try {
+      const res = await fetch('/api/automation/config');
+      if (res.ok) {
+        const data = await res.json();
+        const cfg = data.config || {};
+        const capInput = document.getElementById('capital-input');
+        const levInput = document.getElementById('leverage-input');
+        if (capInput && cfg.capital) capInput.value = cfg.capital;
+        if (levInput && cfg.leverage) levInput.value = cfg.leverage;
+        onCapitalOrMarginChanged();
+        return;
+      }
+    } catch (e) {}
+
+    try {
+      const savedCap = localStorage.getItem('algodesk_user_capital');
+      const savedLev = localStorage.getItem('algodesk_user_leverage');
+      if (savedCap && document.getElementById('capital-input')) document.getElementById('capital-input').value = savedCap;
+      if (savedLev && document.getElementById('leverage-input')) document.getElementById('leverage-input').value = savedLev;
+      onCapitalOrMarginChanged();
+    } catch (e) {}
+  }
+
   async function runMorningScreenerNow() {
     const capitalVal = parseFloat(document.getElementById('capital-input')?.value || 100000);
+    const leverageVal = parseFloat(document.getElementById('leverage-input')?.value || 5.0);
+    const bp = capitalVal * leverageVal;
+    const levStr = Number.isInteger(leverageVal) ? leverageVal + 'x' : leverageVal.toFixed(1) + 'x';
+
     const btn = document.getElementById('btn-run-morning-screener');
     const origText = btn.innerHTML;
     btn.innerHTML = '⏳ AI Distributing...';
     btn.disabled = true;
     try {
-      const res = await fetch(`/api/automation/top10/run-now?top_n=10&total_capital=${capitalVal}`, { method: 'POST' });
+      const res = await fetch(`/api/automation/top10/run-now?top_n=10&total_capital=${capitalVal}&leverage=${leverageVal}`, { method: 'POST' });
       const data = await res.json();
       if (res.ok && data.status === 'success') {
-        alert(`✅ Gemini Smart Distribution Complete!\nTotal Capital: ₹${Number(capitalVal).toLocaleString('en-IN')}\nScreened: ${data.picks?.length || 0} stocks\nSmart Trades Executed: ${data.trades?.length || 0}\n${data.message}`);
+        alert(`✅ Gemini Smart Distribution Complete!\n\n• Margin Capital: ₹${Number(capitalVal).toLocaleString('en-IN')}\n• Leverage: ${levStr} MIS\n• Buying Power: ₹${Number(bp).toLocaleString('en-IN')}\n• Screened: ${data.picks?.length || 0} stocks\n• Smart Trades Executed: ${data.trades?.length || 0}\n\n${data.message}`);
         await loadAutomationTelemetry();
       } else {
         alert('⚠️ ' + (data.detail || data.message || 'Error executing smart morning trade'));
@@ -1017,24 +1167,26 @@
 
   async function previewSmartAllocation() {
     const capitalVal = parseFloat(document.getElementById('capital-input')?.value || 100000);
+    const leverageVal = parseFloat(document.getElementById('leverage-input')?.value || 5.0);
+    const levStr = Number.isInteger(leverageVal) ? leverageVal + 'x' : leverageVal.toFixed(1) + 'x';
     const btn = document.getElementById('btn-preview-alloc');
     const origText = btn.innerHTML;
     btn.innerHTML = '⏳ AI Analyzing...';
     btn.disabled = true;
     try {
-      const res = await fetch(`/api/automation/smart-allocation/preview?total_capital=${capitalVal}&top_n=10`);
+      const res = await fetch(`/api/automation/smart-allocation/preview?total_capital=${capitalVal}&leverage=${leverageVal}&top_n=10`);
       const data = await res.json();
       if (res.ok && data.status === 'success') {
         const alloc = data.allocation;
-        const lev = alloc.leverage || 5.0;
+        const lev = alloc.leverage || leverageVal;
         const bp = alloc.total_buying_power || (capitalVal * lev);
-        let msg = `🧠 Gemini Smart Allocation (5x MIS Intraday Leverage):\n`;
-        msg += `Margin Capital: ₹${Number(capitalVal).toLocaleString('en-IN')} → 5x Buying Power: ₹${Number(bp).toLocaleString('en-IN')}\n`;
+        let msg = `🧠 Gemini Smart Allocation (${levStr} MIS Intraday Leverage):\n`;
+        msg += `Margin Capital: ₹${Number(capitalVal).toLocaleString('en-IN')} → ${levStr} Buying Power: ₹${Number(bp).toLocaleString('en-IN')}\n`;
         msg += `Engine: ${alloc.model_used}\n`;
         msg += `Strategy: ${alloc.strategy_overview}\n\n`;
         alloc.allocations.forEach(a => {
           const exp = a.exposure || (a.allocated_capital * lev);
-          msg += `• ${a.symbol}: Margin ₹${Number(a.allocated_capital).toLocaleString('en-IN')} (${a.weight_pct}%) → Qty: ${a.qty} (5x Exposure: ₹${Number(exp).toLocaleString('en-IN')}) | ${a.rationale}\n`;
+          msg += `• ${a.symbol}: Margin ₹${Number(a.allocated_capital).toLocaleString('en-IN')} (${a.weight_pct}%) → Qty: ${a.qty} (${levStr} Exposure: ₹${Number(exp).toLocaleString('en-IN')}) | ${a.rationale}\n`;
         });
         alert(msg);
       } else {
@@ -1087,7 +1239,8 @@
   }
 
   // Load telemetry on load and poll every 10 seconds
-  document.addEventListener('DOMContentLoaded', () => {
+  document.addEventListener('DOMContentLoaded', async () => {
+    await loadInitialCapitalAndMargin();
     loadAutomationTelemetry();
     setInterval(loadAutomationTelemetry, 10000);
   });

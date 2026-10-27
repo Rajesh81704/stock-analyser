@@ -129,8 +129,64 @@ class DailyIntradayAutoTrader:
                 )
             """)
 
+            # 3. Table for User Configured Capital & Margin Leverage Settings
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS daily_automation_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+
+            # Load persisted settings if available
+            try:
+                cur.execute("SELECT key, value FROM daily_automation_settings")
+                for row in cur.fetchall():
+                    if row["key"] == "capital" and row["value"]:
+                        self.initial_capital = float(row["value"])
+                    elif row["key"] == "leverage" and row["value"]:
+                        self.leverage = float(row["value"])
+            except Exception:
+                pass
+
             conn.commit()
             conn.close()
+
+    def set_capital_and_leverage(self, capital: float, leverage: float) -> Dict[str, float]:
+        """Sets and persists user-defined capital and leverage for the automation engine."""
+        with self._lock:
+            self.initial_capital = float(capital)
+            self.leverage = float(leverage)
+            try:
+                conn = self._get_connection()
+                cur = conn.cursor()
+                now_ts = get_ist_now_ts()
+                cur.execute("""
+                    INSERT OR REPLACE INTO daily_automation_settings (key, value, updated_at)
+                    VALUES ('capital', ?, ?)
+                """, (str(self.initial_capital), now_ts))
+                cur.execute("""
+                    INSERT OR REPLACE INTO daily_automation_settings (key, value, updated_at)
+                    VALUES ('leverage', ?, ?)
+                """, (str(self.leverage), now_ts))
+                conn.commit()
+                conn.close()
+                logger.info(f"⚙️ [AutomationSettings] Saved: Capital=₹{self.initial_capital:,.2f}, Leverage={self.leverage:.1f}x (Buying Power: ₹{self.initial_capital * self.leverage:,.2f})")
+            except Exception as e:
+                logger.warning(f"Failed to persist automation settings: {e}")
+            return {
+                "capital": self.initial_capital,
+                "leverage": self.leverage,
+                "buying_power": round(self.initial_capital * self.leverage, 2)
+            }
+
+    def get_capital_and_leverage(self) -> Dict[str, float]:
+        """Returns current capital, leverage, and total buying power."""
+        return {
+            "capital": getattr(self, "initial_capital", 100000.0),
+            "leverage": getattr(self, "leverage", 5.0),
+            "buying_power": round(getattr(self, "initial_capital", 100000.0) * getattr(self, "leverage", 5.0), 2)
+        }
 
     def is_market_day(self, check_date: Optional[date] = None) -> bool:
         """Returns True if date is Monday-Friday (ignoring holidays for basic check)."""
@@ -337,12 +393,13 @@ class DailyIntradayAutoTrader:
         self,
         picks: Optional[List[Dict[str, Any]]] = None,
         trade_date_str: Optional[str] = None,
-        total_capital: Optional[float] = None
+        total_capital: Optional[float] = None,
+        leverage: Optional[float] = None
     ) -> List[Dict[str, Any]]:
         """
         Enters paper algo trades for the selected top stocks with Initial SL,
         Target (+2%), and dynamic Trailing SL parameters. Smartly distributes `total_capital`
-        using Gemini API (with quantitative multi-factor risk parity fallback).
+        using Gemini API (with quantitative multi-factor risk parity fallback) and `leverage`.
         Logs into `daily_intraday_trades`.
         """
         today_str = trade_date_str or get_ist_date()
@@ -382,7 +439,7 @@ class DailyIntradayAutoTrader:
             return []
 
         pool_capital = float(total_capital if total_capital is not None and total_capital > 0 else self.initial_capital)
-        lev = float(getattr(self, "leverage", 5.0))
+        lev = float(leverage if leverage is not None and leverage > 0 else getattr(self, "leverage", 5.0))
 
         # Smart Capital Distribution via Gemini API (with Quant Conviction Risk-Parity fallback and 5x leverage)
         alloc_map = {}
@@ -761,7 +818,12 @@ class DailyIntradayAutoTrader:
     # -------------------------------------------------------------------------
     # 4. Status Payload & History Reporting for UI & Dashboard
     # -------------------------------------------------------------------------
-    def get_automation_status(self, auto_squareoff_past_3pm: bool = True) -> Dict[str, Any]:
+    def get_automation_status(
+        self,
+        auto_squareoff_past_3pm: bool = True,
+        total_capital: Optional[float] = None,
+        leverage: Optional[float] = None
+    ) -> Dict[str, Any]:
         """Returns comprehensive status, today's picks, open positions, and all trade logs."""
         today_str = get_ist_date()
 
@@ -886,9 +948,9 @@ class DailyIntradayAutoTrader:
         dates_available = sorted(list(trades_by_date.keys()), reverse=True)
         historical_dates = [d for d in dates_available if d != today_str]
 
-        # Capital Utilization and Unified Portfolio Metrics (5x Intraday MIS Leverage)
-        base_simulated_capital = 100000.0
-        lev = float(getattr(self, "leverage", 5.0))
+        # Capital Utilization and Unified Portfolio Metrics (Configurable Intraday MIS Leverage)
+        base_simulated_capital = float(total_capital if total_capital is not None and total_capital > 0 else getattr(self, "initial_capital", 100000.0))
+        lev = float(leverage if leverage is not None and leverage > 0 else getattr(self, "leverage", 5.0))
         open_capital_utilized = sum(float(t.get("allocated_capital") or (t.get("qty", 0) * t.get("entry_price", 0))) for t in open_trades)
         gross_exposure = round(sum(float(t.get("qty", 0) * t.get("entry_price", 0)) for t in open_trades), 2)
         total_buying_power = round(base_simulated_capital * lev, 2)
@@ -900,6 +962,7 @@ class DailyIntradayAutoTrader:
         capital_utilization_pct = round((open_capital_utilized / base_simulated_capital * 100.0), 1) if base_simulated_capital > 0 else 0.0
         effective_leverage = round(gross_exposure / portfolio_equity, 2) if portfolio_equity > 0 else 0.0
 
+        lev_display = f"{int(lev)}x" if lev == int(lev) else f"{lev:.1f}x"
         portfolio_metrics = {
             "simulated_capital": base_simulated_capital,
             "intraday_leverage": lev,
@@ -914,7 +977,7 @@ class DailyIntradayAutoTrader:
             "max_positions_allowed": 10,
             "unrealized_pnl": round(unrealized_pnl, 2),
             "today_realized_net_pnl": today_realized_net_pnl,
-            "execution_mode": f"PAPER (AI ALGO • {lev:.0f}x MIS LEVERAGE)"
+            "execution_mode": f"PAPER (AI ALGO • {lev_display} MIS LEVERAGE)"
         }
 
         conn.close()
@@ -922,6 +985,9 @@ class DailyIntradayAutoTrader:
         return {
             "status": "active",
             "is_market_day": self.is_market_day(),
+            "capital": base_simulated_capital,
+            "leverage": lev,
+            "buying_power": total_buying_power,
             "today_date": today_str,
             "today_picks_count": len(today_picks),
             "today_picks": today_picks,

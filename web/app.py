@@ -2367,13 +2367,49 @@ backtest_metrics:
 # Automated Daily Top Stock Screener & Trailing SL Paper Trader APIs
 # =====================================================================
 
+@app.get("/api/automation/config", summary="Get User Configured Capital & Margin Leverage")
+def get_automation_config():
+    """Returns the currently configured margin capital, leverage, and buying power."""
+    try:
+        from src.algodesk.automation.daily_screener_trader import daily_auto_trader
+        return {
+            "status": "success",
+            "config": daily_auto_trader.get_capital_and_leverage()
+        }
+    except Exception as e:
+        logger.error(f"Error fetching automation config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/automation/config", summary="Set & Save User Margin Capital & Leverage")
+def set_automation_config(
+    capital: float = Query(..., ge=1000.0, le=50000000.0, description="Capital in ₹"),
+    leverage: float = Query(5.0, ge=1.0, le=20.0, description="Intraday leverage multiplier (e.g. 5.0 for 5x)")
+):
+    """Saves user-defined capital and leverage in SQLite database for all current and automated morning runs."""
+    try:
+        from src.algodesk.automation.daily_screener_trader import daily_auto_trader
+        saved = daily_auto_trader.set_capital_and_leverage(capital=capital, leverage=leverage)
+        return {
+            "status": "success",
+            "message": f"Saved Capital ₹{saved['capital']:,.2f} with {saved['leverage']:.1f}x leverage (Buying Power: ₹{saved['buying_power']:,.2f})",
+            "config": saved
+        }
+    except Exception as e:
+        logger.error(f"Error saving automation config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/automation/top10/status", summary="Get Daily Automated Intraday Screener & Paper Trade Status")
 @app.get("/api/automation/top3/status", summary="Get Daily Automated Intraday Screener & Paper Trade Status")
-def get_daily_automation_status():
+def get_daily_automation_status(
+    total_capital: Optional[float] = Query(None, ge=1000.0, le=50000000.0),
+    leverage: Optional[float] = Query(None, ge=1.0, le=20.0)
+):
     """Returns today's picked stocks, active open paper trades with trailing SL, closed trades, and net P&L metrics."""
     try:
         from src.algodesk.automation.daily_screener_trader import daily_auto_trader
-        return daily_auto_trader.get_automation_status()
+        return daily_auto_trader.get_automation_status(total_capital=total_capital, leverage=leverage)
     except Exception as e:
         logger.error(f"Error fetching daily automation status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -2383,13 +2419,22 @@ def get_daily_automation_status():
 @app.post("/api/automation/top3/run-now", summary="Trigger Morning Screener & Initiate Top 10 Paper Trades On-Demand")
 def trigger_daily_automation_run(
     top_n: int = Query(10, ge=1, le=25),
-    total_capital: float = Query(100000.0, ge=1000.0, le=50000000.0, description="Total capital (₹) to smartly distribute across trades")
+    total_capital: Optional[float] = Query(None, ge=1000.0, le=50000000.0, description="Total capital (₹) to smartly distribute across trades"),
+    leverage: Optional[float] = Query(None, ge=1.0, le=20.0, description="Intraday margin leverage (e.g. 5.0 for 5x)")
 ):
     """Runs the morning quantitative screener across NIFTY 500, selects top stocks, and smartly distributes capital using Gemini AI."""
     try:
         from src.algodesk.automation.daily_screener_trader import daily_auto_trader
+        if total_capital is not None or leverage is not None:
+            c = total_capital if total_capital is not None else daily_auto_trader.initial_capital
+            l = leverage if leverage is not None else daily_auto_trader.leverage
+            daily_auto_trader.set_capital_and_leverage(capital=c, leverage=l)
+
+        active_capital = daily_auto_trader.initial_capital
+        active_leverage = daily_auto_trader.leverage
+
         picks = daily_auto_trader.run_morning_screener_and_pick(top_n=top_n)
-        trades = daily_auto_trader.execute_paper_algo_trades(picks=picks, total_capital=total_capital)
+        trades = daily_auto_trader.execute_paper_algo_trades(picks=picks, total_capital=active_capital, leverage=active_leverage)
         from src.algodesk.automation.daily_screener_trader import IST
         if not trades and datetime.now(IST).hour >= 15:
             return {
@@ -2397,14 +2442,16 @@ def trigger_daily_automation_run(
                 "message": f"Screened {len(picks)} stocks. New trades not opened because market is past 3:00 PM IST intraday cutoff.",
                 "picks": picks,
                 "trades": [],
-                "total_capital": total_capital
+                "total_capital": active_capital,
+                "leverage": active_leverage
             }
         return {
             "status": "success",
-            "message": f"Screened top stocks and smartly allocated ₹{total_capital:,.2f} into {len(trades)} trades using Gemini AI.",
+            "message": f"Screened top stocks and smartly allocated ₹{active_capital:,.2f} margin ({active_leverage:.1f}x leverage) into {len(trades)} trades using Gemini AI.",
             "picks": picks,
             "trades": trades,
-            "total_capital": total_capital
+            "total_capital": active_capital,
+            "leverage": active_leverage
         }
     except Exception as e:
         logger.error(f"Error running daily automation: {e}")
@@ -2413,22 +2460,27 @@ def trigger_daily_automation_run(
 
 @app.get("/api/automation/smart-allocation/preview", summary="Preview Gemini Smart Capital Allocation for an Amount X")
 def preview_smart_capital_allocation(
-    total_capital: float = Query(100000.0, ge=1000.0, le=50000000.0),
+    total_capital: Optional[float] = Query(None, ge=1000.0, le=50000000.0),
+    leverage: Optional[float] = Query(None, ge=1.0, le=20.0),
     top_n: int = Query(10, ge=1, le=25)
 ):
-    """Calculates how Gemini AI distributes ₹X across today's top screener picks with conviction weights and rationale."""
+    """Calculates how Gemini AI distributes ₹X across today's top screener picks with conviction weights, leverage, and rationale."""
     try:
         from src.algodesk.automation.daily_screener_trader import daily_auto_trader
         from src.algodesk.ai.gemini_client import GeminiClient
-        status_data = daily_auto_trader.get_automation_status()
+        active_capital = float(total_capital if total_capital is not None else daily_auto_trader.initial_capital)
+        active_leverage = float(leverage if leverage is not None else daily_auto_trader.leverage)
+        status_data = daily_auto_trader.get_automation_status(total_capital=active_capital, leverage=active_leverage)
         picks = status_data.get("today_picks", [])
         if not picks:
             picks = daily_auto_trader.run_morning_screener_and_pick(top_n=top_n)
         gc = GeminiClient()
-        lev = float(getattr(daily_auto_trader, "leverage", 5.0))
-        result = gc.optimize_capital_allocation(total_capital=total_capital, picks=picks[:top_n], leverage=lev)
+        result = gc.optimize_capital_allocation(total_capital=active_capital, picks=picks[:top_n], leverage=active_leverage)
         return {
             "status": "success",
+            "capital": active_capital,
+            "leverage": active_leverage,
+            "buying_power": round(active_capital * active_leverage, 2),
             "allocation": result.model_dump()
         }
     except Exception as e:
