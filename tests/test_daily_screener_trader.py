@@ -296,4 +296,86 @@ def test_datewise_segregation_and_today_summary():
             os.remove(db_path)
 
 
+def test_date_management_crud_and_export():
+    """Verify listing dates summary, fetching by date, CSV export, and date-specific purge."""
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        db_path = f.name
 
+    try:
+        trader = DailyIntradayAutoTrader(db_path=db_path)
+        d1 = "2026-10-25"
+        d2 = "2026-10-26"
+
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        # Insert picks
+        cur.execute("INSERT INTO daily_intraday_picks (date, rank, symbol, conviction_score, price, entry_trigger_price, initial_sl, target_price, strategy_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (d1, 1, "SYM_A", 85.0, 100.0, 100.5, 98.0, 104.0, "ORB_Breakout", f"{d1} 09:16:00"))
+        cur.execute("INSERT INTO daily_intraday_picks (date, rank, symbol, conviction_score, price, entry_trigger_price, initial_sl, target_price, strategy_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (d2, 1, "SYM_B", 90.0, 200.0, 201.0, 196.0, 208.0, "ORB_Breakout", f"{d2} 09:16:00"))
+
+        # Insert trades
+        cur.execute("""
+            INSERT INTO daily_intraday_trades
+            (trade_date, symbol, side, qty, allocated_capital, entry_time, entry_price,
+             exit_time, exit_price, exit_reason, initial_sl, highest_price, current_sl,
+             target_price, gross_pnl, brokerage_and_taxes, net_pnl, return_pct, status, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (d1, "SYM_A", "BUY", 10, 1000.0, f"{d1} 09:20:00", 100.0,
+              f"{d1} 10:00:00", 105.0, "TARGET_HIT", 98.0, 105.0, 98.0, 104.0,
+              50.0, 2.0, 48.0, 4.8, "CLOSED", f"{d1} 10:00:00"))
+
+        cur.execute("""
+            INSERT INTO daily_intraday_trades
+            (trade_date, symbol, side, qty, allocated_capital, entry_time, entry_price,
+             exit_time, exit_price, exit_reason, initial_sl, highest_price, current_sl,
+             target_price, gross_pnl, brokerage_and_taxes, net_pnl, return_pct, status, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (d2, "SYM_B", "BUY", 5, 1000.0, f"{d2} 09:20:00", 200.0,
+              f"{d2} 11:00:00", 195.0, "STOP_LOSS_HIT", 196.0, 200.0, 196.0, 208.0,
+              -25.0, 2.0, -27.0, -2.7, "CLOSED", f"{d2} 11:00:00"))
+        conn.commit()
+        conn.close()
+
+        # 1. Available dates summary
+        summaries = trader.get_available_dates_summary()
+        assert len(summaries) == 2
+        dates = [s["trade_date"] for s in summaries]
+        assert d2 in dates and d1 in dates
+
+        d1_meta = next(s for s in summaries if s["trade_date"] == d1)
+        assert d1_meta["total_trades"] == 1
+        assert d1_meta["closed_trades"] == 1
+        assert d1_meta["winning_trades"] == 1
+        assert d1_meta["net_pnl"] == 48.0
+
+        # 2. Trades for date
+        d1_trades = trader.get_trades_for_date(d1)
+        assert len(d1_trades) == 1
+        assert d1_trades[0]["symbol"] == "SYM_A"
+
+        # 3. CSV Export
+        csv_all = trader.export_trades_csv("all")
+        assert "SYM_A" in csv_all and "SYM_B" in csv_all
+        assert "Trade ID,Trade Date,Symbol" in csv_all
+
+        csv_d1 = trader.export_trades_csv(d1)
+        assert "SYM_A" in csv_d1
+        assert "SYM_B" not in csv_d1
+
+        # 4. Delete / Purge date d1
+        del_res = trader.delete_trades_by_date(d1)
+        assert del_res["status"] == "success"
+        assert del_res["trades_deleted"] == 1
+        assert del_res["picks_deleted"] == 1
+
+        # Verify d1 is purged and d2 remains
+        after_summaries = trader.get_available_dates_summary()
+        assert len(after_summaries) == 1
+        assert after_summaries[0]["trade_date"] == d2
+        assert len(trader.get_trades_for_date(d1)) == 0
+        assert len(trader.get_trades_for_date(d2)) == 1
+
+    finally:
+        if os.path.exists(db_path):
+            os.remove(db_path)

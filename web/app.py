@@ -2485,6 +2485,50 @@ def close_specific_open_trade(identifier: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/automation/history/dates", summary="List All Trading Dates with Performance Summaries")
+def get_automation_history_dates():
+    """Returns all dates present in the trade log with aggregate P&L and win rate statistics."""
+    try:
+        from src.algodesk.automation.daily_screener_trader import daily_auto_trader
+        return daily_auto_trader.get_available_dates_summary()
+    except Exception as e:
+        logger.error(f"Error fetching history dates: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/automation/history/export", summary="Export Algo Trades to CSV by Date")
+def export_automation_trades_csv(date: str = Query("all", description="Date YYYY-MM-DD or 'all'")):
+    """Generates and downloads a CSV export of all trades for the specified date or all dates."""
+    try:
+        from src.algodesk.automation.daily_screener_trader import daily_auto_trader
+        csv_content = daily_auto_trader.export_trades_csv(date_str=date)
+        filename = f"algo_trades_{date}.csv"
+        return Response(
+            content=csv_content,
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except Exception as e:
+        logger.error(f"Error exporting trades CSV for {date}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/automation/history", summary="Delete/Purge Trade History for a Specific Date")
+def delete_automation_history_for_date(date: str = Query(..., description="Target date YYYY-MM-DD to delete")):
+    """Deletes all trades and screener picks for a specified date from the SQLite database."""
+    try:
+        if not date or len(date) < 8:
+            raise HTTPException(status_code=400, detail="Invalid date format. Expected YYYY-MM-DD.")
+        from src.algodesk.automation.daily_screener_trader import daily_auto_trader
+        res = daily_auto_trader.delete_trades_by_date(date_str=date)
+        return res
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting history for {date}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/automation/top3/simulate", summary="Run Full Simulation Test (Picks + Trades + Trailing SL Moves)")
 def trigger_automation_simulation():
     """Performs an end-to-end simulation cycle demonstrating selection, trailing stop adjustments, and P&L logging."""

@@ -283,8 +283,14 @@
             ● SESSION ACTIVE
           </span>
         </div>
-        <div style="font-size: 10px; color: #64748b;">
-          Trailing SL & Target Profit Ratchet Active (Sub-second batch quotes)
+        <div style="font-size: 10px; color: #64748b; display: flex; align-items: center; gap: 8px;">
+          <span>Trailing SL & Target Ratchet Active</span>
+          <button onclick="exportTodayTradesCsv()" class="term-btn" style="background:#e0e7ff; color:#3730a3; border-color:#a5b4fc; padding: 2px 7px; font-size: 10px; font-weight: 700;" title="Download CSV for today's trades">
+            📥 Export Today CSV
+          </button>
+          <button onclick="deleteTodayTrades()" class="term-btn" style="background:#fee2e2; color:#991b1b; border-color:#fca5a5; padding: 2px 7px; font-size: 10px; font-weight: 700;" title="Clear today's paper trades">
+            🗑 Clear Today Trades
+          </button>
         </div>
       </div>
 
@@ -338,20 +344,34 @@
       </div>
     </div>
 
-    <!-- Section 3: Date-Wise Historical Trading Archives -->
+    <!-- Section 3: Date-Wise Historical Trading Archives & Management -->
     <div style="background: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px 14px;">
-      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">
         <div style="display: flex; align-items: center; gap: 8px;">
           <span style="font-size: 11px; font-weight: 800; color: #1e293b; text-transform: uppercase;">
-            📜 Historical Trading Sessions by Date
+            📜 Manage History by Date
           </span>
-          <span style="font-size: 10px; color: #64748b;">(Archived Intraday Sessions)</span>
+          <span style="font-size: 10px; color: #64748b;">(Inspect, Export CSV & Purge Archived Days)</span>
         </div>
 
-        <!-- Date Filter Pills -->
-        <div id="historical-date-pills" style="display: flex; gap: 5px; flex-wrap: wrap;">
-          <button class="time-tab active" onclick="filterHistoricalDate('ALL')">All Dates</button>
+        <!-- Management Controls Toolbar -->
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <label style="font-size: 10.5px; font-weight: 700; color: #475569;">Select Date:</label>
+          <select id="history-date-select" class="nav-select" style="font-size: 11px; padding: 2px 6px; height: 26px; border: 1px solid #cbd5e1; border-radius: 3px;" onchange="filterHistoricalDate(this.value)">
+            <option value="ALL">All Dates</option>
+          </select>
+          <button onclick="exportHistoricalCsv()" class="term-btn" style="background:#f1f5f9; color:#1e293b; border-color:#cbd5e1; padding: 3px 8px; font-size: 10.5px; font-weight: 700;" title="Download CSV of trades for selected date">
+            📥 Export CSV
+          </button>
+          <button onclick="deleteSelectedDateTrades()" class="term-btn" style="background:#fee2e2; color:#991b1b; border-color:#fca5a5; padding: 3px 8px; font-size: 10.5px; font-weight: 700;" title="Purge trades for selected date">
+            🗑 Purge Date Trades
+          </button>
         </div>
+      </div>
+
+      <!-- Date Filter Pills -->
+      <div id="historical-date-pills" style="display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 10px;">
+        <button class="time-tab active" onclick="filterHistoricalDate('ALL')">All Dates</button>
       </div>
 
       <!-- Historical Container -->
@@ -774,11 +794,23 @@
   function renderHistoricalArchives(data) {
     cachedTelemetryData = data;
     const pillsContainer = document.getElementById('historical-date-pills');
+    const dateSelect = document.getElementById('history-date-select');
     const container = document.getElementById('historical-sessions-container');
     if (!container) return;
 
     const historicalDates = data.historical_dates || [];
     const tradesByDate = data.trades_by_date || {};
+
+    // Synchronize Date Dropdown
+    if (dateSelect) {
+      let selectHtml = `<option value="ALL" ${currentHistoricalFilter === 'ALL' ? 'selected' : ''}>All Dates (${historicalDates.length})</option>`;
+      historicalDates.forEach(d => {
+        const g = tradesByDate[d] || {};
+        const pnlSign = (g.net_pnl || 0) >= 0 ? '+' : '';
+        selectHtml += `<option value="${d}" ${currentHistoricalFilter === d ? 'selected' : ''}>📅 ${d} (${g.total_trades || 0} trades • ${pnlSign}₹${Number(g.net_pnl || 0).toFixed(0)})</option>`;
+      });
+      dateSelect.innerHTML = selectHtml;
+    }
 
     // Build Filter Pills
     if (pillsContainer) {
@@ -835,12 +867,18 @@
               Win Rate: <strong style="color: ${g.win_rate >= 50 ? '#059669' : '#cc0000'};">${g.win_rate}%</strong> (${g.winning_trades}W / ${g.losing_trades}L)
             </span>
           </div>
-          <div style="display: flex; align-items: center; gap: 12px; font-size: 10.5px;">
+          <div style="display: flex; align-items: center; gap: 10px; font-size: 10.5px;">
             <span>Gross: <strong>${g.gross_pnl >= 0 ? '+' : ''}₹${Number(g.gross_pnl).toFixed(2)}</strong></span>
             <span>Charges: <strong style="color: #64748b;">-₹${Number(g.brokerage_taxes).toFixed(2)}</strong></span>
             <span style="font-size: 11.5px; font-weight: 800; padding: 2px 8px; border-radius: 3px; background: ${pnlBg}; color: ${pnlColor}; font-family: var(--font-mono);">
               Net P&L: ${sign}₹${Number(g.net_pnl).toFixed(2)}
             </span>
+            <button onclick="exportSingleDateCsv('${d}')" class="term-btn" style="background:#e0e7ff; color:#3730a3; border-color:#a5b4fc; padding: 2px 6px; font-size: 10px; font-weight: 700; margin-left: 4px;" title="Export CSV for ${d}">
+              📥 CSV
+            </button>
+            <button onclick="deleteSingleDateTrades('${d}')" class="term-btn" style="background:#fee2e2; color:#991b1b; border-color:#fca5a5; padding: 2px 6px; font-size: 10px; font-weight: 700;" title="Purge trades for ${d}">
+              🗑 Purge
+            </button>
           </div>
         </div>
 
@@ -876,6 +914,63 @@
     });
 
     container.innerHTML = html;
+  }
+
+  // -------------------------------------------------------------------------
+  // Date Management Action Handlers
+  // -------------------------------------------------------------------------
+  function exportHistoricalCsv() {
+    const sel = document.getElementById('history-date-select')?.value || currentHistoricalFilter || 'ALL';
+    exportSingleDateCsv(sel);
+  }
+
+  function exportSingleDateCsv(dateStr) {
+    const param = (dateStr && dateStr !== 'ALL') ? encodeURIComponent(dateStr) : 'all';
+    window.location.href = `/api/automation/history/export?date=${param}`;
+  }
+
+  function exportTodayTradesCsv() {
+    const todayDate = cachedTelemetryData?.today_date || new Date().toISOString().split('T')[0];
+    exportSingleDateCsv(todayDate);
+  }
+
+  async function deleteSingleDateTrades(dateStr) {
+    if (!dateStr || dateStr === 'ALL') {
+      alert('Please select a specific date to delete.');
+      return;
+    }
+    const confirmed = confirm(`⚠️ Are you sure you want to permanently delete all paper trades and screener picks for date "${dateStr}"?\n\nThis will purge all corresponding database records for that date.`);
+    if (!confirmed) return;
+
+    try {
+      const res = await fetch(`/api/automation/history?date=${encodeURIComponent(dateStr)}`, {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'success') {
+        alert(`✅ ${data.message}`);
+        currentHistoricalFilter = 'ALL';
+        await loadAutomationTelemetry();
+      } else {
+        alert('⚠️ ' + (data.detail || data.message || 'Failed to delete date trades'));
+      }
+    } catch (e) {
+      alert('Error deleting trade history: ' + e.message);
+    }
+  }
+
+  async function deleteSelectedDateTrades() {
+    const sel = document.getElementById('history-date-select')?.value || currentHistoricalFilter;
+    if (!sel || sel === 'ALL') {
+      alert('Please select a specific date from the dropdown or filter pills before clicking "Purge Date Trades".');
+      return;
+    }
+    await deleteSingleDateTrades(sel);
+  }
+
+  async function deleteTodayTrades() {
+    const todayDate = cachedTelemetryData?.today_date || new Date().toISOString().split('T')[0];
+    await deleteSingleDateTrades(todayDate);
   }
 
   async function runMorningScreenerNow() {

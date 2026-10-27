@@ -14,6 +14,8 @@ Features:
 """
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import csv
+import io
 import json
 import logging
 import math
@@ -1070,6 +1072,128 @@ class DailyIntradayAutoTrader:
             "trades": trades,
             "trailing_updates": trail_updates
         }
+
+    # -------------------------------------------------------------------------
+    # 6. History Management by Date (Summary, Filter, Export CSV, Delete Date)
+    # -------------------------------------------------------------------------
+    def get_available_dates_summary(self) -> List[Dict[str, Any]]:
+        """Returns aggregate trade and performance summary grouped by each date."""
+        conn = self._get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT trade_date,
+                   COUNT(*) as total_trades,
+                   SUM(CASE WHEN status = 'OPEN' THEN 1 ELSE 0 END) as open_trades,
+                   SUM(CASE WHEN status = 'CLOSED' THEN 1 ELSE 0 END) as closed_trades,
+                   SUM(CASE WHEN status = 'CLOSED' AND net_pnl > 0 THEN 1 ELSE 0 END) as winning_trades,
+                   SUM(CASE WHEN status = 'CLOSED' AND net_pnl < 0 THEN 1 ELSE 0 END) as losing_trades,
+                   SUM(CASE WHEN status = 'CLOSED' THEN gross_pnl ELSE 0 END) as gross_pnl,
+                   SUM(CASE WHEN status = 'CLOSED' THEN brokerage_and_taxes ELSE 0 END) as brokerage_taxes,
+                   SUM(CASE WHEN status = 'CLOSED' THEN net_pnl ELSE 0 END) as net_pnl,
+                   SUM(allocated_capital) as total_allocated
+            FROM daily_intraday_trades
+            GROUP BY trade_date
+            ORDER BY trade_date DESC
+        """)
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+
+        today_str = get_ist_date()
+        for r in rows:
+            c = r["closed_trades"] or 0
+            w = r["winning_trades"] or 0
+            r["is_today"] = (r["trade_date"] == today_str)
+            r["win_rate"] = round((w / c * 100.0), 1) if c > 0 else 0.0
+            r["gross_pnl"] = round(r["gross_pnl"] or 0.0, 2)
+            r["brokerage_taxes"] = round(r["brokerage_taxes"] or 0.0, 2)
+            r["net_pnl"] = round(r["net_pnl"] or 0.0, 2)
+            r["total_allocated"] = round(r["total_allocated"] or 0.0, 2)
+        return rows
+
+    def get_trades_for_date(self, date_str: str) -> List[Dict[str, Any]]:
+        """Returns all trades recorded for a specific date."""
+        conn = self._get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, trade_date, symbol, side, qty, allocated_capital,
+                   entry_time, entry_price, exit_time, exit_price, exit_reason,
+                   initial_sl, highest_price, current_sl, target_price,
+                   gross_pnl, brokerage_and_taxes, net_pnl, return_pct, status, price_history
+            FROM daily_intraday_trades
+            WHERE trade_date = ?
+            ORDER BY id ASC
+        """, (date_str,))
+        trades = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return trades
+
+    def export_trades_csv(self, date_str: Optional[str] = None) -> str:
+        """Generates CSV text of trades, optionally filtered by date or 'all'."""
+        conn = self._get_connection()
+        cur = conn.cursor()
+        if date_str and date_str.lower() != "all":
+            cur.execute("""
+                SELECT id, trade_date, symbol, side, qty, allocated_capital,
+                       entry_time, entry_price, exit_time, exit_price, exit_reason,
+                       initial_sl, highest_price, current_sl, target_price,
+                       gross_pnl, brokerage_and_taxes, net_pnl, return_pct, status
+                FROM daily_intraday_trades
+                WHERE trade_date = ?
+                ORDER BY id ASC
+            """, (date_str,))
+        else:
+            cur.execute("""
+                SELECT id, trade_date, symbol, side, qty, allocated_capital,
+                       entry_time, entry_price, exit_time, exit_price, exit_reason,
+                       initial_sl, highest_price, current_sl, target_price,
+                       gross_pnl, brokerage_and_taxes, net_pnl, return_pct, status
+                FROM daily_intraday_trades
+                ORDER BY trade_date DESC, id ASC
+            """)
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "Trade ID", "Trade Date", "Symbol", "Side", "Qty", "Allocated Capital (INR)",
+            "Entry Time", "Entry Price", "Exit Time", "Exit Price", "Exit Reason",
+            "Initial SL", "Highest Price", "Current SL", "Target Price",
+            "Gross PnL (INR)", "Brokerage & Taxes (INR)", "Net PnL (INR)", "Return %", "Status"
+        ])
+        for r in rows:
+            writer.writerow([
+                r.get("id"), r.get("trade_date"), r.get("symbol"), r.get("side"), r.get("qty"),
+                r.get("allocated_capital"), r.get("entry_time"), r.get("entry_price"),
+                r.get("exit_time") or "", r.get("exit_price") or "", r.get("exit_reason") or "",
+                r.get("initial_sl"), r.get("highest_price"), r.get("current_sl"), r.get("target_price"),
+                r.get("gross_pnl") if r.get("gross_pnl") is not None else "",
+                r.get("brokerage_and_taxes") if r.get("brokerage_and_taxes") is not None else "",
+                r.get("net_pnl") if r.get("net_pnl") is not None else "",
+                r.get("return_pct") if r.get("return_pct") is not None else "",
+                r.get("status")
+            ])
+        return output.getvalue()
+
+    def delete_trades_by_date(self, date_str: str) -> Dict[str, Any]:
+        """Permanently deletes trades and picks recorded for a specific date."""
+        with self._lock:
+            conn = self._get_connection()
+            cur = conn.cursor()
+            cur.execute("DELETE FROM daily_intraday_trades WHERE trade_date = ?", (date_str,))
+            trades_deleted = cur.rowcount
+            cur.execute("DELETE FROM daily_intraday_picks WHERE date = ?", (date_str,))
+            picks_deleted = cur.rowcount
+            conn.commit()
+            conn.close()
+            logger.info(f"🗑 [PaperTrader] Deleted {trades_deleted} trades and {picks_deleted} picks for date {date_str}")
+            return {
+                "status": "success",
+                "date": date_str,
+                "trades_deleted": trades_deleted,
+                "picks_deleted": picks_deleted,
+                "message": f"Successfully deleted {trades_deleted} trades and {picks_deleted} picks for date {date_str}."
+            }
 
 
 # Global singleton instance

@@ -215,11 +215,15 @@ class GeminiClient:
                 f"Initial SL: ₹{sl:.2f} | Target: ₹{tgt:.2f}\n"
             )
 
+        n_picks = max(1, len(picks))
+        max_pct = round(max(30.0, min(60.0, (180.0 / n_picks))), 1) if n_picks <= 4 else 25.0
+        min_pct = round(max(2.0, min(8.0, 50.0 / n_picks)), 1)
+
         prompt += (
             f"\nRULES FOR ALLOCATION:\n"
             f"1. Total allocated capital across all stocks MUST sum to exactly ₹{total_capital:,.2f} (weights sum to 100.0%).\n"
-            f"2. Conviction-weighted sizing: Stocks with higher conviction scores and higher RVOL should receive larger allocations.\n"
-            f"3. Risk parity & bounds: No single stock should exceed 25% of capital. Every stock must receive at least 4% of capital.\n"
+            f"2. Conviction-weighted sizing: Stocks with higher conviction scores and higher RVOL MUST receive proportionally larger allocations.\n"
+            f"3. Risk parity & bounds: No single stock should exceed {max_pct}% of capital. Every stock must receive at least {min_pct}% of capital.\n"
             f"4. Sector diversification: Do not overload a single sector.\n"
             f"5. Calculate exact suggested qty = max(1, floor(allocated_capital / price)).\n"
             f"6. Respond ONLY with a valid JSON object matching this schema:\n"
@@ -285,8 +289,11 @@ class GeminiClient:
         total_raw = sum(raw_scores) or 1.0
         weights = [raw / total_raw for raw in raw_scores]
 
-        # Clamp between 4% (0.04) and 25% (0.25)
-        clamped = [max(0.04, min(w, 0.25)) for w in weights]
+        # Dynamic risk parity bounds
+        n_picks = max(1, len(picks))
+        max_bound = max(0.30, min(0.60, 1.8 / n_picks)) if n_picks <= 4 else 0.25
+        min_bound = max(0.02, min(0.08, 0.5 / n_picks))
+        clamped = [max(min_bound, min(w, max_bound)) for w in weights]
         norm_sum = sum(clamped)
         final_weights = [round(w / norm_sum, 4) for w in clamped]
 
