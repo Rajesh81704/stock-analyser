@@ -198,3 +198,81 @@ def test_smart_capital_allocation_and_execution():
             os.remove(db_path)
 
 
+def test_datewise_segregation_and_today_summary():
+    """Verifies that get_automation_status segregates trades day-datewise and isolates today's section."""
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        db_path = tmp.name
+
+    try:
+        trader = DailyIntradayAutoTrader(db_path=db_path)
+        from src.algodesk.automation.daily_screener_trader import get_ist_date
+        today_str = get_ist_date()
+        yesterday_str = "2026-10-26"
+
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+
+        # Insert 2 trades for today (1 winning closed, 1 open)
+        cur.execute("""
+            INSERT INTO daily_intraday_trades
+            (trade_date, symbol, side, qty, allocated_capital, entry_time, entry_price,
+             exit_time, exit_price, exit_reason, initial_sl, highest_price, current_sl,
+             target_price, gross_pnl, brokerage_and_taxes, net_pnl, return_pct, status, updated_at)
+            VALUES
+            (?, 'TODAY_WIN', 'BUY', 10, 25000.0, ? || ' 09:16:00', 100.0,
+             ? || ' 10:15:00', 105.0, 'TARGET_HIT', 98.0, 105.0, 104.0, 105.0, 50.0, 10.0, 40.0, 5.0, 'CLOSED', ? || ' 10:15:00'),
+            (?, 'TODAY_OPEN', 'BUY', 5, 15000.0, ? || ' 09:16:00', 200.0,
+             NULL, NULL, NULL, 196.0, 202.0, 198.0, 208.0, 0.0, 0.0, 0.0, 0.0, 'OPEN', ? || ' 09:30:00')
+        """, (today_str, today_str, today_str, today_str, today_str, today_str, today_str))
+
+        # Insert 2 trades for yesterday (1 winning closed, 1 losing closed)
+        cur.execute("""
+            INSERT INTO daily_intraday_trades
+            (trade_date, symbol, side, qty, allocated_capital, entry_time, entry_price,
+             exit_time, exit_price, exit_reason, initial_sl, highest_price, current_sl,
+             target_price, gross_pnl, brokerage_and_taxes, net_pnl, return_pct, status, updated_at)
+            VALUES
+            (?, 'YEST_WIN', 'BUY', 10, 20000.0, ? || ' 09:16:00', 50.0,
+             ? || ' 11:30:00', 52.0, 'TRAILING_SL_HIT', 49.0, 53.0, 52.0, 54.0, 20.0, 8.0, 12.0, 4.0, 'CLOSED', ? || ' 11:30:00'),
+            (?, 'YEST_LOSS', 'BUY', 10, 20000.0, ? || ' 09:16:00', 50.0,
+             ? || ' 09:45:00', 49.0, 'STOP_LOSS_HIT', 49.0, 50.0, 49.0, 52.0, -10.0, 8.0, -18.0, -2.0, 'CLOSED', ? || ' 09:45:00')
+        """, (yesterday_str, yesterday_str, yesterday_str, yesterday_str, yesterday_str, yesterday_str, yesterday_str, yesterday_str))
+
+        conn.commit()
+        conn.close()
+
+        status = trader.get_automation_status()
+
+        # 1. Today's isolation
+        assert status["today_date"] == today_str
+        assert status["today_trades_count"] == 2
+        assert len(status["today_trades"]) == 2
+        assert {t["symbol"] for t in status["today_trades"]} == {"TODAY_WIN", "TODAY_OPEN"}
+
+        # 2. Today's summary
+        today_sum = status["today_summary"]
+        assert today_sum["total_trades"] == 2
+        assert today_sum["open_trades"] == 1
+        assert today_sum["closed_trades"] == 1
+        assert today_sum["winning_trades"] == 1
+        assert today_sum["win_rate"] == 100.0
+        assert today_sum["net_pnl"] == 40.0
+        assert today_sum["total_allocated"] == 40000.0
+
+        # 3. Date-wise segregation
+        assert yesterday_str in status["trades_by_date"]
+        yest_sum = status["trades_by_date"][yesterday_str]
+        assert yest_sum["total_trades"] == 2
+        assert yest_sum["closed_trades"] == 2
+        assert yest_sum["winning_trades"] == 1
+        assert yest_sum["losing_trades"] == 1
+        assert yest_sum["win_rate"] == 50.0
+        assert yest_sum["net_pnl"] == -6.0  # 12.0 - 18.0
+        assert status["historical_dates"] == [yesterday_str]
+
+    finally:
+        if os.path.exists(db_path):
+            os.remove(db_path)
+
+
+

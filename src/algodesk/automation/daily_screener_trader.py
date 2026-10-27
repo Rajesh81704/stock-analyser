@@ -793,14 +793,14 @@ class DailyIntradayAutoTrader:
         """)
         open_trades = [dict(r) for r in cur.fetchall()]
 
-        # Recent closed trades (last 50)
+        # All trades ordered chronologically descending (LIMIT 250)
         cur.execute("""
             SELECT id, trade_date, symbol, side, qty, allocated_capital,
                    entry_time, entry_price, exit_time, exit_price, exit_reason,
                    initial_sl, highest_price, current_sl, target_price,
                    gross_pnl, brokerage_and_taxes, net_pnl, return_pct, status, price_history
             FROM daily_intraday_trades
-            ORDER BY id DESC LIMIT 50
+            ORDER BY trade_date DESC, id DESC LIMIT 250
         """)
         all_trades = [dict(r) for r in cur.fetchall()]
 
@@ -812,6 +812,73 @@ class DailyIntradayAutoTrader:
         total_brokerage = sum((t.get("brokerage_and_taxes") or 0.0) for t in closed_trades)
         win_rate = round((len(winning_trades) / len(closed_trades) * 100.0), 1) if closed_trades else 0.0
 
+        # Segregate trades by trade_date
+        trades_by_date = {}
+        for t in all_trades:
+            t_date = t.get("trade_date") or (t.get("entry_time", "").split(" ")[0]) or "Unknown"
+            if t_date not in trades_by_date:
+                trades_by_date[t_date] = {
+                    "date": t_date,
+                    "is_today": (t_date == today_str),
+                    "trades": [],
+                    "total_trades": 0,
+                    "open_trades": 0,
+                    "closed_trades": 0,
+                    "winning_trades": 0,
+                    "losing_trades": 0,
+                    "win_rate": 0.0,
+                    "gross_pnl": 0.0,
+                    "brokerage_taxes": 0.0,
+                    "net_pnl": 0.0,
+                    "total_allocated": 0.0
+                }
+            g = trades_by_date[t_date]
+            g["trades"].append(t)
+            g["total_trades"] += 1
+            g["total_allocated"] += float(t.get("allocated_capital") or 0.0)
+            if t.get("status") == "OPEN":
+                g["open_trades"] += 1
+            else:
+                g["closed_trades"] += 1
+                npnl = float(t.get("net_pnl") or 0.0)
+                gpnl = float(t.get("gross_pnl") or 0.0)
+                brk = float(t.get("brokerage_and_taxes") or 0.0)
+                g["net_pnl"] += npnl
+                g["gross_pnl"] += gpnl
+                g["brokerage_taxes"] += brk
+                if npnl > 0:
+                    g["winning_trades"] += 1
+                elif npnl < 0:
+                    g["losing_trades"] += 1
+
+        for d_key, g in trades_by_date.items():
+            c_cnt = g["closed_trades"]
+            g["win_rate"] = round((g["winning_trades"] / c_cnt * 100.0), 1) if c_cnt > 0 else 0.0
+            g["gross_pnl"] = round(g["gross_pnl"], 2)
+            g["brokerage_taxes"] = round(g["brokerage_taxes"], 2)
+            g["net_pnl"] = round(g["net_pnl"], 2)
+            g["total_allocated"] = round(g["total_allocated"], 2)
+
+        today_trades = trades_by_date.get(today_str, {}).get("trades", [])
+        today_summary = trades_by_date.get(today_str, {
+            "date": today_str,
+            "is_today": True,
+            "trades": [],
+            "total_trades": 0,
+            "open_trades": 0,
+            "closed_trades": 0,
+            "winning_trades": 0,
+            "losing_trades": 0,
+            "win_rate": 0.0,
+            "gross_pnl": 0.0,
+            "brokerage_taxes": 0.0,
+            "net_pnl": 0.0,
+            "total_allocated": 0.0
+        })
+
+        dates_available = sorted(list(trades_by_date.keys()), reverse=True)
+        historical_dates = [d for d in dates_available if d != today_str]
+
         conn.close()
 
         return {
@@ -822,6 +889,12 @@ class DailyIntradayAutoTrader:
             "today_picks": today_picks,
             "open_trades_count": len(open_trades),
             "open_trades": open_trades,
+            "today_trades_count": len(today_trades),
+            "today_trades": today_trades,
+            "today_summary": today_summary,
+            "trades_by_date": trades_by_date,
+            "dates_available": dates_available,
+            "historical_dates": historical_dates,
             "recent_trades_count": len(all_trades),
             "recent_trades": all_trades,
             "performance_summary": {

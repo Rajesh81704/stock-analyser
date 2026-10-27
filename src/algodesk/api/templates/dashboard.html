@@ -236,42 +236,100 @@
     </div>
   </div>
 
-  <!-- Section 2: Trades & Trailing SL Log Table -->
-  <div style="padding: 0 14px 12px;">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-      <span style="font-size: 11px; font-weight: 800; color: #1e293b; text-transform: uppercase;">
-        📈 Paper Algo Trades & Dynamic Trailing Stop-Loss Log
-      </span>
-      <span style="font-size: 10px; color: #64748b;">Persisted in SQLite (<code style="background:#e2e8f0; padding:1px 4px;">daily_intraday_trades</code>)</span>
+  <!-- Section 2: Today's Live Intraday Trading Session (Dedicated Highlighted Card) -->
+  <div style="padding: 0 14px 14px;">
+    <div style="background: #ffffff; border: 1.5px solid #2563eb; border-radius: 6px; box-shadow: 0 2px 8px rgba(37,99,235,0.06); padding: 12px 14px; margin-bottom: 14px;">
+      
+      <!-- Today's Header Bar -->
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 12px; font-weight: 800; color: #1e3a8a; text-transform: uppercase; letter-spacing: 0.5px;">
+            ⚡ Today's Live Intraday Trading Session
+          </span>
+          <span id="today-session-date" style="font-family: var(--font-mono); font-weight: 800; font-size: 11px; background: #e0e7ff; color: #3730a3; padding: 2px 7px; border-radius: 3px;">
+            --
+          </span>
+          <span id="today-session-badge" style="background: #dcfce7; color: #15803d; border: 1px solid #86efac; font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 3px;">
+            ● SESSION ACTIVE
+          </span>
+        </div>
+        <div style="font-size: 10px; color: #64748b;">
+          Trailing SL & Target Profit Ratchet Active (Sub-second batch quotes)
+        </div>
+      </div>
+
+      <!-- Today's Mini Performance Strip -->
+      <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; padding: 8px 12px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 11px;">
+        <div style="display: flex; gap: 14px; align-items: center; flex-wrap: wrap;">
+          <span><strong>Capital Deployed:</strong> <span id="today-total-capital" style="font-weight:700; color:#1e293b;">₹0.00</span></span>
+          <span><strong>Open Positions:</strong> <span id="today-open-count" style="font-weight:800; color:#d97706;">0</span></span>
+          <span><strong>Closed Trades:</strong> <span id="today-closed-count" style="font-weight:700;">0</span></span>
+          <span><strong>Win Rate Today:</strong> <span id="today-win-rate" style="font-weight:800; color:#059669;">--%</span> (<span id="today-win-ratio" style="color:#64748b;">0W / 0L</span>)</span>
+          <span><strong>Gross PnL:</strong> <span id="today-gross-pnl" style="font-weight:700;">₹0.00</span></span>
+          <span><strong>Charges & Taxes:</strong> <span id="today-charges" style="color:#64748b;">-₹0.00</span></span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 11.5px; font-weight: 800; color: #334155;">Today's Realized Net P&L:</span>
+          <span id="today-net-pnl" style="font-size: 14px; font-weight: 800; padding: 3px 10px; border-radius: 4px; background: #e2e8f0; color: #1e293b; font-family: var(--font-mono);">
+            ₹0.00
+          </span>
+        </div>
+      </div>
+
+      <!-- Today's Trades Table -->
+      <div class="table-container-box" style="margin: 0; max-height: 260px; overflow-y: auto;">
+        <table class="terminal-table" style="font-size: 10.5px;">
+          <thead style="position: sticky; top: 0; background: #f8fafc; z-index: 1;">
+            <tr>
+              <th style="width: 35px;">#</th>
+              <th>Time</th>
+              <th>Symbol</th>
+              <th>Side</th>
+              <th>Qty</th>
+              <th>Capital</th>
+              <th>Entry</th>
+              <th>Highest</th>
+              <th>Trailed SL</th>
+              <th>Target</th>
+              <th>Exit Price</th>
+              <th>Exit Reason</th>
+              <th>Gross PnL</th>
+              <th>Brokerage & Tax</th>
+              <th>Net P&L</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="auto-trades-tbody">
+            <tr>
+              <td colspan="16" style="text-align: center; padding: 14px; color: #64748b;">Loading today's trades...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
-    <div class="table-container-box" style="margin: 0; max-height: 220px; overflow-y: auto;">
-      <table class="terminal-table" style="font-size: 10.5px;">
-        <thead style="position: sticky; top: 0; background: #f8fafc; z-index: 1;">
-          <tr>
-            <th style="width: 40px;">#</th>
-            <th>Time</th>
-            <th>Symbol</th>
-            <th>Side</th>
-            <th>Qty</th>
-            <th>Entry</th>
-            <th>Highest</th>
-            <th>Trailed SL</th>
-            <th>Target</th>
-            <th>Exit Price</th>
-            <th>Exit Reason</th>
-            <th>Gross PnL</th>
-            <th>Brokerage & Tax</th>
-            <th>Net P&L</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody id="auto-trades-tbody">
-          <tr>
-            <td colspan="15" style="text-align: center; padding: 12px; color: #64748b;">Loading trade log...</td>
-          </tr>
-        </tbody>
-      </table>
+    <!-- Section 3: Date-Wise Historical Trading Archives -->
+    <div style="background: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px 14px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 11px; font-weight: 800; color: #1e293b; text-transform: uppercase;">
+            📜 Historical Trading Sessions by Date
+          </span>
+          <span style="font-size: 10px; color: #64748b;">(Archived Intraday Sessions)</span>
+        </div>
+
+        <!-- Date Filter Pills -->
+        <div id="historical-date-pills" style="display: flex; gap: 5px; flex-wrap: wrap;">
+          <button class="time-tab active" onclick="filterHistoricalDate('ALL')">All Dates</button>
+        </div>
+      </div>
+
+      <!-- Historical Container -->
+      <div id="historical-sessions-container">
+        <div style="text-align: center; padding: 16px; color: #64748b; font-size: 11px;">
+          Loading historical sessions...
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -452,47 +510,255 @@
         }
       }
 
-      // Render Trades Table
-      const tradesTbody = document.getElementById('auto-trades-tbody');
-      if (tradesTbody) {
-        const trades = data.recent_trades || [];
-        if (trades.length === 0) {
-          tradesTbody.innerHTML = `<tr><td colspan="15" style="text-align:center; padding:16px; color:#64748b;">No trades executed yet. Morning algo initiates trades automatically upon stock selection.</td></tr>`;
-        } else {
-          let html = '';
-          trades.forEach(t => {
-            const isWin = (t.net_pnl || 0) >= 0;
-            const pnlColor = isWin ? '#059669' : '#cc0000';
-            const sign = isWin ? '+' : '';
-            const statusBadge = t.status === 'OPEN' 
-              ? `<span style="background:#fef3c7; color:#92400e; font-weight:800; font-size:9.5px; padding:2px 6px; border-radius:3px; border:1px solid #f59e0b;">ACTIVE OPEN</span>`
-              : `<span style="background:#e2e8f0; color:#334155; font-weight:700; font-size:9.5px; padding:2px 6px; border-radius:3px;">CLOSED</span>`;
+      // -----------------------------------------------------------------------
+      // Render Today's Dedicated Section
+      // -----------------------------------------------------------------------
+      const todayDateEl = document.getElementById('today-session-date');
+      if (todayDateEl) todayDateEl.innerText = data.today_date || '--';
 
-            html += `<tr>
-              <td style="font-family:var(--font-mono); font-size:10px;">${t.id}</td>
-              <td style="font-size:10px; color:#64748b;">${(t.entry_time || '').split(' ')[1] || t.entry_time || '--'}</td>
-              <td style="font-weight:800; color:#000080;">${t.symbol}</td>
-              <td><span style="font-weight:700; color:#059669;">${t.side}</span></td>
-              <td style="font-weight:700;">${t.qty}</td>
-              <td>₹${Number(t.entry_price || 0).toFixed(2)}</td>
-              <td style="font-family:var(--font-mono); color:#1e293b;">₹${Number(t.highest_price || t.entry_price || 0).toFixed(2)}</td>
-              <td style="font-family:var(--font-mono); font-weight:700; color:#b91c1c;">₹${Number(t.current_sl || t.initial_sl || 0).toFixed(2)}</td>
-              <td style="font-family:var(--font-mono); font-weight:700; color:#059669;">₹${Number(t.target_price || 0).toFixed(2)}</td>
-              <td>${t.exit_price ? '₹' + Number(t.exit_price).toFixed(2) : '--'}</td>
-              <td style="font-size:10px;"><span style="background:#f1f5f9; padding:2px 4px; border-radius:2px;">${t.exit_reason || '--'}</span></td>
-              <td style="font-weight:700; color:${pnlColor};">${t.gross_pnl !== null ? sign + '₹' + Number(t.gross_pnl).toFixed(2) : '--'}</td>
-              <td style="color:#64748b; font-size:10px;">${t.brokerage_and_taxes !== null ? '-₹' + Number(t.brokerage_and_taxes).toFixed(2) : '--'}</td>
-              <td style="font-weight:800; color:${pnlColor}; font-size:11.5px;">${t.net_pnl !== null ? sign + '₹' + Number(t.net_pnl).toFixed(2) : '--'}</td>
-              <td>${statusBadge}</td>
-            </tr>`;
-          });
-          tradesTbody.innerHTML = html;
+      const todayBadgeEl = document.getElementById('today-session-badge');
+      if (todayBadgeEl) {
+        const isPast3pm = data.is_past_3pm || (new Date().getHours() >= 15);
+        if (isPast3pm) {
+          todayBadgeEl.innerText = '🏁 3:00 PM CUTOFF - SESSION CLOSED';
+          todayBadgeEl.style.background = '#f1f5f9';
+          todayBadgeEl.style.color = '#475569';
+          todayBadgeEl.style.border = '1px solid #cbd5e1';
+        } else if ((data.open_trades_count || 0) > 0) {
+          todayBadgeEl.innerText = `🟢 LIVE INTRADAY ACTIVE (${data.open_trades_count} OPEN)`;
+          todayBadgeEl.style.background = '#dcfce7';
+          todayBadgeEl.style.color = '#15803d';
+          todayBadgeEl.style.border = '1px solid #86efac';
+        } else if (data.is_market_day) {
+          todayBadgeEl.innerText = '● INTRADAY SESSION READY';
+          todayBadgeEl.style.background = '#e0e7ff';
+          todayBadgeEl.style.color = '#3730a3';
+          todayBadgeEl.style.border = '1px solid #c7d2fe';
+        } else {
+          todayBadgeEl.innerText = '⏸ MARKET CLOSED (WEEKEND/HOLIDAY)';
+          todayBadgeEl.style.background = '#fef3c7';
+          todayBadgeEl.style.color = '#92400e';
+          todayBadgeEl.style.border = '1px solid #fde68a';
         }
       }
+
+      const todaySummary = data.today_summary || {};
+      const todayAllocEl = document.getElementById('today-total-capital');
+      if (todayAllocEl) todayAllocEl.innerText = '₹' + Number(todaySummary.total_allocated || 0).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+      const todayOpenEl = document.getElementById('today-open-count');
+      if (todayOpenEl) todayOpenEl.innerText = `${todaySummary.open_trades || 0} Open`;
+
+      const todayClosedEl = document.getElementById('today-closed-count');
+      if (todayClosedEl) todayClosedEl.innerText = `${todaySummary.closed_trades || 0} Closed`;
+
+      const todayWinRateEl = document.getElementById('today-win-rate');
+      if (todayWinRateEl) {
+        const twr = todaySummary.win_rate ?? 0.0;
+        todayWinRateEl.innerText = `${twr}%`;
+        todayWinRateEl.style.color = twr >= 50 ? '#059669' : '#cc0000';
+      }
+
+      const todayWinRatioEl = document.getElementById('today-win-ratio');
+      if (todayWinRatioEl) todayWinRatioEl.innerText = `${todaySummary.winning_trades || 0}W / ${todaySummary.losing_trades || 0}L`;
+
+      const todayGrossEl = document.getElementById('today-gross-pnl');
+      if (todayGrossEl) {
+        const gpnl = todaySummary.gross_pnl || 0.0;
+        todayGrossEl.innerText = `${gpnl >= 0 ? '+' : ''}₹${gpnl.toFixed(2)}`;
+        todayGrossEl.style.color = gpnl >= 0 ? '#059669' : '#cc0000';
+      }
+
+      const todayChargesEl = document.getElementById('today-charges');
+      if (todayChargesEl) todayChargesEl.innerText = `-₹${Number(todaySummary.brokerage_taxes || 0).toFixed(2)}`;
+
+      const todayNetPnlEl = document.getElementById('today-net-pnl');
+      if (todayNetPnlEl) {
+        const npnl = todaySummary.net_pnl || 0.0;
+        const sign = npnl >= 0 ? '+' : '';
+        todayNetPnlEl.innerText = `${sign}₹${npnl.toFixed(2)}`;
+        todayNetPnlEl.style.background = npnl >= 0 ? '#dcfce7' : '#fee2e2';
+        todayNetPnlEl.style.color = npnl >= 0 ? '#15803d' : '#991b1b';
+      }
+
+      // Render Today's Trades Table
+      const todayTradesTbody = document.getElementById('auto-trades-tbody');
+      if (todayTradesTbody) {
+        const todayTrades = data.today_trades || [];
+        if (todayTrades.length === 0) {
+          todayTradesTbody.innerHTML = `<tr><td colspan="16" style="text-align:center; padding:18px; color:#64748b;">No trades executed yet for today (${data.today_date || '--'}). Morning screener executes automatically at 09:16 AM IST or click "⚡ AI Trade Now".</td></tr>`;
+        } else {
+          todayTradesTbody.innerHTML = todayTrades.map(t => renderTradeRowHtml(t)).join('');
+        }
+      }
+
+      // -----------------------------------------------------------------------
+      // Render Historical Date-Wise Archives
+      // -----------------------------------------------------------------------
+      renderHistoricalArchives(data);
 
     } catch (e) {
       console.error("Failed to load automation telemetry:", e);
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Helper: Render Individual Trade Row
+  // -------------------------------------------------------------------------
+  function renderTradeRowHtml(t) {
+    const isWin = (t.net_pnl || 0) >= 0;
+    const pnlColor = isWin ? '#059669' : '#cc0000';
+    const sign = isWin ? '+' : '';
+    const isOpen = t.status === 'OPEN';
+    const statusBadge = isOpen 
+      ? `<span style="background:#fef3c7; color:#92400e; font-weight:800; font-size:9.5px; padding:2px 6px; border-radius:3px; border:1px solid #f59e0b;">ACTIVE OPEN</span>`
+      : `<span style="background:#e2e8f0; color:#334155; font-weight:700; font-size:9.5px; padding:2px 6px; border-radius:3px;">CLOSED</span>`;
+
+    const timeStr = (t.entry_time || '').split(' ')[1] || t.entry_time || '--';
+    const exitTimeStr = t.exit_time ? ((t.exit_time || '').split(' ')[1] || t.exit_time) : '';
+    const capStr = t.allocated_capital ? '₹' + Number(t.allocated_capital).toLocaleString('en-IN') : '--';
+
+    return `<tr style="${isOpen ? 'background: #fffbeb;' : ''}">
+      <td style="font-family:var(--font-mono); font-size:10px;">${t.id}</td>
+      <td style="font-size:10px; color:#64748b;" title="Entry: ${t.entry_time || '--'} ${t.exit_time ? '| Exit: ' + t.exit_time : ''}">
+        ${timeStr}
+        ${exitTimeStr ? `<div style="font-size:9px; color:#94a3b8;">${exitTimeStr}</div>` : ''}
+      </td>
+      <td style="font-weight:800; color:#000080;">${t.symbol}</td>
+      <td><span style="font-weight:700; color:#059669;">${t.side}</span></td>
+      <td style="font-weight:700;">${t.qty}</td>
+      <td style="font-size:10px; color:#475569; font-family:var(--font-mono);">${capStr}</td>
+      <td>₹${Number(t.entry_price || 0).toFixed(2)}</td>
+      <td style="font-family:var(--font-mono); color:#1e293b;">₹${Number(t.highest_price || t.entry_price || 0).toFixed(2)}</td>
+      <td style="font-family:var(--font-mono); font-weight:700; color:#b91c1c;">₹${Number(t.current_sl || t.initial_sl || 0).toFixed(2)}</td>
+      <td style="font-family:var(--font-mono); font-weight:700; color:#059669;">₹${Number(t.target_price || 0).toFixed(2)}</td>
+      <td>${t.exit_price ? '₹' + Number(t.exit_price).toFixed(2) : '--'}</td>
+      <td style="font-size:10px;"><span style="background:#f1f5f9; padding:2px 4px; border-radius:2px; font-weight:600;">${t.exit_reason || '--'}</span></td>
+      <td style="font-weight:700; color:${pnlColor};">${t.gross_pnl !== null ? sign + '₹' + Number(t.gross_pnl).toFixed(2) : '--'}</td>
+      <td style="color:#64748b; font-size:10px;">${t.brokerage_and_taxes !== null ? '-₹' + Number(t.brokerage_and_taxes).toFixed(2) : '--'}</td>
+      <td style="font-weight:800; color:${pnlColor}; font-size:11.5px;">${t.net_pnl !== null ? sign + '₹' + Number(t.net_pnl).toFixed(2) : '--'}</td>
+      <td>${statusBadge}</td>
+    </tr>`;
+  }
+
+  // -------------------------------------------------------------------------
+  // Helper: Render Historical Sessions Grouped by Date
+  // -------------------------------------------------------------------------
+  let currentHistoricalFilter = 'ALL';
+  let cachedTelemetryData = null;
+
+  function filterHistoricalDate(dateStr) {
+    currentHistoricalFilter = dateStr;
+    if (cachedTelemetryData) {
+      renderHistoricalArchives(cachedTelemetryData);
+    }
+  }
+
+  function renderHistoricalArchives(data) {
+    cachedTelemetryData = data;
+    const pillsContainer = document.getElementById('historical-date-pills');
+    const container = document.getElementById('historical-sessions-container');
+    if (!container) return;
+
+    const historicalDates = data.historical_dates || [];
+    const tradesByDate = data.trades_by_date || {};
+
+    // Build Filter Pills
+    if (pillsContainer) {
+      let pillsHtml = `<button class="time-tab ${currentHistoricalFilter === 'ALL' ? 'active' : ''}" onclick="filterHistoricalDate('ALL')">All Dates (${historicalDates.length})</button>`;
+      historicalDates.forEach(d => {
+        const g = tradesByDate[d] || {};
+        const pnlSign = (g.net_pnl || 0) >= 0 ? '+' : '';
+        pillsHtml += `<button class="time-tab ${currentHistoricalFilter === d ? 'active' : ''}" onclick="filterHistoricalDate('${d}')">📅 ${d} (${g.total_trades || 0} • ${pnlSign}₹${Number(g.net_pnl || 0).toFixed(0)})</button>`;
+      });
+      pillsContainer.innerHTML = pillsHtml;
+    }
+
+    // If no historical dates
+    if (historicalDates.length === 0) {
+      container.innerHTML = `<div style="text-align: center; padding: 18px; color: #64748b; font-size: 11px;">No previous historical intraday trading sessions recorded yet. All past sessions will be segregated here by date.</div>`;
+      return;
+    }
+
+    // Filter which dates to render
+    const datesToRender = currentHistoricalFilter === 'ALL' 
+      ? historicalDates 
+      : historicalDates.filter(d => d === currentHistoricalFilter);
+
+    if (datesToRender.length === 0) {
+      container.innerHTML = `<div style="text-align: center; padding: 18px; color: #64748b; font-size: 11px;">No records found for date ${currentHistoricalFilter}.</div>`;
+      return;
+    }
+
+    let html = '';
+    datesToRender.forEach(d => {
+      const g = tradesByDate[d] || {};
+      const trades = g.trades || [];
+      const isWin = (g.net_pnl || 0) >= 0;
+      const sign = isWin ? '+' : '';
+      const pnlColor = isWin ? '#15803d' : '#991b1b';
+      const pnlBg = isWin ? '#dcfce7' : '#fee2e2';
+
+      let dateLabel = d;
+      try {
+        const parsed = new Date(d + 'T00:00:00');
+        dateLabel = parsed.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+      } catch (e) {}
+
+      html += `
+      <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 5px; margin-bottom: 12px; overflow: hidden;">
+        <!-- Date Session Header Banner -->
+        <div style="background: #e2e8f0; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid #cbd5e1;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-weight: 800; font-size: 11.5px; color: #0f172a;">📅 ${dateLabel} (${d})</span>
+            <span style="font-size: 10.5px; background: #ffffff; color: #334155; font-weight: 700; padding: 1px 6px; border-radius: 3px; border: 1px solid #cbd5e1;">
+              ${g.total_trades} Trades
+            </span>
+            <span style="font-size: 10.5px; color: #475569;">
+              Win Rate: <strong style="color: ${g.win_rate >= 50 ? '#059669' : '#cc0000'};">${g.win_rate}%</strong> (${g.winning_trades}W / ${g.losing_trades}L)
+            </span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; font-size: 10.5px;">
+            <span>Gross: <strong>${g.gross_pnl >= 0 ? '+' : ''}₹${Number(g.gross_pnl).toFixed(2)}</strong></span>
+            <span>Charges: <strong style="color: #64748b;">-₹${Number(g.brokerage_taxes).toFixed(2)}</strong></span>
+            <span style="font-size: 11.5px; font-weight: 800; padding: 2px 8px; border-radius: 3px; background: ${pnlBg}; color: ${pnlColor}; font-family: var(--font-mono);">
+              Net P&L: ${sign}₹${Number(g.net_pnl).toFixed(2)}
+            </span>
+          </div>
+        </div>
+
+        <!-- Date Trades Table -->
+        <div class="table-container-box" style="margin: 0; max-height: 200px; overflow-y: auto;">
+          <table class="terminal-table" style="font-size: 10px;">
+            <thead style="position: sticky; top: 0; background: #ffffff; z-index: 1;">
+              <tr>
+                <th style="width: 35px;">#</th>
+                <th>Time</th>
+                <th>Symbol</th>
+                <th>Side</th>
+                <th>Qty</th>
+                <th>Capital</th>
+                <th>Entry</th>
+                <th>Highest</th>
+                <th>Trailed SL</th>
+                <th>Target</th>
+                <th>Exit Price</th>
+                <th>Exit Reason</th>
+                <th>Gross PnL</th>
+                <th>Brokerage & Tax</th>
+                <th>Net P&L</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${trades.map(t => renderTradeRowHtml(t)).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+    });
+
+    container.innerHTML = html;
   }
 
   async function runMorningScreenerNow() {
