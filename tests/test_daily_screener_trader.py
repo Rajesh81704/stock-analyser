@@ -468,3 +468,67 @@ def test_manual_capital_and_leverage_configuration(tmp_path):
     assert pm["total_buying_power"] == 800000.0
     assert "4x MIS LEVERAGE" in pm["execution_mode"]
 
+
+def test_continuous_whole_day_opportunity_scanning(tmp_path):
+    """Verifies that the continuous engine scans for breakout opportunities whole day and dynamically enters trades."""
+    db_path = tmp_path / "test_opportunity_scan.db"
+    trader = DailyIntradayAutoTrader(db_path=db_path, initial_capital=100000.0, leverage=5.0)
+
+    # 1. Populate candidate stocks in daily_intraday_picks with status WATCHING
+    conn = sqlite3.connect(str(db_path))
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO daily_intraday_picks (
+            date, rank, symbol, company_name, sector, price, conviction_score,
+            rvol, strategy_name, entry_trigger_price, initial_sl, target_price,
+            trailing_step_pct, status, created_at
+        ) VALUES
+        ('2026-10-28', 1, 'INFY', 'Infosys Ltd', 'IT', 1500.0, 92.0, 2.5, 'ORB_Breakout', 1505.0, 1485.0, 1530.0, 0.5, 'WATCHING', '2026-10-28 09:16:00'),
+        ('2026-10-28', 2, 'TCS', 'Tata Consultancy', 'IT', 3500.0, 88.0, 1.8, 'ORB_Breakout', 3510.0, 3465.0, 3570.0, 0.5, 'WATCHING', '2026-10-28 09:16:00')
+    """)
+    conn.commit()
+    conn.close()
+
+    # Case A: Market prices are below entry triggers (e.g. INFY 1495, TCS 3490) -> No entry
+    no_trades = trader.scan_and_execute_intraday_opportunities(
+        current_prices={"INFY": 1495.0, "TCS": 3490.0},
+        trade_date_str="2026-10-28"
+    )
+    assert len(no_trades) == 0
+
+    # Case B: INFY breaks out above 1505 at 10:45 AM -> Dynamically entered!
+    entered_trades = trader.scan_and_execute_intraday_opportunities(
+        current_prices={"INFY": 1506.0, "TCS": 3495.0},
+        trade_date_str="2026-10-28"
+    )
+    assert len(entered_trades) == 1
+    assert entered_trades[0]["symbol"] == "INFY"
+    assert entered_trades[0]["entry_price"] == 1506.0
+    assert entered_trades[0]["status"] == "OPEN"
+
+    # Verify INFY pick status updated to TRIGGERED
+    status = trader.get_automation_status(auto_squareoff_past_3pm=False)
+    infy_pick = next(p for p in status["today_picks"] if p["symbol"] == "INFY")
+    assert infy_pick["status"] == "TRIGGERED"
+
+    # Case C: INFY already open, scan again -> No duplicate trade for INFY
+    no_dup = trader.scan_and_execute_intraday_opportunities(
+        current_prices={"INFY": 1510.0, "TCS": 3495.0},
+        trade_date_str="2026-10-28"
+    )
+    assert len(no_dup) == 0
+
+    # Case D: Later at 1:30 PM, TCS breaks out above 3510 -> Dynamically entered!
+    tcs_trade = trader.scan_and_execute_intraday_opportunities(
+        current_prices={"INFY": 1515.0, "TCS": 3512.0},
+        trade_date_str="2026-10-28"
+    )
+    assert len(tcs_trade) == 1
+    assert tcs_trade[0]["symbol"] == "TCS"
+    assert tcs_trade[0]["entry_price"] == 3512.0
+
+    # Both trades are now active open positions
+    status_final = trader.get_automation_status(auto_squareoff_past_3pm=False)
+    assert status_final["open_trades_count"] == 2
+
+

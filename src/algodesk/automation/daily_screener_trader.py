@@ -372,11 +372,11 @@ class DailyIntradayAutoTrader:
                     stock["score"],
                     stock["rvol"],
                     stock["strategy_name"],
-                    stock["price"],
+                    round(stock["price"] * 1.002, 2),  # Intraday breakout entry trigger (+0.2%)
                     stock["initial_sl"],
                     stock["target"],
                     stock["trailing_step_pct"],
-                    "PICKED",
+                    "WATCHING",
                     now_ts
                 ))
 
@@ -531,7 +531,7 @@ class DailyIntradayAutoTrader:
                 trade_id = cur.lastrowid
 
                 # Update status in daily_intraday_picks
-                cur.execute("UPDATE daily_intraday_picks SET status = 'TRADED' WHERE date = ? AND symbol = ?", (today_str, sym))
+                cur.execute("UPDATE daily_intraday_picks SET status = 'TRIGGERED' WHERE date = ? AND symbol = ?", (today_str, sym))
 
                 executed_trades.append({
                     "trade_id": trade_id,
@@ -552,6 +552,253 @@ class DailyIntradayAutoTrader:
 
         logger.info(f"🚀 [PaperTrader] Successfully initiated {len(executed_trades)} paper algo trades for {today_str}.")
         return executed_trades
+
+    # -------------------------------------------------------------------------
+    # 2b. Continuous Whole-Day Opportunity Scanner & Dynamic Trader
+    # -------------------------------------------------------------------------
+    def scan_and_execute_intraday_opportunities(
+        self,
+        current_prices: Optional[Dict[str, float]] = None,
+        trade_date_str: Optional[str] = None,
+        max_positions: int = 10,
+        min_trade_capital: float = 2000.0
+    ) -> List[Dict[str, Any]]:
+        """
+        Continuously scans today's best intraday stocks throughout the market day (09:15 - 15:00 IST)
+        for breakout and entry opportunities. Whenever an opportunity triggers and margin capital / position
+        slots are available, automatically enters a paper trade with 5x leverage and dynamic trailing SL.
+        """
+        today_str = trade_date_str or get_ist_date()
+        now_dt = datetime.now(IST)
+        now_ts = get_ist_now_ts()
+
+        # Strict 3:00 PM cutoff: No new entries allowed after 15:00 IST
+        if not trade_date_str and now_dt.time() >= dt_time(15, 0):
+            logger.info("🚫 [OpportunityScanner] Past 15:00 IST intraday cutoff. No new trades entered.")
+            return []
+
+        with self._lock:
+            conn = self._get_connection()
+            cur = conn.cursor()
+
+            # 1. Read open trades and check slot availability
+            cur.execute("""
+                SELECT id, symbol, allocated_capital, qty, entry_price
+                FROM daily_intraday_trades
+                WHERE status = 'OPEN'
+            """)
+            open_trades = [dict(r) for r in cur.fetchall()]
+            open_symbols = {t["symbol"] for t in open_trades}
+
+            # Avoid re-trading symbols that already completed or are open today
+            cur.execute("SELECT symbol FROM daily_intraday_trades WHERE trade_date = ?", (today_str,))
+            traded_today = {r["symbol"] for r in cur.fetchall()}
+
+            slots_available = max_positions - len(open_trades)
+            if slots_available <= 0:
+                logger.info(f"⏸️ [OpportunityScanner] Max intraday positions ({len(open_trades)}/{max_positions}) active. Awaiting exits.")
+                conn.close()
+                return []
+
+            # 2. Compute available margin capital
+            total_margin_capital = float(getattr(self, "initial_capital", 100000.0))
+            open_margin_utilized = sum(float(t["allocated_capital"] or 0.0) for t in open_trades)
+            available_margin = max(0.0, total_margin_capital - open_margin_utilized)
+
+            if available_margin < min_trade_capital:
+                logger.info(f"⏸️ [OpportunityScanner] Available margin (₹{available_margin:,.2f}) below min threshold (₹{min_trade_capital:,.2f}).")
+                conn.close()
+                return []
+
+            # 3. Fetch candidate picks for today waiting for entry
+            cur.execute("""
+                SELECT id, symbol, price, entry_trigger_price, initial_sl, target_price,
+                       trailing_step_pct, conviction_score, rvol, strategy_name, status
+                FROM daily_intraday_picks
+                WHERE date = ? AND status IN ('WATCHING', 'PICKED', 'PENDING_ENTRY')
+                ORDER BY rank ASC
+            """, (today_str,))
+            candidate_picks = [dict(r) for r in cur.fetchall()]
+            conn.close()
+
+        # If no picks in DB, automatically run morning screener to generate top picks
+        if not candidate_picks and self.is_market_day():
+            logger.info("[OpportunityScanner] No candidate picks found in DB. Running screener to arm watchlist...")
+            candidate_picks = self.run_morning_screener_and_pick(top_n=max_positions, scan_date_str=today_str)
+
+        # Filter out stocks already traded today
+        eligible_candidates = [p for p in candidate_picks if p["symbol"] not in traded_today]
+        if not eligible_candidates:
+            return []
+
+        # 4. Fetch live market prices for eligible candidates
+        cand_symbols = [p["symbol"] for p in eligible_candidates]
+        batch_prices = {}
+        if not current_prices:
+            try:
+                from src.data_loader import KITE_API_KEY, KITE_ACCESS_TOKEN
+                if KITE_API_KEY and KITE_ACCESS_TOKEN:
+                    from kiteconnect import KiteConnect
+                    kc = KiteConnect(api_key=KITE_API_KEY)
+                    kc.set_access_token(KITE_ACCESS_TOKEN)
+                    instruments = [f"NSE:{s.replace('.NS', '')}" for s in cand_symbols]
+                    q_map = kc.quote(instruments)
+                    if q_map:
+                        for s in cand_symbols:
+                            s_clean = s.replace(".NS", "")
+                            k_key = f"NSE:{s_clean}"
+                            if k_key in q_map:
+                                lp = float(q_map[k_key].get("last_price") or 0.0)
+                                if lp > 0:
+                                    batch_prices[s] = lp
+                                    batch_prices[s_clean] = lp
+            except Exception as batch_err:
+                logger.debug(f"Kite quote batch error: {batch_err}")
+
+        # Fallback to fast_info or yfinance or baseline if market quotes unavailable
+        for p in eligible_candidates:
+            sym = p["symbol"]
+            if current_prices and sym in current_prices:
+                batch_prices[sym] = float(current_prices[sym])
+            elif sym not in batch_prices:
+                try:
+                    resolved = resolve_ticker(sym)
+                    import yfinance as yf
+                    tk = yf.Ticker(resolved)
+                    fi = getattr(tk, "fast_info", None)
+                    if fi and getattr(fi, "last_price", None):
+                        batch_prices[sym] = float(fi.last_price)
+                    else:
+                        batch_prices[sym] = float(p["price"])
+                except Exception:
+                    batch_prices[sym] = float(p["price"])
+
+        # 5. Check triggers and execute trades
+        new_trades = []
+        lev = float(getattr(self, "leverage", 5.0))
+
+        with self._lock:
+            conn = self._get_connection()
+            cur = conn.cursor()
+
+            for pick in eligible_candidates:
+                if slots_available <= 0 or available_margin < min_trade_capital:
+                    break
+
+                sym = pick["symbol"]
+                curr_price = float(batch_prices.get(sym) or batch_prices.get(sym.replace(".NS", "")) or pick["price"])
+                base_price = float(pick["price"])
+                trigger_price = float(pick.get("entry_trigger_price") or (base_price * 1.002))
+
+                # Opportunity trigger:
+                # 1. Price reached/broke out above trigger price, OR
+                # 2. Bullish momentum breakout: Price is >= trigger_price * 0.998 and positive price action
+                is_opportunity = (curr_price >= trigger_price * 0.998) or (curr_price >= base_price * 1.002)
+
+                if is_opportunity:
+                    # Allocate portion of available margin
+                    alloc_margin = round(min(available_margin, available_margin / max(1, slots_available)), 2)
+                    qty = max(1, int((alloc_margin * lev) / curr_price))
+                    actual_margin = round((qty * curr_price) / lev, 2)
+                    exposure = round(qty * curr_price, 2)
+
+                    initial_sl = round(curr_price * 0.99, 2)     # -1.0% stop-loss
+                    target_p = round(curr_price * 1.02, 2)       # +2.0% profit target
+
+                    initial_log = json.dumps([{
+                        "ts": now_ts,
+                        "price": curr_price,
+                        "sl": initial_sl,
+                        "note": f"🎯 Intraday Breakout Opportunity Triggered ({lev:.0f}x MIS): Margin ₹{actual_margin:,.2f} | 5x Exp ₹{exposure:,.2f} | Score: {pick.get('conviction_score', 0)}"
+                    }])
+
+                    # Prevent duplicate insertion
+                    cur.execute("SELECT id FROM daily_intraday_trades WHERE trade_date = ? AND symbol = ?", (today_str, sym))
+                    if cur.fetchone():
+                        continue
+
+                    cur.execute("""
+                        INSERT INTO daily_intraday_trades (
+                            trade_date, symbol, side, qty, allocated_capital,
+                            entry_time, entry_price, initial_sl, highest_price,
+                            current_sl, target_price, gross_pnl, brokerage_and_taxes,
+                            net_pnl, return_pct, status, price_history, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        today_str,
+                        sym,
+                        "BUY",
+                        qty,
+                        actual_margin,
+                        now_ts,
+                        curr_price,
+                        initial_sl,
+                        curr_price,
+                        initial_sl,
+                        target_p,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        "OPEN",
+                        initial_log,
+                        now_ts
+                    ))
+                    trade_id = cur.lastrowid
+
+                    # Update pick status to 'TRIGGERED'
+                    cur.execute("""
+                        UPDATE daily_intraday_picks
+                        SET status = 'TRIGGERED', entry_trigger_price = ?
+                        WHERE date = ? AND symbol = ?
+                    """, (curr_price, today_str, sym))
+
+                    new_trades.append({
+                        "trade_id": trade_id,
+                        "symbol": sym,
+                        "qty": qty,
+                        "allocated_capital": actual_margin,
+                        "leverage": lev,
+                        "gross_exposure": exposure,
+                        "entry_price": curr_price,
+                        "initial_sl": initial_sl,
+                        "target_price": target_p,
+                        "status": "OPEN",
+                        "opportunity_note": f"Intraday Breakout Opportunity Triggered at ₹{curr_price:,.2f}"
+                    })
+
+                    logger.info(f"🎯 [IntradayOpportunity] Trade ENTERED: {sym} at ₹{curr_price} | Qty: {qty} ({lev:.0f}x MIS) | Margin: ₹{actual_margin:,.2f} | Target: ₹{target_p} | SL: ₹{initial_sl}")
+
+                    available_margin -= actual_margin
+                    slots_available -= 1
+
+            conn.commit()
+            conn.close()
+
+        if new_trades:
+            logger.info(f"🚀 [IntradayOpportunity] Successfully entered {len(new_trades)} opportunities during intraday session.")
+        return new_trades
+
+    def refresh_intraday_opportunity_watchlist(self, top_n: int = 10) -> List[Dict[str, Any]]:
+        """
+        Refreshes or tops up today's intraday watchlist so that there are always high-conviction
+        stocks being watched for opportunities during the trading day.
+        """
+        today_str = get_ist_date()
+        conn = self._get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT COUNT(*) FROM daily_intraday_picks
+            WHERE date = ? AND status IN ('WATCHING', 'PICKED', 'PENDING_ENTRY')
+        """, (today_str,))
+        watching_cnt = cur.fetchone()[0]
+        conn.close()
+
+        if watching_cnt < 4 and self.is_market_day():
+            logger.info(f"🔄 [WatchlistRefresh] Only {watching_cnt} candidate stocks watching. Refreshing intraday picks across NIFTY 500...")
+            picks = self.run_morning_screener_and_pick(top_n=top_n, scan_date_str=today_str)
+            return picks
+        return []
 
     # -------------------------------------------------------------------------
     # 3. Dynamic Trailing Stop Loss & Live Price Monitor Engine

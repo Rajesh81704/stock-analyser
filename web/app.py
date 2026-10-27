@@ -2505,6 +2505,25 @@ def trigger_trailing_sl_update():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/automation/opportunities/scan-now", summary="Scan Intraday Watchlist & Dynamically Enter Triggered Opportunities")
+def trigger_intraday_opportunity_scan():
+    """Immediately scans today's best intraday stocks for entry breakout opportunities and enters trades if triggered."""
+    try:
+        from src.algodesk.automation.daily_screener_trader import daily_auto_trader
+        updates = daily_auto_trader.monitor_and_update_trailing_sl(force_eod_squareoff=False)
+        new_trades = daily_auto_trader.scan_and_execute_intraday_opportunities()
+        return {
+            "status": "success",
+            "message": f"Scanned intraday watchlist. Entered {len(new_trades)} new opportunities.",
+            "trades_entered": new_trades,
+            "updates_count": len(updates),
+            "new_trades_count": len(new_trades)
+        }
+    except Exception as e:
+        logger.error(f"Error scanning intraday opportunities: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/automation/top10/square-off", summary="Force EOD Square-Off for All Open Intraday Positions")
 @app.post("/api/automation/top3/square-off", summary="Force EOD Square-Off for All Open Intraday Positions")
 def trigger_eod_square_off():

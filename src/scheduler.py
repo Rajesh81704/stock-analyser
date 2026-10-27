@@ -182,19 +182,25 @@ def _morning_intraday_screener_and_trade_job():
 
 
 def _intraday_trailing_sl_job():
-    """Triggered every 30 seconds to trail SLs, monitor targets, and enforce strict 3:00 PM square-off."""
+    """Triggered every 30 seconds to trail SLs, monitor targets, and continuously enter intraday opportunities."""
     try:
         from src.algodesk.automation.daily_screener_trader import daily_auto_trader
         now = datetime.now(IST)
         is_past_3pm = now.time() >= time(15, 0)
 
-        # Run if within market hours (09:15-15:30) or if any open positions exist past 3 PM
+        # 1. Manage open positions: trail stop-loss and take profit on target
         if is_market_hours() or is_past_3pm:
             updates = daily_auto_trader.monitor_and_update_trailing_sl(force_eod_squareoff=is_past_3pm)
             if updates:
                 logger.info(f"📈 [Trailing SL Monitor] Processed {len(updates)} positions (force_squareoff={is_past_3pm}).")
+
+        # 2. Continuous Intraday Opportunity Scanning throughout the market day (09:15-15:00)
+        if is_market_hours() and not is_past_3pm:
+            new_trades = daily_auto_trader.scan_and_execute_intraday_opportunities()
+            if new_trades:
+                logger.info(f"🎯 [IntradayEngine] Dynamically entered {len(new_trades)} new opportunities during market hours.")
     except Exception as e:
-        logger.error(f"❌ Error during intraday trailing SL monitor: {e}")
+        logger.error(f"❌ Error during intraday trailing SL and opportunity monitor: {e}")
 
 
 def _eod_intraday_squareoff_job():
@@ -210,7 +216,13 @@ def _eod_intraday_squareoff_job():
 def _market_hours_job():
     """Triggered every 30 mins; checks if market is open before running."""
     if is_market_hours():
-        logger.info("Market hours active (09:15-15:30 IST). Running 30-min automated scan...")
+        logger.info("Market hours active (09:15-15:30 IST). Running 30-min automated scan & opportunity watchlist refresh...")
+        try:
+            from src.algodesk.automation.daily_screener_trader import daily_auto_trader
+            daily_auto_trader.refresh_intraday_opportunity_watchlist(top_n=10)
+            daily_auto_trader.scan_and_execute_intraday_opportunities()
+        except Exception as e:
+            logger.warning(f"Notice during 30-min watchlist refresh: {e}")
         run_automatic_scheduled_scan(trigger_name="30MIN_MARKET_HOURS_SCAN")
     else:
         logger.info("Outside market hours. Skipping 30-min intra-day scan.")
