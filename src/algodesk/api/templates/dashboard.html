@@ -72,15 +72,17 @@
 <!-- Portfolio Performance Metrics Banner -->
 <div class="algo-metric-banner">
   <div class="algo-stat-cell">
-    <span class="stat-lbl">Simulated Capital</span>
+    <span class="stat-lbl">Margin Capital (5x MIS)</span>
     <span class="stat-val" id="kpi-simulated-capital">₹{{ "{:,.2f}".format(portfolio_metrics.simulated_capital if portfolio_metrics else 100000.0) }}</span>
+    <span style="font-size: 9.5px; color: #475569;" id="kpi-buying-power">5x Power: ₹{{ "{:,.2f}".format(portfolio_metrics.total_buying_power if (portfolio_metrics and portfolio_metrics.total_buying_power) else 500000.0) }}</span>
   </div>
   <div class="algo-stat-cell">
-    <span class="stat-lbl">Capital Utilized</span>
+    <span class="stat-lbl">Margin Utilized (Exposure)</span>
     <span class="stat-val" id="kpi-capital-utilized" style="color: #2563eb;">₹{{ "{:,.2f}".format(portfolio_metrics.capital_utilized if portfolio_metrics else 0.0) }} ({{ portfolio_metrics.capital_utilization_pct if portfolio_metrics else 0.0 }}%)</span>
+    <span style="font-size: 9.5px; color: #475569;" id="kpi-gross-exposure">Exposure: ₹{{ "{:,.2f}".format(portfolio_metrics.gross_exposure if (portfolio_metrics and portfolio_metrics.gross_exposure) else 0.0) }}</span>
   </div>
   <div class="algo-stat-cell">
-    <span class="stat-lbl">Available Cash</span>
+    <span class="stat-lbl">Available Margin</span>
     <span class="stat-val" id="kpi-available-cash">₹{{ "{:,.2f}".format(portfolio_metrics.available_cash if portfolio_metrics else portfolio.cash) }}</span>
   </div>
   <div class="algo-stat-cell">
@@ -97,8 +99,8 @@
   </div>
   <div class="algo-stat-cell">
     <span class="stat-lbl">Execution Mode</span>
-    <span class="stat-val" style="font-size: 13px; color: #000080;">
-      PAPER (AI ALGO)
+    <span class="stat-val" id="kpi-execution-mode" style="font-size: 11.5px; color: #000080; font-weight: 800;">
+      PAPER (5x MIS LEVERAGE)
     </span>
   </div>
 </div>
@@ -121,8 +123,9 @@
         <tr>
           <th>Symbol</th>
           <th>Side</th>
-          <th>Qty</th>
-          <th>Allocated Capital</th>
+          <th>Qty (5x)</th>
+          <th>Margin Capital</th>
+          <th>Gross Exposure (5x)</th>
           <th>Entry Price</th>
           <th>Current Price</th>
           <th>Unrealized P&L</th>
@@ -138,7 +141,8 @@
               <td style="font-weight: 800; color: #000080;">{{ t.symbol }}</td>
               <td><span style="font-weight: 700; color: #059669;">BUY</span></td>
               <td style="font-weight: 700;">{{ t.qty }}</td>
-              <td style="font-family: var(--font-mono); color: #475569;">₹{{ "{:,.2f}".format(t.allocated_capital or (t.qty * t.entry_price)) }}</td>
+              <td style="font-family: var(--font-mono); color: #475569;">₹{{ "{:,.2f}".format(t.allocated_capital or ((t.qty * t.entry_price) / 5.0)) }}</td>
+              <td style="font-family: var(--font-mono); color: #1e293b; font-weight: 700;">₹{{ "{:,.2f}".format(t.qty * t.entry_price) }}</td>
               <td>₹{{ "%.2f"|format(t.entry_price) }}</td>
               <td style="font-family: var(--font-mono); color: #1e293b;">₹{{ "%.2f"|format(t.highest_price or t.entry_price) }}</td>
               <td style="font-weight: 800; color: {% if (t.net_pnl or 0) >= 0 %}#059669{% else %}#cc0000{% endif %};">
@@ -159,7 +163,8 @@
               <td style="font-weight: 800; color: #000080;">{{ sym }}</td>
               <td><span style="font-weight: 700; color: #059669;">BUY (LONG)</span></td>
               <td style="font-weight: 700;">{{ pos.qty|abs }}</td>
-              <td style="font-family: var(--font-mono); color: #475569;">₹{{ "{:,.2f}".format(pos.qty * pos.entry_price) }}</td>
+              <td style="font-family: var(--font-mono); color: #475569;">₹{{ "{:,.2f}".format((pos.qty * pos.entry_price) / 5.0) }}</td>
+              <td style="font-family: var(--font-mono); color: #1e293b; font-weight: 700;">₹{{ "{:,.2f}".format(pos.qty * pos.entry_price) }}</td>
               <td>₹{{ "%.2f"|format(pos.entry_price) }}</td>
               <td>₹{{ "%.2f"|format(pos.current_price) }}</td>
               <td style="font-weight: 800; color: {% if pos.unrealized_pnl >= 0 %}#059669{% else %}#cc0000{% endif %};">
@@ -176,7 +181,7 @@
           {% endfor %}
         {% else %}
           <tr>
-            <td colspan="10" style="text-align: center; padding: 20px; color: #64748b;">
+            <td colspan="11" style="text-align: center; padding: 20px; color: #64748b;">
               No active open positions. Next morning autonomous screener executes at 09:16 AM IST, or click "⚡ AI Trade Now" below.
             </td>
           </tr>
@@ -522,11 +527,23 @@
       const kpiCap = document.getElementById('kpi-simulated-capital');
       if (kpiCap) kpiCap.innerText = '₹' + Number(pm.simulated_capital || 100000).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
 
+      const kpiPower = document.getElementById('kpi-buying-power');
+      if (kpiPower) {
+        const bp = Number(pm.total_buying_power || ((pm.simulated_capital || 100000) * 5.0));
+        kpiPower.innerText = '5x Power: ₹' + bp.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+      }
+
       const kpiUtil = document.getElementById('kpi-capital-utilized');
       if (kpiUtil) {
         const uVal = Number(pm.capital_utilized || 0);
         const uPct = Number(pm.capital_utilization_pct || 0);
         kpiUtil.innerText = `₹${uVal.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})} (${uPct}%)`;
+      }
+
+      const kpiGross = document.getElementById('kpi-gross-exposure');
+      if (kpiGross) {
+        const ge = Number(pm.gross_exposure || 0);
+        kpiGross.innerText = 'Exposure: ₹' + ge.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
       }
 
       const kpiCash = document.getElementById('kpi-available-cash');
@@ -556,19 +573,21 @@
       if (topPositionsTbody) {
         const openTrades = data.open_trades || [];
         if (openTrades.length === 0) {
-          topPositionsTbody.innerHTML = `<tr><td colspan="10" style="text-align: center; padding: 20px; color: #64748b;">No active open positions. Next morning autonomous screener executes at 09:16 AM IST, or click "⚡ AI Trade Now" below.</td></tr>`;
+          topPositionsTbody.innerHTML = `<tr><td colspan="11" style="text-align: center; padding: 20px; color: #64748b;">No active open positions. Next morning autonomous screener executes at 09:16 AM IST, or click "⚡ AI Trade Now" below.</td></tr>`;
         } else {
           topPositionsTbody.innerHTML = openTrades.map(t => {
             const isWin = (t.net_pnl || 0) >= 0;
             const sign = isWin ? '+' : '';
             const pnlColor = isWin ? '#059669' : '#cc0000';
             const capVal = t.allocated_capital ? '₹' + Number(t.allocated_capital).toLocaleString('en-IN', {minimumFractionDigits: 2}) : '--';
+            const expVal = (t.qty && t.entry_price) ? '₹' + Number(t.qty * t.entry_price).toLocaleString('en-IN', {minimumFractionDigits: 2}) : '--';
             const currPrice = Number(t.highest_price || t.entry_price || 0).toFixed(2);
             return `<tr style="background: #fffbeb;">
               <td style="font-weight: 800; color: #000080;">${t.symbol}</td>
               <td><span style="font-weight: 700; color: #059669;">BUY</span></td>
               <td style="font-weight: 700;">${t.qty}</td>
               <td style="font-family: var(--font-mono); color: #475569;">${capVal}</td>
+              <td style="font-family: var(--font-mono); color: #1e293b; font-weight: 700;">${expVal}</td>
               <td>₹${Number(t.entry_price || 0).toFixed(2)}</td>
               <td style="font-family: var(--font-mono); color: #1e293b;">₹${currPrice}</td>
               <td style="font-weight: 800; color: ${pnlColor}; font-family: var(--font-mono);">
@@ -1007,11 +1026,15 @@
       const data = await res.json();
       if (res.ok && data.status === 'success') {
         const alloc = data.allocation;
-        let msg = `🧠 Gemini Smart Allocation for ₹${Number(capitalVal).toLocaleString('en-IN')}:\n`;
+        const lev = alloc.leverage || 5.0;
+        const bp = alloc.total_buying_power || (capitalVal * lev);
+        let msg = `🧠 Gemini Smart Allocation (5x MIS Intraday Leverage):\n`;
+        msg += `Margin Capital: ₹${Number(capitalVal).toLocaleString('en-IN')} → 5x Buying Power: ₹${Number(bp).toLocaleString('en-IN')}\n`;
         msg += `Engine: ${alloc.model_used}\n`;
         msg += `Strategy: ${alloc.strategy_overview}\n\n`;
         alloc.allocations.forEach(a => {
-          msg += `• ${a.symbol}: ₹${Number(a.allocated_capital).toLocaleString('en-IN')} (${a.weight_pct}%) → Qty: ${a.qty} | ${a.rationale}\n`;
+          const exp = a.exposure || (a.allocated_capital * lev);
+          msg += `• ${a.symbol}: Margin ₹${Number(a.allocated_capital).toLocaleString('en-IN')} (${a.weight_pct}%) → Qty: ${a.qty} (5x Exposure: ₹${Number(exp).toLocaleString('en-IN')}) | ${a.rationale}\n`;
         });
         alert(msg);
       } else {

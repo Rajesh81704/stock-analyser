@@ -2425,7 +2425,8 @@ def preview_smart_capital_allocation(
         if not picks:
             picks = daily_auto_trader.run_morning_screener_and_pick(top_n=top_n)
         gc = GeminiClient()
-        result = gc.optimize_capital_allocation(total_capital=total_capital, picks=picks[:top_n])
+        lev = float(getattr(daily_auto_trader, "leverage", 5.0))
+        result = gc.optimize_capital_allocation(total_capital=total_capital, picks=picks[:top_n], leverage=lev)
         return {
             "status": "success",
             "allocation": result.model_dump()

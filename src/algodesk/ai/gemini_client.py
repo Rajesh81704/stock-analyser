@@ -58,12 +58,15 @@ class SmartAllocationItem(BaseModel):
     symbol: str
     weight_pct: float
     allocated_capital: float
+    exposure: Optional[float] = None
     qty: int
     rationale: str
 
 
 class SmartCapitalAllocationResult(BaseModel):
     total_capital: float
+    leverage: float = 5.0
+    total_buying_power: Optional[float] = None
     strategy_overview: str
     allocations: List[SmartAllocationItem]
     model_used: str = "gemini-3.5-flash"
@@ -174,10 +177,12 @@ class GeminiClient:
         self,
         total_capital: float,
         picks: List[Dict[str, Any]],
-        risk_profile: str = "BALANCED"
+        risk_profile: str = "BALANCED",
+        leverage: float = 5.0
     ) -> SmartCapitalAllocationResult:
         """
-        Smartly distributes `total_capital` across `picks` using Gemini API.
+        Smartly distributes cash margin `total_capital` across `picks` using Gemini API,
+        accounting for 5x intraday MIS leverage (purchasing power = total_capital * 5.0).
         Analyzes conviction score, relative volume (RVOL), sector diversification,
         and risk-reward ratio. Falls back seamlessly to smart quantitative conviction sizing
         if the Gemini API is offline or quota-limited.
@@ -185,19 +190,24 @@ class GeminiClient:
         if not picks:
             return SmartCapitalAllocationResult(
                 total_capital=total_capital,
+                leverage=leverage,
+                total_buying_power=total_capital * leverage,
                 strategy_overview="No picks provided for allocation.",
                 allocations=[],
                 model_used="none"
             )
 
         if not self.is_available():
-            logger.info("Gemini API not available/configured. Utilizing Quant Conviction Risk-Parity Allocation.")
-            return self._quant_conviction_fallback(total_capital, picks)
+            logger.info("Gemini API not available/configured. Utilizing Quant Conviction Risk-Parity Allocation (5x MIS Leverage).")
+            return self._quant_conviction_fallback(total_capital, picks, leverage=leverage)
+
+        total_exposure = round(total_capital * leverage, 2)
 
         prompt = (
             f"You are a Senior Quantitative Portfolio Manager and Risk Officer.\n"
-            f"You have an intraday capital pool of ₹{total_capital:,.2f}.\n"
-            f"Distribute this exact capital smartly across the following {len(picks)} selected intraday stocks.\n\n"
+            f"You have an intraday cash margin pool of ₹{total_capital:,.2f}.\n"
+            f"INTRADAY LEVERAGE: 5.0x MIS margin leverage applies (20% margin requirement). Total purchasing exposure = ₹{total_exposure:,.2f}.\n"
+            f"Distribute this margin capital smartly across the following {len(picks)} selected intraday stocks.\n\n"
             f"PORTFOLIO STOCKS IN PLAY:\n"
         )
         for p in picks:
@@ -221,11 +231,11 @@ class GeminiClient:
 
         prompt += (
             f"\nRULES FOR ALLOCATION:\n"
-            f"1. Total allocated capital across all stocks MUST sum to exactly ₹{total_capital:,.2f} (weights sum to 100.0%).\n"
+            f"1. Total allocated margin capital across all stocks MUST sum to exactly ₹{total_capital:,.2f} (weights sum to 100.0%).\n"
             f"2. Conviction-weighted sizing: Stocks with higher conviction scores and higher RVOL MUST receive proportionally larger allocations.\n"
             f"3. Risk parity & bounds: No single stock should exceed {max_pct}% of capital. Every stock must receive at least {min_pct}% of capital.\n"
             f"4. Sector diversification: Do not overload a single sector.\n"
-            f"5. Calculate exact suggested qty = max(1, floor(allocated_capital / price)).\n"
+            f"5. Sizing & Leverage: 5.0x intraday MIS leverage applies. Calculate suggested quantity = max(1, floor((allocated_capital * 5.0) / price)).\n"
             f"6. Respond ONLY with a valid JSON object matching this schema:\n"
             f"{{\n"
             f'  "total_capital": {total_capital},\n'
@@ -235,8 +245,8 @@ class GeminiClient:
             f'      "symbol": "SYMBOL",\n'
             f'      "weight_pct": 14.5,\n'
             f'      "allocated_capital": 14500.0,\n'
-            f'      "qty": 10,\n'
-            f'      "rationale": "Clear concise 1-sentence rationale for this sizing"\n'
+            f'      "qty": 50,\n'
+            f'      "rationale": "Clear concise 1-sentence rationale for this sizing with 5x leverage"\n'
             f'    }}\n'
             f'  ]\n'
             f"}}\n"
@@ -247,33 +257,49 @@ class GeminiClient:
             self._daily_calls_count += 1
             data = json.loads(raw_json)
             alloc_items = []
+            picks_by_sym = {p.get("symbol"): p for p in picks}
+
             for item in data.get("allocations", []):
+                sym = item.get("symbol")
+                px = float(picks_by_sym.get(sym, {}).get("price", 100.0))
+                alloc_cap = float(item.get("allocated_capital", 0.0))
+                item["exposure"] = round(alloc_cap * leverage, 2)
+                # Ensure 5x leverage quantity is enforced even if LLM omitted leverage math
+                expected_qty = max(1, int((alloc_cap * leverage) / max(1.0, px)))
+                if item.get("qty", 0) < expected_qty * 0.7:
+                    item["qty"] = expected_qty
                 alloc_items.append(SmartAllocationItem(**item))
+
             if alloc_items:
                 return SmartCapitalAllocationResult(
                     total_capital=total_capital,
-                    strategy_overview=data.get("strategy_overview", "Gemini AI Portfolio Allocation"),
+                    leverage=leverage,
+                    total_buying_power=total_exposure,
+                    strategy_overview=data.get("strategy_overview", f"Gemini AI Portfolio Allocation (5x MIS Leverage: ₹{total_exposure:,.2f})"),
                     allocations=alloc_items,
                     model_used=self.fast_model
                 )
         except Exception as e:
             logger.warning(f"Gemini smart capital allocation call notice: {e}. Falling back to quant conviction engine.")
 
-        return self._quant_conviction_fallback(total_capital, picks)
+        return self._quant_conviction_fallback(total_capital, picks, leverage=leverage)
 
     def _quant_conviction_fallback(
         self,
         total_capital: float,
-        picks: List[Dict[str, Any]]
+        picks: List[Dict[str, Any]],
+        leverage: float = 5.0
     ) -> SmartCapitalAllocationResult:
         """
-        Mathematical Quant Conviction Fallback:
+        Mathematical Quant Conviction Fallback with 5x MIS Leverage:
         Weights positions proportional to (conviction_score^1.3 * rvol^0.5),
-        clamped between 4% and 25%, normalized to exactly 100%.
+        clamped between min and max bounds, normalized to 100%, and sized with 5x leverage.
         """
         if not picks:
             return SmartCapitalAllocationResult(
                 total_capital=total_capital,
+                leverage=leverage,
+                total_buying_power=total_capital * leverage,
                 strategy_overview="No picks available",
                 allocations=[],
                 model_used="quant-engine"
@@ -307,24 +333,29 @@ class GeminiClient:
             sym = p.get("symbol", "")
             px = max(1.0, float(p.get("price", 100.0)))
             allocated = round(total_capital * w, 2)
-            qty = max(1, int(allocated / px))
+            exposure = round(allocated * leverage, 2)
+            qty = max(1, int(exposure / px))
             score = float(p.get("conviction_score", p.get("score", 75.0)))
             rvol = float(p.get("rvol", 1.0))
             rationale = (
-                f"Conviction-weighted risk parity ({w * 100.0:.1f}%): "
-                f"Score {score:.1f}, RVOL {rvol:.2f}x in {p.get('sector', 'Equities')}."
+                f"Conviction-weighted risk parity ({w * 100.0:.1f}%, 5x MIS): "
+                f"Margin ₹{allocated:,.2f} (Exposure ₹{exposure:,.2f}) | Score {score:.1f}, RVOL {rvol:.2f}x in {p.get('sector', 'Equities')}."
             )
             allocations.append(SmartAllocationItem(
                 symbol=sym,
                 weight_pct=round(w * 100.0, 2),
                 allocated_capital=allocated,
+                exposure=exposure,
                 qty=qty,
                 rationale=rationale
             ))
 
+        total_exposure = round(total_capital * leverage, 2)
         return SmartCapitalAllocationResult(
             total_capital=total_capital,
-            strategy_overview=f"Quant Conviction Multi-Factor Allocation across {len(picks)} positions.",
+            leverage=leverage,
+            total_buying_power=total_exposure,
+            strategy_overview=f"Quant Conviction Multi-Factor Allocation (5x MIS Leverage: ₹{total_exposure:,.2f}) across {len(picks)} positions.",
             allocations=allocations,
             model_used="quant-conviction-fallback"
         )

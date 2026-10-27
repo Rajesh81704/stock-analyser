@@ -54,9 +54,10 @@ DB_PATH = Path("data/stock_screener.db")
 class DailyIntradayAutoTrader:
     """Automated Daily Screener, Stock Picker & Paper Algo Trading Engine."""
 
-    def __init__(self, db_path: Optional[Path] = None, initial_capital: float = 100000.0):
+    def __init__(self, db_path: Optional[Path] = None, initial_capital: float = 100000.0, leverage: float = 5.0):
         self.db_path = Path(db_path) if db_path else DB_PATH
         self.initial_capital = initial_capital
+        self.leverage = float(leverage)
         self.cost_calculator = CostCalculator(ZerodhaIntradayCostsConfig())
         self._lock = threading.Lock()
         self._init_database_tables()
@@ -381,16 +382,17 @@ class DailyIntradayAutoTrader:
             return []
 
         pool_capital = float(total_capital if total_capital is not None and total_capital > 0 else self.initial_capital)
+        lev = float(getattr(self, "leverage", 5.0))
 
-        # Smart Capital Distribution via Gemini API (with Quant Conviction Risk-Parity fallback)
+        # Smart Capital Distribution via Gemini API (with Quant Conviction Risk-Parity fallback and 5x leverage)
         alloc_map = {}
         try:
             from src.algodesk.ai.gemini_client import GeminiClient
             gc = GeminiClient()
-            alloc_res = gc.optimize_capital_allocation(total_capital=pool_capital, picks=picks)
+            alloc_res = gc.optimize_capital_allocation(total_capital=pool_capital, picks=picks, leverage=lev)
             if alloc_res and alloc_res.allocations:
                 alloc_map = {item.symbol: item for item in alloc_res.allocations}
-                logger.info(f"🧠 [SmartAllocator] Gemini distributed ₹{pool_capital:,.2f} across {len(picks)} stocks ({alloc_res.model_used}). Strategy: {alloc_res.strategy_overview[:120]}...")
+                logger.info(f"🧠 [SmartAllocator] Gemini distributed ₹{pool_capital:,.2f} margin (5x buying power: ₹{pool_capital * lev:,.2f}) across {len(picks)} stocks ({alloc_res.model_used}). Strategy: {alloc_res.strategy_overview[:120]}...")
         except Exception as alloc_err:
             logger.warning(f"Smart allocation notice ({alloc_err}), falling back to equal weighting.")
 
@@ -410,16 +412,19 @@ class DailyIntradayAutoTrader:
                 smart_item = alloc_map.get(sym)
                 if smart_item:
                     allocated_for_trade = round(float(smart_item.allocated_capital), 2)
-                    qty = max(1, int(smart_item.qty))
-                    entry_note = f"Smart AI Sizing: ₹{allocated_for_trade:,.2f} ({smart_item.weight_pct:.1f}%) | {smart_item.rationale}"
+                    expected_qty = max(1, int((allocated_for_trade * lev) / entry_price))
+                    qty = max(1, int(smart_item.qty)) if smart_item.qty and smart_item.qty >= expected_qty * 0.7 else expected_qty
+                    exposure = round(qty * entry_price, 2)
+                    entry_note = f"Smart AI Sizing ({lev:.0f}x MIS): Margin ₹{allocated_for_trade:,.2f} | Exposure ₹{exposure:,.2f} ({smart_item.weight_pct:.1f}%) | {smart_item.rationale}"
                     weight_val = smart_item.weight_pct
                     rationale_val = smart_item.rationale
                 else:
-                    qty = max(1, int(capital_per_trade / entry_price))
-                    allocated_for_trade = round(qty * entry_price, 2)
-                    entry_note = f"Standard sizing: ₹{allocated_for_trade:,.2f} | 1% SL & 2% Target"
+                    allocated_for_trade = round(capital_per_trade, 2)
+                    qty = max(1, int((allocated_for_trade * lev) / entry_price))
+                    exposure = round(qty * entry_price, 2)
+                    entry_note = f"Standard sizing ({lev:.0f}x MIS): Margin ₹{allocated_for_trade:,.2f} | Exposure ₹{exposure:,.2f} | 1% SL & 2% Target"
                     weight_val = round((allocated_for_trade / pool_capital) * 100.0, 1)
-                    rationale_val = "Equal distribution"
+                    rationale_val = f"Equal distribution ({lev:.0f}x MIS leverage)"
 
                 # Check if trade already exists for today
                 cur.execute("SELECT id FROM daily_intraday_trades WHERE trade_date = ? AND symbol = ?", (today_str, sym))
@@ -756,12 +761,12 @@ class DailyIntradayAutoTrader:
     # -------------------------------------------------------------------------
     # 4. Status Payload & History Reporting for UI & Dashboard
     # -------------------------------------------------------------------------
-    def get_automation_status(self) -> Dict[str, Any]:
+    def get_automation_status(self, auto_squareoff_past_3pm: bool = True) -> Dict[str, Any]:
         """Returns comprehensive status, today's picks, open positions, and all trade logs."""
         today_str = get_ist_date()
 
         # Enforce 3:00 PM strict squareoff check: If past 15:00 IST and open trades exist, square them off
-        if datetime.now(IST).time() >= dt_time(15, 0):
+        if auto_squareoff_past_3pm and datetime.now(IST).time() >= dt_time(15, 0):
             try:
                 conn_check = self._get_connection()
                 cur_check = conn_check.cursor()
@@ -881,27 +886,35 @@ class DailyIntradayAutoTrader:
         dates_available = sorted(list(trades_by_date.keys()), reverse=True)
         historical_dates = [d for d in dates_available if d != today_str]
 
-        # Capital Utilization and Unified Portfolio Metrics
+        # Capital Utilization and Unified Portfolio Metrics (5x Intraday MIS Leverage)
         base_simulated_capital = 100000.0
+        lev = float(getattr(self, "leverage", 5.0))
         open_capital_utilized = sum(float(t.get("allocated_capital") or (t.get("qty", 0) * t.get("entry_price", 0))) for t in open_trades)
+        gross_exposure = round(sum(float(t.get("qty", 0) * t.get("entry_price", 0)) for t in open_trades), 2)
+        total_buying_power = round(base_simulated_capital * lev, 2)
         unrealized_pnl = sum(float(t.get("net_pnl") or t.get("gross_pnl") or 0.0) for t in open_trades)
         today_realized_net_pnl = float(today_summary.get("net_pnl") or 0.0)
 
         available_cash = max(0.0, round(base_simulated_capital - open_capital_utilized + today_realized_net_pnl, 2))
         portfolio_equity = round(base_simulated_capital + today_realized_net_pnl + unrealized_pnl, 2)
         capital_utilization_pct = round((open_capital_utilized / base_simulated_capital * 100.0), 1) if base_simulated_capital > 0 else 0.0
+        effective_leverage = round(gross_exposure / portfolio_equity, 2) if portfolio_equity > 0 else 0.0
 
         portfolio_metrics = {
             "simulated_capital": base_simulated_capital,
+            "intraday_leverage": lev,
+            "total_buying_power": total_buying_power,
             "capital_utilized": round(open_capital_utilized, 2),
             "capital_utilization_pct": capital_utilization_pct,
+            "gross_exposure": gross_exposure,
+            "effective_leverage": effective_leverage,
             "available_cash": available_cash,
             "portfolio_equity": portfolio_equity,
             "active_positions_count": len(open_trades),
             "max_positions_allowed": 10,
             "unrealized_pnl": round(unrealized_pnl, 2),
             "today_realized_net_pnl": today_realized_net_pnl,
-            "execution_mode": "PAPER (AI ALGO)"
+            "execution_mode": f"PAPER (AI ALGO • {lev:.0f}x MIS LEVERAGE)"
         }
 
         conn.close()

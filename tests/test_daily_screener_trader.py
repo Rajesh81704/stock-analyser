@@ -241,7 +241,7 @@ def test_datewise_segregation_and_today_summary():
         conn.commit()
         conn.close()
 
-        status = trader.get_automation_status()
+        status = trader.get_automation_status(auto_squareoff_past_3pm=False)
 
         # 1. Today's isolation
         assert status["today_date"] == today_str
@@ -375,6 +375,58 @@ def test_date_management_crud_and_export():
         assert after_summaries[0]["trade_date"] == d2
         assert len(trader.get_trades_for_date(d1)) == 0
         assert len(trader.get_trades_for_date(d2)) == 1
+
+    finally:
+        if os.path.exists(db_path):
+            os.remove(db_path)
+
+
+def test_5x_intraday_leverage_mechanics():
+    """Verify that 5x MIS leverage is applied: quantity = (margin * 5) / price, and metrics reflect exposure."""
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        db_path = tmp.name
+
+    try:
+        trader = DailyIntradayAutoTrader(db_path=db_path, initial_capital=100000.0, leverage=5.0)
+        assert trader.leverage == 5.0
+
+        sample_picks = [
+            {"symbol": "INFY", "price": 1000.0, "conviction_score": 90.0, "rvol": 2.0, "sector": "IT", "strategy_name": "ORB"},
+            {"symbol": "TCS", "price": 2000.0, "conviction_score": 85.0, "rvol": 1.5, "sector": "IT", "strategy_name": "ORB"},
+        ]
+
+        # Allocate ₹50,000 margin capital
+        margin_capital = 50000.0
+        trades = trader.execute_paper_algo_trades(
+            picks=sample_picks,
+            trade_date_str="2026-10-27",
+            total_capital=margin_capital
+        )
+
+        assert len(trades) == 2
+        # Sum of allocated capital must equal margin_capital
+        assert sum(t["allocated_capital"] for t in trades) == margin_capital
+
+        # With 5x leverage: total exposure should be approx ₹2,50,000 (50k * 5)
+        for t in trades:
+            margin = t["allocated_capital"]
+            px = t["entry_price"]
+            expected_exposure = margin * 5.0
+            # Qty should reflect 5x buying power: ~ (margin * 5) / px
+            expected_qty = int(expected_exposure / px)
+            assert abs(t["qty"] - expected_qty) <= 1
+
+        # Verify portfolio metrics with 5x leverage
+        status = trader.get_automation_status(auto_squareoff_past_3pm=False)
+        pm = status["portfolio_metrics"]
+        assert pm["intraday_leverage"] == 5.0
+        assert pm["total_buying_power"] == 500000.0  # 100k capital * 5x
+        assert pm["capital_utilized"] == 50000.0
+        assert pm["capital_utilization_pct"] == 50.0
+        assert pm["available_cash"] == 50000.0
+        # Gross exposure should be 5x margin utilized (approx ₹2,50,000)
+        assert abs(pm["gross_exposure"] - 250000.0) <= 2000.0
+        assert "5x MIS LEVERAGE" in pm["execution_mode"]
 
     finally:
         if os.path.exists(db_path):
