@@ -23,6 +23,9 @@ test:
 lint:
 	ruff check src/ tests/
 
+run-api:
+	$(PYTHON) run.py
+
 new-strategy:
 	@if [ -z "$(name)" ]; then echo "Error: Specify name, e.g. make new-strategy name=mean_reversion"; exit 1; fi
 	$(PYTHON) scripts/create_strategy.py --name $(name)
