@@ -2357,28 +2357,57 @@ def get_daily_automation_status():
 
 @app.post("/api/automation/top10/run-now", summary="Trigger Morning Screener & Initiate Top 10 Paper Trades On-Demand")
 @app.post("/api/automation/top3/run-now", summary="Trigger Morning Screener & Initiate Top 10 Paper Trades On-Demand")
-def trigger_daily_automation_run(top_n: int = Query(10, ge=1, le=25)):
-    """Runs the morning quantitative screener across NIFTY 500, selects top 10 stocks, and initiates paper algo trades."""
+def trigger_daily_automation_run(
+    top_n: int = Query(10, ge=1, le=25),
+    total_capital: float = Query(100000.0, ge=1000.0, le=50000000.0, description="Total capital (₹) to smartly distribute across trades")
+):
+    """Runs the morning quantitative screener across NIFTY 500, selects top stocks, and smartly distributes capital using Gemini AI."""
     try:
         from src.algodesk.automation.daily_screener_trader import daily_auto_trader
         picks = daily_auto_trader.run_morning_screener_and_pick(top_n=top_n)
-        trades = daily_auto_trader.execute_paper_algo_trades(picks=picks)
+        trades = daily_auto_trader.execute_paper_algo_trades(picks=picks, total_capital=total_capital)
         from src.algodesk.automation.daily_screener_trader import IST
         if not trades and datetime.now(IST).hour >= 15:
             return {
                 "status": "success",
                 "message": f"Screened {len(picks)} stocks. New trades not opened because market is past 3:00 PM IST intraday cutoff.",
                 "picks": picks,
-                "trades": []
+                "trades": [],
+                "total_capital": total_capital
             }
         return {
             "status": "success",
-            "message": f"Successfully screened top stocks across NIFTY 500 and executed {len(trades)} paper trades.",
+            "message": f"Screened top stocks and smartly allocated ₹{total_capital:,.2f} into {len(trades)} trades using Gemini AI.",
             "picks": picks,
-            "trades": trades
+            "trades": trades,
+            "total_capital": total_capital
         }
     except Exception as e:
         logger.error(f"Error running daily automation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/automation/smart-allocation/preview", summary="Preview Gemini Smart Capital Allocation for an Amount X")
+def preview_smart_capital_allocation(
+    total_capital: float = Query(100000.0, ge=1000.0, le=50000000.0),
+    top_n: int = Query(10, ge=1, le=25)
+):
+    """Calculates how Gemini AI distributes ₹X across today's top screener picks with conviction weights and rationale."""
+    try:
+        from src.algodesk.automation.daily_screener_trader import daily_auto_trader
+        from src.algodesk.ai.gemini_client import GeminiClient
+        status_data = daily_auto_trader.get_automation_status()
+        picks = status_data.get("today_picks", [])
+        if not picks:
+            picks = daily_auto_trader.run_morning_screener_and_pick(top_n=top_n)
+        gc = GeminiClient()
+        result = gc.optimize_capital_allocation(total_capital=total_capital, picks=picks[:top_n])
+        return {
+            "status": "success",
+            "allocation": result.model_dump()
+        }
+    except Exception as e:
+        logger.error(f"Error previewing smart allocation: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

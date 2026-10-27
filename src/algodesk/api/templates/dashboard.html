@@ -165,9 +165,16 @@
         APScheduler: 09:16 IST Mon-Fri
       </span>
     </div>
-    <div style="display: flex; gap: 8px; align-items: center;">
+    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+      <div style="display: flex; align-items: center; background: rgba(255,255,255,0.18); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.35);">
+        <span style="font-size: 11px; font-weight: 700; color: #fff; margin-right: 4px;">Capital: ₹</span>
+        <input type="number" id="capital-input" value="100000" min="5000" step="10000" style="width: 85px; padding: 2px 4px; font-size: 11px; font-weight: 800; border: 1px solid #cbd5e1; border-radius: 2px; text-align: right; background: #fff; color: #000;" title="Enter total capital amount to smartly distribute using Gemini AI" />
+      </div>
+      <button onclick="previewSmartAllocation()" id="btn-preview-alloc" class="term-btn" style="background: #e0e7ff; color: #1e1b4b; font-weight: 800; border: 1px solid #818cf8; padding: 4px 10px; font-size: 11px; cursor: pointer;" title="Preview Gemini AI smart sizing weights">
+        🧠 Preview AI Sizing
+      </button>
       <button onclick="runMorningScreenerNow()" id="btn-run-morning-screener" class="term-btn" style="background: #fbbf24; color: #000; font-weight: 800; border: 1px solid #d97706; padding: 4px 10px; font-size: 11px; cursor: pointer;">
-        ⚡ Run Screener & Pick Now
+        ⚡ AI Trade Now
       </button>
       <button onclick="triggerTrailingSlCheck()" id="btn-tick-update" class="term-btn" style="background: #ffffff; color: #000080; font-weight: 700; border: 1px solid #ffffff; padding: 4px 10px; font-size: 11px; cursor: pointer;">
         🔄 SL Check
@@ -489,18 +496,48 @@
   }
 
   async function runMorningScreenerNow() {
+    const capitalVal = parseFloat(document.getElementById('capital-input')?.value || 100000);
     const btn = document.getElementById('btn-run-morning-screener');
     const origText = btn.innerHTML;
-    btn.innerHTML = '⏳ Screening & Trading...';
+    btn.innerHTML = '⏳ AI Distributing...';
     btn.disabled = true;
     try {
-      const res = await fetch('/api/automation/top10/run-now?top_n=10', { method: 'POST' });
+      const res = await fetch(`/api/automation/top10/run-now?top_n=10&total_capital=${capitalVal}`, { method: 'POST' });
       const data = await res.json();
       if (res.ok && data.status === 'success') {
-        alert(`✅ Morning Routine Complete!\nScreened: ${data.picks.length} stocks\nPicks: ${data.picks.map(p => p.symbol + ' (Score ' + p.conviction_score + ')').join(', ')}\nInitiated ${data.trades.length} Paper Trades!`);
+        alert(`✅ Gemini Smart Distribution Complete!\nTotal Capital: ₹${Number(capitalVal).toLocaleString('en-IN')}\nScreened: ${data.picks?.length || 0} stocks\nSmart Trades Executed: ${data.trades?.length || 0}\n${data.message}`);
         await loadAutomationTelemetry();
       } else {
-        alert('⚠️ ' + (data.detail || data.message || 'Error executing morning screener'));
+        alert('⚠️ ' + (data.detail || data.message || 'Error executing smart morning trade'));
+      }
+    } catch (e) {
+      alert('Error: ' + e.message);
+    } finally {
+      btn.innerHTML = origText;
+      btn.disabled = false;
+    }
+  }
+
+  async function previewSmartAllocation() {
+    const capitalVal = parseFloat(document.getElementById('capital-input')?.value || 100000);
+    const btn = document.getElementById('btn-preview-alloc');
+    const origText = btn.innerHTML;
+    btn.innerHTML = '⏳ AI Analyzing...';
+    btn.disabled = true;
+    try {
+      const res = await fetch(`/api/automation/smart-allocation/preview?total_capital=${capitalVal}&top_n=10`);
+      const data = await res.json();
+      if (res.ok && data.status === 'success') {
+        const alloc = data.allocation;
+        let msg = `🧠 Gemini Smart Allocation for ₹${Number(capitalVal).toLocaleString('en-IN')}:\n`;
+        msg += `Engine: ${alloc.model_used}\n`;
+        msg += `Strategy: ${alloc.strategy_overview}\n\n`;
+        alloc.allocations.forEach(a => {
+          msg += `• ${a.symbol}: ₹${Number(a.allocated_capital).toLocaleString('en-IN')} (${a.weight_pct}%) → Qty: ${a.qty} | ${a.rationale}\n`;
+        });
+        alert(msg);
+      } else {
+        alert('⚠️ ' + (data.detail || 'Failed to preview smart allocation'));
       }
     } catch (e) {
       alert('Error: ' + e.message);

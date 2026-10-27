@@ -333,11 +333,14 @@ class DailyIntradayAutoTrader:
     def execute_paper_algo_trades(
         self,
         picks: Optional[List[Dict[str, Any]]] = None,
-        trade_date_str: Optional[str] = None
+        trade_date_str: Optional[str] = None,
+        total_capital: Optional[float] = None
     ) -> List[Dict[str, Any]]:
         """
         Enters paper algo trades for the selected top stocks with Initial SL,
-        Target (+2%), and dynamic Trailing SL parameters. Logs into `daily_intraday_trades`.
+        Target (+2%), and dynamic Trailing SL parameters. Smartly distributes `total_capital`
+        using Gemini API (with quantitative multi-factor risk parity fallback).
+        Logs into `daily_intraday_trades`.
         """
         today_str = trade_date_str or get_ist_date()
         now_ts = get_ist_now_ts()
@@ -375,7 +378,21 @@ class DailyIntradayAutoTrader:
             logger.warning("[PaperTrader] No top picks found to execute trades.")
             return []
 
-        capital_per_trade = self.initial_capital / max(1, len(picks))
+        pool_capital = float(total_capital if total_capital is not None and total_capital > 0 else self.initial_capital)
+
+        # Smart Capital Distribution via Gemini API (with Quant Conviction Risk-Parity fallback)
+        alloc_map = {}
+        try:
+            from src.algodesk.ai.gemini_client import GeminiClient
+            gc = GeminiClient()
+            alloc_res = gc.optimize_capital_allocation(total_capital=pool_capital, picks=picks)
+            if alloc_res and alloc_res.allocations:
+                alloc_map = {item.symbol: item for item in alloc_res.allocations}
+                logger.info(f"🧠 [SmartAllocator] Gemini distributed ₹{pool_capital:,.2f} across {len(picks)} stocks ({alloc_res.model_used}). Strategy: {alloc_res.strategy_overview[:120]}...")
+        except Exception as alloc_err:
+            logger.warning(f"Smart allocation notice ({alloc_err}), falling back to equal weighting.")
+
+        capital_per_trade = pool_capital / max(1, len(picks))
         executed_trades = []
 
         with self._lock:
@@ -385,9 +402,22 @@ class DailyIntradayAutoTrader:
             for stock in picks:
                 sym = stock["symbol"]
                 entry_price = float(stock["price"])
-                qty = max(1, int(capital_per_trade / entry_price))
                 initial_sl = float(stock.get("initial_sl") or (entry_price * 0.99))
                 target = float(stock.get("target") or (entry_price * 1.02))
+
+                smart_item = alloc_map.get(sym)
+                if smart_item:
+                    allocated_for_trade = round(float(smart_item.allocated_capital), 2)
+                    qty = max(1, int(smart_item.qty))
+                    entry_note = f"Smart AI Sizing: ₹{allocated_for_trade:,.2f} ({smart_item.weight_pct:.1f}%) | {smart_item.rationale}"
+                    weight_val = smart_item.weight_pct
+                    rationale_val = smart_item.rationale
+                else:
+                    qty = max(1, int(capital_per_trade / entry_price))
+                    allocated_for_trade = round(qty * entry_price, 2)
+                    entry_note = f"Standard sizing: ₹{allocated_for_trade:,.2f} | 1% SL & 2% Target"
+                    weight_val = round((allocated_for_trade / pool_capital) * 100.0, 1)
+                    rationale_val = "Equal distribution"
 
                 # Check if trade already exists for today
                 cur.execute("SELECT id FROM daily_intraday_trades WHERE trade_date = ? AND symbol = ?", (today_str, sym))
@@ -403,7 +433,7 @@ class DailyIntradayAutoTrader:
                     "price": entry_price,
                     "sl": initial_sl,
                     "target": target,
-                    "note": "Paper trade initialized with 1% SL and 2% Target (Trailing mode enabled)"
+                    "note": entry_note
                 }])
 
                 cur.execute("""
@@ -418,7 +448,7 @@ class DailyIntradayAutoTrader:
                     sym,
                     "BUY",
                     qty,
-                    round(qty * entry_price, 2),
+                    allocated_for_trade,
                     now_ts,
                     entry_price,
                     initial_sl,
@@ -443,6 +473,9 @@ class DailyIntradayAutoTrader:
                     "trade_id": trade_id,
                     "symbol": sym,
                     "qty": qty,
+                    "allocated_capital": allocated_for_trade,
+                    "weight_pct": weight_val,
+                    "ai_rationale": rationale_val,
                     "entry_price": entry_price,
                     "initial_sl": initial_sl,
                     "current_sl": initial_sl,

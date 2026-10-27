@@ -162,3 +162,39 @@ def test_3pm_force_squareoff_rule():
         if os.path.exists(db_path):
             os.remove(db_path)
 
+
+def test_smart_capital_allocation_and_execution():
+    """Verifies that an allocated amount X is smartly distributed across picks using Gemini/Quant engine."""
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        db_path = tmp.name
+
+    try:
+        trader = DailyIntradayAutoTrader(db_path=db_path)
+        sample_picks = [
+            {"symbol": "ALPHA", "price": 1000.0, "conviction_score": 92.0, "rvol": 2.5, "sector": "IT", "strategy_name": "Momentum"},
+            {"symbol": "BETA", "price": 500.0, "conviction_score": 82.0, "rvol": 1.8, "sector": "Banking", "strategy_name": "Breakout"},
+            {"symbol": "GAMMA", "price": 250.0, "conviction_score": 72.0, "rvol": 1.1, "sector": "Pharma", "strategy_name": "Volume_Surge"},
+        ]
+
+        total_capital = 150000.0  # ₹1.5 Lakhs
+        trades = trader.execute_paper_algo_trades(
+            picks=sample_picks,
+            trade_date_str="2026-10-27",
+            total_capital=total_capital
+        )
+
+        assert len(trades) == 3
+        total_allocated = sum(t["allocated_capital"] for t in trades)
+        assert abs(total_allocated - total_capital) < 1.0  # Within ₹1 rounding
+
+        # Higher conviction stock (ALPHA) should receive more capital than lower conviction (GAMMA)
+        alpha_trade = next(t for t in trades if t["symbol"] == "ALPHA")
+        gamma_trade = next(t for t in trades if t["symbol"] == "GAMMA")
+        assert alpha_trade["allocated_capital"] > gamma_trade["allocated_capital"]
+        assert alpha_trade["weight_pct"] > gamma_trade["weight_pct"]
+        assert "ai_rationale" in alpha_trade
+    finally:
+        if os.path.exists(db_path):
+            os.remove(db_path)
+
+

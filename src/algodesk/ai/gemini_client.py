@@ -54,6 +54,21 @@ class StrategyDraftResult(BaseModel):
     yaml_config: str
 
 
+class SmartAllocationItem(BaseModel):
+    symbol: str
+    weight_pct: float
+    allocated_capital: float
+    qty: int
+    rationale: str
+
+
+class SmartCapitalAllocationResult(BaseModel):
+    total_capital: float
+    strategy_overview: str
+    allocations: List[SmartAllocationItem]
+    model_used: str = "gemini-3.5-flash"
+
+
 # -------------------------------------------------------------------------
 # Static Safety Checker for Strategy Code
 # -------------------------------------------------------------------------
@@ -154,6 +169,158 @@ class GeminiClient:
         except Exception as e:
             logger.warning(f"Gemini trade review failed: {e}")
             return None
+
+    def optimize_capital_allocation(
+        self,
+        total_capital: float,
+        picks: List[Dict[str, Any]],
+        risk_profile: str = "BALANCED"
+    ) -> SmartCapitalAllocationResult:
+        """
+        Smartly distributes `total_capital` across `picks` using Gemini API.
+        Analyzes conviction score, relative volume (RVOL), sector diversification,
+        and risk-reward ratio. Falls back seamlessly to smart quantitative conviction sizing
+        if the Gemini API is offline or quota-limited.
+        """
+        if not picks:
+            return SmartCapitalAllocationResult(
+                total_capital=total_capital,
+                strategy_overview="No picks provided for allocation.",
+                allocations=[],
+                model_used="none"
+            )
+
+        if not self.is_available():
+            logger.info("Gemini API not available/configured. Utilizing Quant Conviction Risk-Parity Allocation.")
+            return self._quant_conviction_fallback(total_capital, picks)
+
+        prompt = (
+            f"You are a Senior Quantitative Portfolio Manager and Risk Officer.\n"
+            f"You have an intraday capital pool of ₹{total_capital:,.2f}.\n"
+            f"Distribute this exact capital smartly across the following {len(picks)} selected intraday stocks.\n\n"
+            f"PORTFOLIO STOCKS IN PLAY:\n"
+        )
+        for p in picks:
+            sym = p.get("symbol", "")
+            sec = p.get("sector", "Equities")
+            px = float(p.get("price", 100.0))
+            score = float(p.get("conviction_score", p.get("score", 75.0)))
+            rvol = float(p.get("rvol", 1.0))
+            strat = p.get("strategy_name", "Breakout")
+            sl = float(p.get("initial_sl", px * 0.99))
+            tgt = float(p.get("target", p.get("target_price", px * 1.02)))
+            prompt += (
+                f"- Symbol: {sym} | Sector: {sec} | Price: ₹{px:.2f} | "
+                f"Conviction Score: {score:.1f} | RVOL: {rvol:.2f}x | Strategy: {strat} | "
+                f"Initial SL: ₹{sl:.2f} | Target: ₹{tgt:.2f}\n"
+            )
+
+        prompt += (
+            f"\nRULES FOR ALLOCATION:\n"
+            f"1. Total allocated capital across all stocks MUST sum to exactly ₹{total_capital:,.2f} (weights sum to 100.0%).\n"
+            f"2. Conviction-weighted sizing: Stocks with higher conviction scores and higher RVOL should receive larger allocations.\n"
+            f"3. Risk parity & bounds: No single stock should exceed 25% of capital. Every stock must receive at least 4% of capital.\n"
+            f"4. Sector diversification: Do not overload a single sector.\n"
+            f"5. Calculate exact suggested qty = max(1, floor(allocated_capital / price)).\n"
+            f"6. Respond ONLY with a valid JSON object matching this schema:\n"
+            f"{{\n"
+            f'  "total_capital": {total_capital},\n'
+            f'  "strategy_overview": "Summary of portfolio risk distribution and weighting rationale",\n'
+            f'  "allocations": [\n'
+            f'    {{\n'
+            f'      "symbol": "SYMBOL",\n'
+            f'      "weight_pct": 14.5,\n'
+            f'      "allocated_capital": 14500.0,\n'
+            f'      "qty": 10,\n'
+            f'      "rationale": "Clear concise 1-sentence rationale for this sizing"\n'
+            f'    }}\n'
+            f'  ]\n'
+            f"}}\n"
+        )
+
+        try:
+            raw_json = self._call_gemini(self.fast_model, prompt)
+            self._daily_calls_count += 1
+            data = json.loads(raw_json)
+            alloc_items = []
+            for item in data.get("allocations", []):
+                alloc_items.append(SmartAllocationItem(**item))
+            if alloc_items:
+                return SmartCapitalAllocationResult(
+                    total_capital=total_capital,
+                    strategy_overview=data.get("strategy_overview", "Gemini AI Portfolio Allocation"),
+                    allocations=alloc_items,
+                    model_used=self.fast_model
+                )
+        except Exception as e:
+            logger.warning(f"Gemini smart capital allocation call notice: {e}. Falling back to quant conviction engine.")
+
+        return self._quant_conviction_fallback(total_capital, picks)
+
+    def _quant_conviction_fallback(
+        self,
+        total_capital: float,
+        picks: List[Dict[str, Any]]
+    ) -> SmartCapitalAllocationResult:
+        """
+        Mathematical Quant Conviction Fallback:
+        Weights positions proportional to (conviction_score^1.3 * rvol^0.5),
+        clamped between 4% and 25%, normalized to exactly 100%.
+        """
+        if not picks:
+            return SmartCapitalAllocationResult(
+                total_capital=total_capital,
+                strategy_overview="No picks available",
+                allocations=[],
+                model_used="quant-engine"
+            )
+
+        raw_scores = []
+        for p in picks:
+            score = max(10.0, float(p.get("conviction_score", p.get("score", 70.0))))
+            rvol = max(0.8, min(float(p.get("rvol", 1.0)), 3.0))
+            raw_weight = (score ** 1.3) * (rvol ** 0.5)
+            raw_scores.append(raw_weight)
+
+        total_raw = sum(raw_scores) or 1.0
+        weights = [raw / total_raw for raw in raw_scores]
+
+        # Clamp between 4% (0.04) and 25% (0.25)
+        clamped = [max(0.04, min(w, 0.25)) for w in weights]
+        norm_sum = sum(clamped)
+        final_weights = [round(w / norm_sum, 4) for w in clamped]
+
+        # Ensure sum is 1.0 by adjusting top pick
+        diff = 1.0 - sum(final_weights)
+        top_idx = max(range(len(final_weights)), key=lambda i: final_weights[i])
+        final_weights[top_idx] = round(final_weights[top_idx] + diff, 4)
+
+        allocations = []
+        for p, w in zip(picks, final_weights):
+            sym = p.get("symbol", "")
+            px = max(1.0, float(p.get("price", 100.0)))
+            allocated = round(total_capital * w, 2)
+            qty = max(1, int(allocated / px))
+            score = float(p.get("conviction_score", p.get("score", 75.0)))
+            rvol = float(p.get("rvol", 1.0))
+            rationale = (
+                f"Conviction-weighted risk parity ({w * 100.0:.1f}%): "
+                f"Score {score:.1f}, RVOL {rvol:.2f}x in {p.get('sector', 'Equities')}."
+            )
+            allocations.append(SmartAllocationItem(
+                symbol=sym,
+                weight_pct=round(w * 100.0, 2),
+                allocated_capital=allocated,
+                qty=qty,
+                rationale=rationale
+            ))
+
+        return SmartCapitalAllocationResult(
+            total_capital=total_capital,
+            strategy_overview=f"Quant Conviction Multi-Factor Allocation across {len(picks)} positions.",
+            allocations=allocations,
+            model_used="quant-conviction-fallback"
+        )
 
     def draft_strategy(self, user_idea: str) -> Tuple[bool, str, Optional[Path], Optional[Path]]:
         """
