@@ -1,40 +1,42 @@
 #!/usr/bin/env python3
 """
-AlgoDesk MarketX - Unified Application Launcher & CLI Controller
-----------------------------------------------------------------
-Launches the FastAPI trading workstation, runs autonomous screeners,
-executes smart capital allocation trades (5x MIS leverage), and checks system health.
+AlgoDesk MarketX - Local Server Launcher
+========================================
+Starts the FastAPI local development server for the AlgoDesk MarketX dashboard.
 
 Usage:
-    # 1. Start Web Dashboard (default)
-    python run.py
-    python run.py --port 8500
-    python run.py --host 0.0.0.0 --port 8500 --no-reload
-
-    # 2. Run Autonomous Morning Screener & Pick Stocks
-    python run.py --screen --top-n 10
-
-    # 3. Execute Smart AI Paper Trades (with 5x leverage)
-    python run.py --trade --capital 100000
-
-    # 4. Square-Off Open Positions
-    python run.py --square-off
-
-    # 5. Run Full End-to-End Simulation
-    python run.py --simulate
-
-    # 6. Check System & API Health
-    python run.py --check
-
-    # 7. Export Trade History to CSV
-    python run.py --export-csv all
+    python3 run.py                  # Start local server on http://localhost:8000
+    python3 run.py --port 8500      # Custom port
+    python3 run.py --host 0.0.0.0   # Allow LAN/remote access
+    python3 run.py --no-reload      # Disable hot-reloading (production/PM2 mode)
+    python3 run.py --open           # Open browser automatically
 """
 
-import argparse
 import os
 import sys
 from pathlib import Path
 
+# ---------------------------------------------------------------------------
+# 1. Automatic Virtual Environment Bootstrap
+# If running with system python, auto-switch to .venv if available
+# ---------------------------------------------------------------------------
+PROJECT_ROOT = Path(__file__).resolve().parent
+
+if sys.prefix == sys.base_prefix:
+    for venv_candidate in [".venv", "venv", "stock_venv"]:
+        venv_python = PROJECT_ROOT / venv_candidate / "bin" / "python"
+        if venv_python.is_file() and os.access(venv_python, os.X_OK):
+            # Re-execute this script with the virtual environment python
+            os.execv(str(venv_python), [str(venv_python)] + sys.argv)
+
+# Ensure project root is in sys.path
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+import argparse
+import threading
+import time
+import webbrowser
 
 BANNER = r"""
 ========================================================================
@@ -47,16 +49,37 @@ BANNER = r"""
 """
 
 
-def run_server(host: str, port: int, reload: bool, workers: int = 1):
+def open_browser_delayed(url: str, delay: float = 1.2):
+    """Opens default browser after server starts."""
+    def _open():
+        time.sleep(delay)
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
+    threading.Thread(target=_open, daemon=True).start()
+
+
+def start_server(host: str, port: int, reload: bool, workers: int = 1, open_browser: bool = False):
     """Starts the FastAPI Web Dashboard & REST API server."""
     print(BANNER)
-    print(f"🚀 Launching AlgoDesk MarketX Web Dashboard...")
-    print(f"   • URL:           http://{host}:{port}")
-    print(f"   • Documentation: http://{host}:{port}/docs")
-    print(f"   • Auto-Reload:   {'Enabled' if reload and workers == 1 else 'Disabled'}")
-    print(f"   • Workers:       {workers}")
-    print(f"   • Leverage:      5.0x MIS Intraday Margin")
-    print(f"   • Mode:          PAPER (Autonomous AI Algo)\n")
+    
+    display_host = "localhost" if host in ("127.0.0.1", "0.0.0.0") else host
+    local_url = f"http://{display_host}:{port}"
+    docs_url = f"http://{display_host}:{port}/docs"
+    
+    print("🚀 Starting AlgoDesk MarketX Local Server...")
+    print(f"   👉 Web Dashboard: {local_url}")
+    print(f"   👉 REST API Docs: {docs_url}")
+    print(f"   • Host:           {host}")
+    print(f"   • Port:           {port}")
+    print(f"   • Auto-Reload:    {'Enabled (hot-reload on file save)' if reload and workers == 1 else 'Disabled'}")
+    print(f"   • Leverage:       5.0x Intraday MIS Margin")
+    print(f"   • Python:         {sys.executable}")
+    print("   • Exit:           Press Ctrl+C to stop\n" + "-" * 72 + "\n")
+
+    if open_browser:
+        open_browser_delayed(local_url)
 
     import uvicorn
     uvicorn.run(
@@ -65,9 +88,13 @@ def run_server(host: str, port: int, reload: bool, workers: int = 1):
         port=port,
         reload=reload and workers == 1,
         workers=workers if not reload else None,
-        log_level="info"
+        log_level="info",
     )
 
+
+# ---------------------------------------------------------------------------
+# CLI Helpers (Screener, Paper Trading, Diagnostics)
+# ---------------------------------------------------------------------------
 
 def run_screener(top_n: int = 10):
     """Runs the autonomous morning screener and prints ranked stock picks."""
@@ -120,7 +147,7 @@ def run_trades(capital: float, top_n: int = 10):
         tgt = f"₹{t.get('target_price', 0):.2f}"
         print(f"{sym:<14} | {qty:<9} | {margin:<13} | {exp:<16} | {entry:<10} | {sl:<9} | {tgt:<10}")
     print("=" * 96)
-    print(f"✅ Executed {len(trades)} paper trades. Active monitoring armed with dynamic trailing SL.")
+    print(f"✅ Executed {len(trades)} paper trades with 5x MIS leverage.")
 
 
 def run_square_off():
@@ -154,10 +181,8 @@ def run_check():
     """Validates local environment, SQLite DB, Kite credentials, and Gemini API keys."""
     print(BANNER)
     print("🩺 Running AlgoDesk System & API Health Checks...\n")
-    # 1. Python & Core Environment
     print(f"   [1/4] Python Version:        {sys.version.split()[0]} ({sys.executable})")
 
-    # 2. SQLite Database
     from src.algodesk.automation.daily_screener_trader import daily_auto_trader
     db_file = daily_auto_trader.db_path
     if os.path.exists(db_file):
@@ -166,7 +191,6 @@ def run_check():
     else:
         print(f"   [2/4] SQLite Database:       INITIALIZED ({db_file})")
 
-    # 3. Gemini API Client
     from src.algodesk.ai.gemini_client import GeminiClient
     gc = GeminiClient()
     if gc.is_available():
@@ -174,7 +198,6 @@ def run_check():
     else:
         print("   [3/4] Gemini AI Engine:      OFFLINE / Key not configured (Quant Fallback Active)")
 
-    # 4. Kite Connect Integration
     from src.algodesk.config import settings
     if settings.active_kite_token and settings.kite_api_key:
         print(f"   [4/4] Zerodha Kite Connect:  CONFIGURED (API Key: {settings.kite_api_key[:4]}***)")
@@ -196,26 +219,33 @@ def run_export_csv(date_str: str):
 
 def main():
     default_port = int(os.getenv("PORT", 8000))
-    default_host = os.getenv("HOST", "0.0.0.0")
+    default_host = os.getenv("HOST", "127.0.0.1")
 
-    parser = argparse.ArgumentParser(description="AlgoDesk MarketX Autonomous Suite Launcher")
-    parser.add_argument("--host", type=str, default=default_host, help=f"Host IP address to bind to (default: {default_host})")
-    parser.add_argument("--port", type=int, default=default_port, help=f"Port to run FastAPI server on (default: {default_port})")
-    parser.add_argument("--no-reload", action="store_true", help="Disable auto-reload mode")
-    parser.add_argument("--workers", type=int, default=1, help="Number of uvicorn worker processes (default: 1)")
+    parser = argparse.ArgumentParser(
+        description="AlgoDesk MarketX - Local Server Launcher & Control Suite",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    # Server arguments
+    parser.add_argument("--host", type=str, default=default_host, help="Host IP address to bind to (e.g. 127.0.0.1 or 0.0.0.0)")
+    parser.add_argument("--port", type=int, default=default_port, help="Port to run FastAPI server on")
+    parser.add_argument("--no-reload", action="store_true", help="Disable auto-reload mode (production/PM2 mode)")
+    parser.add_argument("--reload", action="store_true", help="Explicitly enable auto-reload mode")
+    parser.add_argument("--workers", type=int, default=1, help="Number of uvicorn worker processes")
+    parser.add_argument("--open", "-b", action="store_true", help="Automatically open browser to the dashboard URL")
 
-    # CLI Actions
+    # CLI Utility arguments (optional)
+    parser.add_argument("--check", action="store_true", help="Run system diagnostics and API health check")
     parser.add_argument("--screen", action="store_true", help="Run morning stock screener & print picks")
     parser.add_argument("--trade", action="store_true", help="Execute smart AI morning trades with 5x leverage")
     parser.add_argument("--capital", type=float, default=100000.0, help="Margin capital for trading (default: 100000.0)")
-    parser.add_argument("--top-n", type=int, default=10, help="Number of top stocks to pick/trade (default: 10)")
+    parser.add_argument("--top-n", type=int, default=10, help="Number of top stocks to pick/trade")
     parser.add_argument("--square-off", action="store_true", help="Force square-off all active open positions")
     parser.add_argument("--simulate", action="store_true", help="Run end-to-end simulation cycle")
-    parser.add_argument("--check", action="store_true", help="Run system diagnostics and API health check")
     parser.add_argument("--export-csv", type=str, metavar="DATE", help="Export trade history to CSV ('all' or 'YYYY-MM-DD')")
 
     args = parser.parse_args()
 
+    # Route to sub-commands if requested, else default to starting the local server
     if args.check:
         run_check()
     elif args.screen:
@@ -229,11 +259,14 @@ def main():
     elif args.export_csv:
         run_export_csv(date_str=args.export_csv)
     else:
-        run_server(
+        # Default behavior: Start local server
+        reload_enabled = not args.no_reload
+        start_server(
             host=args.host,
             port=args.port,
-            reload=not args.no_reload,
-            workers=args.workers
+            reload=reload_enabled,
+            workers=args.workers,
+            open_browser=args.open,
         )
 
 
