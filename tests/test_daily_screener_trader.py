@@ -270,6 +270,27 @@ def test_datewise_segregation_and_today_summary():
         assert yest_sum["net_pnl"] == -6.0  # 12.0 - 18.0
         assert status["historical_dates"] == [yesterday_str]
 
+        # 4. Portfolio metrics verification
+        pm = status["portfolio_metrics"]
+        assert pm["simulated_capital"] == 100000.0
+        assert pm["active_positions_count"] == 1  # TODAY_OPEN
+        assert pm["capital_utilized"] == 15000.0  # TODAY_OPEN allocated capital
+        assert pm["capital_utilization_pct"] == 15.0
+        assert pm["available_cash"] == 100000.0 - 15000.0 + 40.0  # 85,040.0
+
+        # 5. Test close_single_position
+        closed_res = trader.close_single_position("TODAY_OPEN")
+        assert closed_res is not None
+        assert closed_res["symbol"] == "TODAY_OPEN"
+        assert closed_res["action"] == "CLOSED"
+        assert closed_res["exit_reason"] == "MANUAL_SQUAREOFF"
+
+        # Verify no open trades remain
+        st_after = trader.get_automation_status()
+        assert st_after["open_trades_count"] == 0
+        assert st_after["portfolio_metrics"]["active_positions_count"] == 0
+        assert st_after["portfolio_metrics"]["capital_utilized"] == 0.0
+
     finally:
         if os.path.exists(db_path):
             os.remove(db_path)

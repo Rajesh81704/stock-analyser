@@ -879,6 +879,29 @@ class DailyIntradayAutoTrader:
         dates_available = sorted(list(trades_by_date.keys()), reverse=True)
         historical_dates = [d for d in dates_available if d != today_str]
 
+        # Capital Utilization and Unified Portfolio Metrics
+        base_simulated_capital = 100000.0
+        open_capital_utilized = sum(float(t.get("allocated_capital") or (t.get("qty", 0) * t.get("entry_price", 0))) for t in open_trades)
+        unrealized_pnl = sum(float(t.get("net_pnl") or t.get("gross_pnl") or 0.0) for t in open_trades)
+        today_realized_net_pnl = float(today_summary.get("net_pnl") or 0.0)
+
+        available_cash = max(0.0, round(base_simulated_capital - open_capital_utilized + today_realized_net_pnl, 2))
+        portfolio_equity = round(base_simulated_capital + today_realized_net_pnl + unrealized_pnl, 2)
+        capital_utilization_pct = round((open_capital_utilized / base_simulated_capital * 100.0), 1) if base_simulated_capital > 0 else 0.0
+
+        portfolio_metrics = {
+            "simulated_capital": base_simulated_capital,
+            "capital_utilized": round(open_capital_utilized, 2),
+            "capital_utilization_pct": capital_utilization_pct,
+            "available_cash": available_cash,
+            "portfolio_equity": portfolio_equity,
+            "active_positions_count": len(open_trades),
+            "max_positions_allowed": 10,
+            "unrealized_pnl": round(unrealized_pnl, 2),
+            "today_realized_net_pnl": today_realized_net_pnl,
+            "execution_mode": "PAPER (AI ALGO)"
+        }
+
         conn.close()
 
         return {
@@ -889,6 +912,7 @@ class DailyIntradayAutoTrader:
             "today_picks": today_picks,
             "open_trades_count": len(open_trades),
             "open_trades": open_trades,
+            "portfolio_metrics": portfolio_metrics,
             "today_trades_count": len(today_trades),
             "today_trades": today_trades,
             "today_summary": today_summary,
@@ -906,6 +930,114 @@ class DailyIntradayAutoTrader:
                 "total_brokerage_paid": round(total_brokerage, 2),
             }
         }
+
+    def close_single_position(self, identifier: Any, exit_reason: str = "MANUAL_SQUAREOFF") -> Optional[Dict[str, Any]]:
+        """Closes a specific open intraday trade by ID or symbol at current market/watermark price."""
+        conn = self._get_connection()
+        cur = conn.cursor()
+        if str(identifier).isdigit():
+            cur.execute("""
+                SELECT id, trade_date, symbol, side, qty, allocated_capital,
+                       entry_time, entry_price, initial_sl, highest_price, current_sl,
+                       target_price, price_history, status
+                FROM daily_intraday_trades
+                WHERE id = ? AND status = 'OPEN'
+            """, (int(identifier),))
+        else:
+            cur.execute("""
+                SELECT id, trade_date, symbol, side, qty, allocated_capital,
+                       entry_time, entry_price, initial_sl, highest_price, current_sl,
+                       target_price, price_history, status
+                FROM daily_intraday_trades
+                WHERE (symbol = ? OR symbol = ?) AND status = 'OPEN'
+                ORDER BY id DESC LIMIT 1
+            """, (str(identifier), f"{identifier}.NS"))
+        row = cur.fetchone()
+        conn.close()
+
+        if not row:
+            return None
+
+        trade = dict(row)
+        sym = trade["symbol"]
+        qty = trade["qty"]
+        entry_p = float(trade["entry_price"])
+        highest_p = float(trade["highest_price"])
+        curr_sl = float(trade["current_sl"])
+
+        curr_p = highest_p
+        try:
+            from src.data_loader import KITE_API_KEY, KITE_ACCESS_TOKEN
+            if KITE_API_KEY and KITE_ACCESS_TOKEN:
+                from kiteconnect import KiteConnect
+                kc = KiteConnect(api_key=KITE_API_KEY)
+                kc.set_access_token(KITE_ACCESS_TOKEN)
+                inst = f"NSE:{sym.replace('.NS', '')}"
+                q = kc.quote([inst])
+                if q and inst in q:
+                    lp = float(q[inst].get("last_price") or 0.0)
+                    if lp > 0:
+                        curr_p = lp
+        except Exception:
+            pass
+
+        exit_price = round(curr_p, 2)
+        gross_pnl = round(qty * (exit_price - entry_p), 2)
+        cost_breakdown = self.cost_calculator.calculate_roundtrip(
+            side="LONG",
+            qty=qty,
+            raw_entry_price=entry_p,
+            raw_exit_price=exit_price
+        )
+        brokerage_taxes = round(cost_breakdown.total_costs, 2)
+        net_pnl = round(gross_pnl - brokerage_taxes, 2)
+        ret_pct = round((net_pnl / trade["allocated_capital"]) * 100.0, 2) if trade["allocated_capital"] > 0 else 0.0
+
+        now_ts = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
+        history = json.loads(trade["price_history"] or "[]")
+        history.append({
+            "time": now_ts,
+            "event": "MANUAL_CLOSE",
+            "exit_price": exit_price,
+            "exit_reason": exit_reason,
+            "gross_pnl": gross_pnl,
+            "brokerage_taxes": brokerage_taxes,
+            "net_pnl": net_pnl,
+            "return_pct": ret_pct
+        })
+
+        with self._lock:
+            conn = self._get_connection()
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE daily_intraday_trades
+                SET exit_time = ?, exit_price = ?, exit_reason = ?,
+                    highest_price = ?, current_sl = ?, gross_pnl = ?,
+                    brokerage_and_taxes = ?, net_pnl = ?, return_pct = ?,
+                    status = 'CLOSED', price_history = ?, updated_at = ?
+                WHERE id = ?
+            """, (
+                now_ts, exit_price, exit_reason,
+                max(highest_p, exit_price), curr_sl, gross_pnl,
+                brokerage_taxes, net_pnl, ret_pct,
+                json.dumps(history), now_ts, trade["id"]
+            ))
+            conn.commit()
+            conn.close()
+
+        res = {
+            "trade_id": trade["id"],
+            "symbol": sym,
+            "action": "CLOSED",
+            "exit_reason": exit_reason,
+            "exit_price": exit_price,
+            "gross_pnl": gross_pnl,
+            "brokerage_taxes": brokerage_taxes,
+            "net_pnl": net_pnl,
+            "return_pct": ret_pct
+        }
+        logger.info(f"🛑 [PaperTrader] Trade Closed manually for {sym}: Net PnL ₹{net_pnl:+.2f}")
+        return res
 
     # -------------------------------------------------------------------------
     # 5. On-Demand Simulation / Test Workflow

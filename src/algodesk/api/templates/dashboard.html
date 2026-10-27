@@ -73,81 +73,111 @@
 <div class="algo-metric-banner">
   <div class="algo-stat-cell">
     <span class="stat-lbl">Simulated Capital</span>
-    <span class="stat-val">₹1,00,000.00</span>
+    <span class="stat-val" id="kpi-simulated-capital">₹{{ "{:,.2f}".format(portfolio_metrics.simulated_capital if portfolio_metrics else 100000.0) }}</span>
   </div>
   <div class="algo-stat-cell">
-    <span class="stat-lbl">Net Portfolio Equity</span>
-    <span class="stat-val">₹{{ "{:,.2f}".format(portfolio.equity) }}</span>
+    <span class="stat-lbl">Capital Utilized</span>
+    <span class="stat-val" id="kpi-capital-utilized" style="color: #2563eb;">₹{{ "{:,.2f}".format(portfolio_metrics.capital_utilized if portfolio_metrics else 0.0) }} ({{ portfolio_metrics.capital_utilization_pct if portfolio_metrics else 0.0 }}%)</span>
   </div>
   <div class="algo-stat-cell">
     <span class="stat-lbl">Available Cash</span>
-    <span class="stat-val">₹{{ "{:,.2f}".format(portfolio.cash) }}</span>
+    <span class="stat-val" id="kpi-available-cash">₹{{ "{:,.2f}".format(portfolio_metrics.available_cash if portfolio_metrics else portfolio.cash) }}</span>
+  </div>
+  <div class="algo-stat-cell">
+    <span class="stat-lbl">Net Portfolio Equity</span>
+    <span class="stat-val" id="kpi-portfolio-equity" style="color: {% if (portfolio_metrics.portfolio_equity if portfolio_metrics else portfolio.equity) >= (portfolio_metrics.simulated_capital if portfolio_metrics else 100000.0) %}#059669{% else %}#cc0000{% endif %};">
+      ₹{{ "{:,.2f}".format(portfolio_metrics.portfolio_equity if portfolio_metrics else portfolio.equity) }}
+    </span>
   </div>
   <div class="algo-stat-cell">
     <span class="stat-lbl">Active Positions</span>
-    <span class="stat-val" style="color: {% if portfolio.positions|length > 0 %}#059669{% else %}#000000{% endif %};">
-      {{ portfolio.positions|length }} / {{ risk_limits.max_open_positions }}
+    <span class="stat-val" id="kpi-active-positions" style="color: {% if (auto_open_trades|length + portfolio.positions|length) > 0 %}#059669{% else %}#000000{% endif %};">
+      {{ auto_open_trades|length if auto_open_trades else portfolio.positions|length }} / {{ portfolio_metrics.max_positions_allowed if portfolio_metrics else 10 }}
     </span>
   </div>
   <div class="algo-stat-cell">
     <span class="stat-lbl">Execution Mode</span>
-    <span class="stat-val" style="font-size: 14px; color: #000080;">
-      {{ mode }}
+    <span class="stat-val" style="font-size: 13px; color: #000080;">
+      PAPER (AI ALGO)
     </span>
   </div>
 </div>
 
 <!-- Active Positions Table -->
 <div class="algo-desk-card">
-  <div class="algo-desk-card-header">
-    <span>📋 Active Open Positions (Intraday MIS)</span>
-    <span style="font-size: 10px; color: #666;">Auto square-off at 15:15 IST</span>
+  <div class="algo-desk-card-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <span>📋 Active Open Positions (Intraday MIS)</span>
+      <span id="top-open-count-badge" class="badge-signal-bullish" style="background: {% if (auto_open_trades|length + portfolio.positions|length) > 0 %}#059669{% else %}#64748b{% endif %}; color: #fff; font-size: 10px; padding: 2px 7px; border-radius: 3px;">
+        {{ auto_open_trades|length if auto_open_trades else portfolio.positions|length }} Active
+      </span>
+    </div>
+    <span style="font-size: 10px; color: #64748b;">Strict auto square-off at 15:00 IST (Market Cutoff)</span>
   </div>
 
-  <div class="table-container-box" style="margin: 0;">
-    <table class="terminal-table">
-      <thead>
+  <div class="table-container-box" style="margin: 0; max-height: 250px; overflow-y: auto;">
+    <table class="terminal-table" style="font-size: 10.5px;">
+      <thead style="position: sticky; top: 0; background: #f8fafc; z-index: 1;">
         <tr>
           <th>Symbol</th>
           <th>Side</th>
           <th>Qty</th>
+          <th>Allocated Capital</th>
           <th>Entry Price</th>
           <th>Current Price</th>
           <th>Unrealized P&L</th>
-          <th>Stop Loss</th>
+          <th>Trailed Stop Loss</th>
           <th>Target</th>
           <th>Action</th>
         </tr>
       </thead>
-      <tbody>
-        {% if portfolio.positions %}
-          {% for sym, pos in portfolio.positions.items() %}
-            <tr>
-              <td style="font-weight: 800;">{{ sym }}</td>
-              <td>
-                <span class="{% if pos.qty > 0 %}change-green{% else %}change-red{% endif %}" style="font-weight: 700;">
-                  {% if pos.qty > 0 %}BUY (LONG){% else %}SELL (SHORT){% endif %}
-                </span>
+      <tbody id="top-active-positions-tbody">
+        {% if auto_open_trades %}
+          {% for t in auto_open_trades %}
+            <tr style="background: #fffbeb;">
+              <td style="font-weight: 800; color: #000080;">{{ t.symbol }}</td>
+              <td><span style="font-weight: 700; color: #059669;">BUY</span></td>
+              <td style="font-weight: 700;">{{ t.qty }}</td>
+              <td style="font-family: var(--font-mono); color: #475569;">₹{{ "{:,.2f}".format(t.allocated_capital or (t.qty * t.entry_price)) }}</td>
+              <td>₹{{ "%.2f"|format(t.entry_price) }}</td>
+              <td style="font-family: var(--font-mono); color: #1e293b;">₹{{ "%.2f"|format(t.highest_price or t.entry_price) }}</td>
+              <td style="font-weight: 800; color: {% if (t.net_pnl or 0) >= 0 %}#059669{% else %}#cc0000{% endif %};">
+                {% if (t.net_pnl or 0) >= 0 %}+{% endif %}₹{{ "%.2f"|format(t.net_pnl or 0.0) }}
               </td>
-              <td>{{ pos.qty|abs }}</td>
+              <td style="font-family: var(--font-mono); font-weight: 700; color: #b91c1c;">₹{{ "%.2f"|format(t.current_sl or t.initial_sl) }}</td>
+              <td style="font-family: var(--font-mono); font-weight: 700; color: #059669;">₹{{ "%.2f"|format(t.target_price) }}</td>
+              <td>
+                <button onclick="closeOpenTrade('{{ t.id }}', '{{ t.symbol }}')" class="term-btn" style="background:#fee2e2; color:#cc0000; border-color:#cc0000; padding: 2px 7px; font-size: 10px; font-weight: 700; cursor: pointer;">
+                  🛑 Close
+                </button>
+              </td>
+            </tr>
+          {% endfor %}
+        {% elif portfolio.positions %}
+          {% for sym, pos in portfolio.positions.items() %}
+            <tr style="background: #fffbeb;">
+              <td style="font-weight: 800; color: #000080;">{{ sym }}</td>
+              <td><span style="font-weight: 700; color: #059669;">BUY (LONG)</span></td>
+              <td style="font-weight: 700;">{{ pos.qty|abs }}</td>
+              <td style="font-family: var(--font-mono); color: #475569;">₹{{ "{:,.2f}".format(pos.qty * pos.entry_price) }}</td>
               <td>₹{{ "%.2f"|format(pos.entry_price) }}</td>
               <td>₹{{ "%.2f"|format(pos.current_price) }}</td>
               <td style="font-weight: 800; color: {% if pos.unrealized_pnl >= 0 %}#059669{% else %}#cc0000{% endif %};">
                 {% if pos.unrealized_pnl >= 0 %}+{% endif %}₹{{ "%.2f"|format(pos.unrealized_pnl) }}
               </td>
-              <td>{% if pos.stop_loss %}₹{{ "%.2f"|format(pos.stop_loss) }}{% else %}--{% endif %}</td>
-              <td>{% if pos.target %}₹{{ "%.2f"|format(pos.target) }}{% else %}--{% endif %}</td>
+              <td style="font-family: var(--font-mono); font-weight: 700; color: #b91c1c;">{% if pos.stop_loss %}₹{{ "%.2f"|format(pos.stop_loss) }}{% else %}--{% endif %}</td>
+              <td style="font-family: var(--font-mono); font-weight: 700; color: #059669;">{% if pos.target %}₹{{ "%.2f"|format(pos.target) }}{% else %}--{% endif %}</td>
               <td>
-                <button onclick="closePosition('{{ sym }}')" class="term-btn" style="background:#fee2e2; color:#cc0000; border-color:#cc0000; padding: 2px 6px; font-size: 10px;">
-                  Close
+                <button onclick="closeOpenTrade('{{ sym }}', '{{ sym }}')" class="term-btn" style="background:#fee2e2; color:#cc0000; border-color:#cc0000; padding: 2px 7px; font-size: 10px; font-weight: 700; cursor: pointer;">
+                  🛑 Close
                 </button>
               </td>
             </tr>
           {% endfor %}
         {% else %}
           <tr>
-            <td colspan="9" style="text-align: center; padding: 20px; color: #777;">
-              No open positions. Select a stock from the left NIFTY 500 panel to place a paper order.
+            <td colspan="10" style="text-align: center; padding: 20px; color: #64748b;">
+              No active open positions. Next morning autonomous screener executes at 09:16 AM IST, or click "⚡ AI Trade Now" below.
             </td>
           </tr>
         {% endif %}
@@ -440,6 +470,22 @@
     }
   }
 
+  async function closeOpenTrade(tradeIdOrSymbol, sym) {
+    if (!confirm(`Are you sure you want to SQUARE OFF open position for ${sym || tradeIdOrSymbol} at current market price?`)) return;
+    try {
+      const res = await fetch(`/api/automation/trades/${tradeIdOrSymbol}/close`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.status === 'success') {
+        alert(`✅ Position for ${sym || tradeIdOrSymbol} squared off!\nExit Price: ₹${data.closed?.exit_price}\nNet PnL: ₹${data.closed?.net_pnl}`);
+        await loadAutomationTelemetry();
+      } else {
+        alert('⚠️ ' + (data.detail || data.message || 'Failed to square off position'));
+      }
+    } catch (e) {
+      alert('Error: ' + e.message);
+    }
+  }
+
   // =========================================================================
   // Autonomous Morning Intraday Suite Real-Time Client
   // =========================================================================
@@ -448,6 +494,77 @@
       const res = await fetch('/api/automation/top3/status');
       if (!res.ok) return;
       const data = await res.json();
+
+      // -----------------------------------------------------------------------
+      // Top Portfolio KPI Banner & Active Open Positions Updates
+      // -----------------------------------------------------------------------
+      const pm = data.portfolio_metrics || {};
+      const kpiCap = document.getElementById('kpi-simulated-capital');
+      if (kpiCap) kpiCap.innerText = '₹' + Number(pm.simulated_capital || 100000).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+      const kpiUtil = document.getElementById('kpi-capital-utilized');
+      if (kpiUtil) {
+        const uVal = Number(pm.capital_utilized || 0);
+        const uPct = Number(pm.capital_utilization_pct || 0);
+        kpiUtil.innerText = `₹${uVal.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})} (${uPct}%)`;
+      }
+
+      const kpiCash = document.getElementById('kpi-available-cash');
+      if (kpiCash) kpiCash.innerText = '₹' + Number(pm.available_cash || 100000).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+      const kpiEquity = document.getElementById('kpi-portfolio-equity');
+      if (kpiEquity) {
+        const eqVal = Number(pm.portfolio_equity || 100000);
+        kpiEquity.innerText = '₹' + eqVal.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        kpiEquity.style.color = eqVal >= (pm.simulated_capital || 100000) ? '#059669' : '#cc0000';
+      }
+
+      const kpiPositions = document.getElementById('kpi-active-positions');
+      const topBadge = document.getElementById('top-open-count-badge');
+      const openCount = (data.open_trades || []).length;
+      if (kpiPositions) {
+        kpiPositions.innerText = `${openCount} / ${pm.max_positions_allowed || 10}`;
+        kpiPositions.style.color = openCount > 0 ? '#059669' : '#000000';
+      }
+      if (topBadge) {
+        topBadge.innerText = `${openCount} Active`;
+        topBadge.style.background = openCount > 0 ? '#059669' : '#64748b';
+      }
+
+      // Top Active Open Positions Table
+      const topPositionsTbody = document.getElementById('top-active-positions-tbody');
+      if (topPositionsTbody) {
+        const openTrades = data.open_trades || [];
+        if (openTrades.length === 0) {
+          topPositionsTbody.innerHTML = `<tr><td colspan="10" style="text-align: center; padding: 20px; color: #64748b;">No active open positions. Next morning autonomous screener executes at 09:16 AM IST, or click "⚡ AI Trade Now" below.</td></tr>`;
+        } else {
+          topPositionsTbody.innerHTML = openTrades.map(t => {
+            const isWin = (t.net_pnl || 0) >= 0;
+            const sign = isWin ? '+' : '';
+            const pnlColor = isWin ? '#059669' : '#cc0000';
+            const capVal = t.allocated_capital ? '₹' + Number(t.allocated_capital).toLocaleString('en-IN', {minimumFractionDigits: 2}) : '--';
+            const currPrice = Number(t.highest_price || t.entry_price || 0).toFixed(2);
+            return `<tr style="background: #fffbeb;">
+              <td style="font-weight: 800; color: #000080;">${t.symbol}</td>
+              <td><span style="font-weight: 700; color: #059669;">BUY</span></td>
+              <td style="font-weight: 700;">${t.qty}</td>
+              <td style="font-family: var(--font-mono); color: #475569;">${capVal}</td>
+              <td>₹${Number(t.entry_price || 0).toFixed(2)}</td>
+              <td style="font-family: var(--font-mono); color: #1e293b;">₹${currPrice}</td>
+              <td style="font-weight: 800; color: ${pnlColor}; font-family: var(--font-mono);">
+                ${t.net_pnl !== null ? sign + '₹' + Number(t.net_pnl).toFixed(2) : '₹0.00'}
+              </td>
+              <td style="font-family: var(--font-mono); font-weight: 700; color: #b91c1c;">₹${Number(t.current_sl || t.initial_sl || 0).toFixed(2)}</td>
+              <td style="font-family: var(--font-mono); font-weight: 700; color: #059669;">₹${Number(t.target_price || 0).toFixed(2)}</td>
+              <td>
+                <button onclick="closeOpenTrade('${t.id}', '${t.symbol}')" class="term-btn" style="background:#fee2e2; color:#cc0000; border-color:#cc0000; padding: 2px 7px; font-size: 10px; font-weight: 700; cursor: pointer;">
+                  🛑 Close
+                </button>
+              </td>
+            </tr>`;
+          }).join('');
+        }
+      }
 
       // Top telemetry
       const mktEl = document.getElementById('auto-market-status');

@@ -1144,8 +1144,30 @@ def dashboard(request: Request):
     portfolio = paper_broker.get_portfolio_state()
     strategies = StrategyRegistry.list_strategies()
     configs = load_all_strategy_configs(settings.configs_dir)
-
     kite_status = check_kite_session_status()
+
+    # Integrate automated paper trading positions and capital metrics
+    auto_open_trades = []
+    portfolio_metrics = {
+        "simulated_capital": 100000.0,
+        "capital_utilized": 0.0,
+        "capital_utilization_pct": 0.0,
+        "available_cash": 100000.0,
+        "portfolio_equity": 100000.0,
+        "active_positions_count": 0,
+        "max_positions_allowed": 10,
+        "execution_mode": settings.default_mode.value,
+    }
+    try:
+        from src.algodesk.automation.daily_screener_trader import daily_auto_trader
+        auto_status = daily_auto_trader.get_automation_status()
+        auto_open_trades = auto_status.get("open_trades", [])
+        if "portfolio_metrics" in auto_status:
+            portfolio_metrics = auto_status["portfolio_metrics"]
+            portfolio["cash"] = portfolio_metrics["available_cash"]
+            portfolio["equity"] = portfolio_metrics["portfolio_equity"]
+    except Exception as e_p:
+        logger.debug(f"Dashboard portfolio metrics sync notice: {e_p}")
 
     return templates.TemplateResponse(
         request=request,
@@ -1154,6 +1176,8 @@ def dashboard(request: Request):
             "active_page": "dashboard",
             "mode": settings.default_mode.value,
             "portfolio": portfolio,
+            "portfolio_metrics": portfolio_metrics,
+            "auto_open_trades": auto_open_trades,
             "strategies": strategies,
             "configs": configs,
             "kill_switch": risk_engine.kill_switch_active,
@@ -2442,6 +2466,22 @@ def trigger_eod_square_off():
         }
     except Exception as e:
         logger.error(f"Error during square-off: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/automation/trades/{identifier}/close", summary="Square-Off Specific Open Intraday Trade")
+def close_specific_open_trade(identifier: str):
+    """Immediately squares off a specific open trade by ID or symbol at current market price."""
+    try:
+        from src.algodesk.automation.daily_screener_trader import daily_auto_trader
+        closed = daily_auto_trader.close_single_position(identifier=identifier)
+        if not closed:
+            raise HTTPException(status_code=404, detail=f"No open trade found for '{identifier}'")
+        return {"status": "success", "closed": closed}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error closing trade {identifier}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
