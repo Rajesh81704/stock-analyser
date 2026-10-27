@@ -2400,6 +2400,21 @@ def set_automation_config(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/automation/capital/verify", summary="Verify Account Capital Availability & Margin Health")
+def get_automation_capital_verification():
+    """Checks whether account capital is available, verified, and ready for new trades."""
+    try:
+        from src.algodesk.automation.daily_screener_trader import daily_auto_trader
+        summary = daily_auto_trader.get_account_capital_summary()
+        return {
+            "status": "success",
+            "capital_summary": summary
+        }
+    except Exception as e:
+        logger.error(f"Error verifying account capital: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/automation/top10/status", summary="Get Daily Automated Intraday Screener & Paper Trade Status")
 @app.get("/api/automation/top3/status", summary="Get Daily Automated Intraday Screener & Paper Trade Status")
 def get_daily_automation_status(

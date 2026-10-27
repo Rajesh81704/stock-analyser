@@ -532,3 +532,91 @@ def test_continuous_whole_day_opportunity_scanning(tmp_path):
     assert status_final["open_trades_count"] == 2
 
 
+def test_account_capital_availability_gate(tmp_path):
+    """
+    Verify strict account capital availability verification:
+    1. get_account_capital_summary() returns precise margin availability.
+    2. execute_paper_algo_trades() skips orders if available capital is lower than margin needed.
+    3. scan_and_execute_intraday_opportunities() rejects trades when margin is exhausted.
+    """
+    db_file = tmp_path / "test_capital_gate.db"
+    trader = DailyIntradayAutoTrader(db_path=db_file, initial_capital=1000.0, leverage=5.0)
+
+    # 1. Verify capital summary on fresh account
+    cap_summary = trader.get_account_capital_summary()
+    assert cap_summary["capital_ready"] is True
+    assert cap_summary["base_capital"] == 1000.0
+    assert cap_summary["available_margin"] == 1000.0
+    assert cap_summary["total_buying_power"] == 5000.0
+    assert cap_summary["open_margin_utilized"] == 0.0
+
+    # 2. Add candidates:
+    # Candidate A: MRF at ₹120,000. At 5x leverage, 1 share requires ₹24,000 margin.
+    # Total available margin is ₹1,000 -> Cannot afford even 1 share! Must be skipped.
+    # Candidate B: ITC at ₹400. At 5x leverage, 1 share requires ₹80 margin -> Can afford!
+    picks = [
+        {
+            "symbol": "MRF",
+            "price": 120000.0,
+            "conviction_score": 95.0,
+            "rvol": 2.5,
+            "sector": "Auto",
+            "strategy_name": "Breakout",
+            "initial_sl": 118000.0,
+            "target_price": 125000.0
+        },
+        {
+            "symbol": "ITC",
+            "price": 400.0,
+            "conviction_score": 88.0,
+            "rvol": 2.0,
+            "sector": "FMCG",
+            "strategy_name": "Breakout",
+            "initial_sl": 390.0,
+            "target_price": 420.0
+        }
+    ]
+
+    trades = trader.execute_paper_algo_trades(picks=picks, trade_date_str="2026-10-28")
+    symbols_entered = [t["symbol"] for t in trades]
+
+    # MRF must have been rejected due to insufficient capital
+    assert "MRF" not in symbols_entered
+    # ITC must be entered
+    assert "ITC" in symbols_entered
+
+    # Verify that available margin did not go negative
+    updated_cap = trader.get_account_capital_summary()
+    assert updated_cap["available_margin"] >= 0.0
+    assert updated_cap["open_margin_utilized"] > 0.0
+
+    # 3. If available margin is exhausted to 0, intraday opportunity scanner must reject new entries
+    # Set simulated initial_capital to small amount equal to margin utilized
+    trader.initial_capital = updated_cap["open_margin_utilized"]
+    exhausted_cap = trader.get_account_capital_summary()
+    assert exhausted_cap["available_margin"] == 0.0
+
+    # Insert a breakout candidate into daily_intraday_picks
+    conn = sqlite3.connect(str(db_file))
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO daily_intraday_picks (
+            date, rank, symbol, company_name, sector, price, conviction_score,
+            rvol, strategy_name, entry_trigger_price, initial_sl, target_price,
+            trailing_step_pct, status, created_at
+        ) VALUES
+        ('2026-10-28', 3, 'RELIANCE', 'Reliance Ind', 'Energy', 2500.0, 90.0, 2.0, 'Breakout', 2510.0, 2450.0, 2600.0, 0.5, 'WATCHING', '2026-10-28 09:16:00')
+    """)
+    conn.commit()
+    conn.close()
+
+    # Opportunity triggers breakout, but margin is 0 -> should NOT enter trade
+    opp_trades = trader.scan_and_execute_intraday_opportunities(
+        current_prices={"RELIANCE": 2515.0},
+        trade_date_str="2026-10-28"
+    )
+    assert len(opp_trades) == 0
+
+
+
+

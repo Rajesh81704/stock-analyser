@@ -188,6 +188,71 @@ class DailyIntradayAutoTrader:
             "buying_power": round(getattr(self, "initial_capital", 100000.0) * getattr(self, "leverage", 5.0), 2)
         }
 
+    def get_account_capital_summary(self) -> Dict[str, Any]:
+        """
+        Calculates real-time capital availability, margin utilized,
+        buying power, and checks if sufficient capital is available in the account.
+        """
+        today_str = get_ist_date()
+        with self._lock:
+            conn = self._get_connection()
+            cur = conn.cursor()
+
+            # Open trades margin utilized
+            cur.execute("""
+                SELECT symbol, qty, entry_price, allocated_capital
+                FROM daily_intraday_trades
+                WHERE status = 'OPEN'
+            """)
+            open_trades = [dict(r) for r in cur.fetchall()]
+            lev = float(getattr(self, "leverage", 5.0))
+            open_margin_utilized = sum(float(t.get("allocated_capital") or ((t.get("qty", 0) * t.get("entry_price", 0)) / lev)) for t in open_trades)
+            gross_exposure = sum(float(t.get("qty", 0) * t.get("entry_price", 0)) for t in open_trades)
+
+            # Closed trades realized P&L today
+            cur.execute("SELECT net_pnl FROM daily_intraday_trades WHERE trade_date = ? AND status = 'CLOSED'", (today_str,))
+            today_realized_pnl = sum(float(r["net_pnl"] or 0.0) for r in cur.fetchall())
+            conn.close()
+
+        base_capital = float(getattr(self, "initial_capital", 100000.0))
+
+        # Check if live Zerodha Kite margins are available
+        broker_live_cash = None
+        try:
+            from src.algodesk.config import settings
+            if settings.active_kite_token and settings.kite_api_key:
+                from src.algodesk.data.kite_client import get_kite_client
+                kc = get_kite_client()
+                if kc:
+                    lm = kc.get_live_margins()
+                    if lm.get("status") == "success" and lm.get("available_cash", 0) > 0:
+                        broker_live_cash = float(lm.get("available_cash"))
+        except Exception:
+            pass
+
+        # Effective available margin cash for new trades
+        available_capital = round(max(0.0, base_capital - open_margin_utilized + today_realized_pnl), 2)
+        available_buying_power = round(available_capital * lev, 2)
+        total_buying_power = round(base_capital * lev, 2)
+
+        return {
+            "status": "healthy" if available_capital >= 2000.0 else "low_capital",
+            "capital_ready": available_capital >= 500.0,
+            "base_capital": base_capital,
+            "leverage": lev,
+            "total_buying_power": total_buying_power,
+            "open_margin_utilized": round(open_margin_utilized, 2),
+            "gross_exposure": round(gross_exposure, 2),
+            "available_capital": available_capital,
+            "available_margin": available_capital,
+            "available_buying_power": available_buying_power,
+            "today_realized_pnl": round(today_realized_pnl, 2),
+            "open_positions_count": len(open_trades),
+            "broker_live_cash": broker_live_cash,
+            "is_capital_sufficient": available_capital >= 2000.0,
+            "can_open_new_trades": available_capital >= 500.0 and len(open_trades) < 10
+        }
+
     def is_market_day(self, check_date: Optional[date] = None) -> bool:
         """Returns True if date is Monday-Friday (ignoring holidays for basic check)."""
         d = check_date or datetime.now(IST).date()
@@ -438,8 +503,16 @@ class DailyIntradayAutoTrader:
             logger.warning("[PaperTrader] No top picks found to execute trades.")
             return []
 
-        pool_capital = float(total_capital if total_capital is not None and total_capital > 0 else self.initial_capital)
+        # 1. Verify actual available capital in account
+        cap_summary = self.get_account_capital_summary()
+        current_avail = cap_summary["available_capital"]
+
+        pool_capital = float(total_capital if total_capital is not None and total_capital > 0 else min(self.initial_capital, current_avail))
         lev = float(leverage if leverage is not None and leverage > 0 else getattr(self, "leverage", 5.0))
+
+        if pool_capital < 500.0 and current_avail < 500.0 and total_capital is None:
+            logger.warning(f"🚫 [CapitalGate] Insufficient capital in account (Available: ₹{current_avail:,.2f}). New trades cannot be entered.")
+            return []
 
         # Smart Capital Distribution via Gemini API (with Quant Conviction Risk-Parity fallback and 5x leverage)
         alloc_map = {}
@@ -455,12 +528,17 @@ class DailyIntradayAutoTrader:
 
         capital_per_trade = pool_capital / max(1, len(picks))
         executed_trades = []
+        available_margin_tracker = pool_capital
 
         with self._lock:
             conn = self._get_connection()
             cur = conn.cursor()
 
             for stock in picks:
+                if available_margin_tracker <= 0:
+                    logger.info("⏸️ [CapitalGate] Available account capital exhausted. Skipping remaining picks.")
+                    break
+
                 sym = stock["symbol"]
                 entry_price = float(stock["price"])
                 initial_sl = float(stock.get("initial_sl") or (entry_price * 0.99))
@@ -490,6 +568,21 @@ class DailyIntradayAutoTrader:
                 if existing:
                     logger.info(f"Trade already exists for {sym} on {today_str}. Skipping duplicate entry.")
                     continue
+
+                # Strict Account Capital Availability Check: Ensure account can afford at least 1 share
+                min_margin_for_1_share = entry_price / lev
+                if available_margin_tracker < min_margin_for_1_share:
+                    logger.warning(f"🚫 [CapitalGate] Insufficient capital in account for {sym} (Needed margin: ₹{min_margin_for_1_share:,.2f}, Available: ₹{available_margin_tracker:,.2f}). Skipping.")
+                    continue
+
+                # Clamp allocated margin so it never exceeds remaining account cash
+                if allocated_for_trade > available_margin_tracker:
+                    allocated_for_trade = round(available_margin_tracker, 2)
+                    qty = max(1, int((allocated_for_trade * lev) / entry_price))
+                    exposure = round(qty * entry_price, 2)
+
+                actual_margin_spent = round((qty * entry_price) / lev, 2)
+                available_margin_tracker = max(0.0, available_margin_tracker - actual_margin_spent)
 
                 initial_log = json.dumps([{
                     "time": now_ts,
@@ -600,13 +693,16 @@ class DailyIntradayAutoTrader:
                 conn.close()
                 return []
 
-            # 2. Compute available margin capital
+            # 2. Compute available margin capital using unified account state
+            cur.execute("SELECT net_pnl FROM daily_intraday_trades WHERE trade_date = ? AND status = 'CLOSED'", (today_str,))
+            today_realized_pnl = sum(float(r["net_pnl"] or 0.0) for r in cur.fetchall())
+
             total_margin_capital = float(getattr(self, "initial_capital", 100000.0))
             open_margin_utilized = sum(float(t["allocated_capital"] or 0.0) for t in open_trades)
-            available_margin = max(0.0, total_margin_capital - open_margin_utilized)
+            available_margin = max(0.0, total_margin_capital - open_margin_utilized + today_realized_pnl)
 
             if available_margin < min_trade_capital:
-                logger.info(f"⏸️ [OpportunityScanner] Available margin (₹{available_margin:,.2f}) below min threshold (₹{min_trade_capital:,.2f}).")
+                logger.info(f"⏸️ [CapitalGate] Available margin (₹{available_margin:,.2f}) below min threshold (₹{min_trade_capital:,.2f}). Awaiting exits.")
                 conn.close()
                 return []
 

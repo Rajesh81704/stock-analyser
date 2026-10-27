@@ -84,6 +84,7 @@
   <div class="algo-stat-cell">
     <span class="stat-lbl">Available Margin</span>
     <span class="stat-val" id="kpi-available-cash">₹{{ "{:,.2f}".format(portfolio_metrics.available_cash if portfolio_metrics else portfolio.cash) }}</span>
+    <span style="font-size: 9.5px; font-weight: 800; color: #059669;" id="kpi-available-badge">● CAPITAL READY</span>
   </div>
   <div class="algo-stat-cell">
     <span class="stat-lbl">Net Portfolio Equity</span>
@@ -593,7 +594,21 @@
       }
 
       const kpiCash = document.getElementById('kpi-available-cash');
-      if (kpiCash) kpiCash.innerText = '₹' + Number(pm.available_cash || 100000).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+      const kpiAvailBadge = document.getElementById('kpi-available-badge');
+      const availCash = Number(pm.available_cash != null ? pm.available_cash : 100000);
+      if (kpiCash) kpiCash.innerText = '₹' + availCash.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+      if (kpiAvailBadge) {
+        if (availCash >= 5000) {
+          kpiAvailBadge.innerText = '● CAPITAL READY';
+          kpiAvailBadge.style.color = '#059669';
+        } else if (availCash > 0) {
+          kpiAvailBadge.innerText = '● LOW MARGIN';
+          kpiAvailBadge.style.color = '#d97706';
+        } else {
+          kpiAvailBadge.innerText = '● 100% UTILIZED';
+          kpiAvailBadge.style.color = '#cc0000';
+        }
+      }
 
       const kpiEquity = document.getElementById('kpi-portfolio-equity');
       if (kpiEquity) {
