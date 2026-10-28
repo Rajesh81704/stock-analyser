@@ -3,6 +3,13 @@
 {% block title %}AlgoDesk MarketX — Algorithmic Intraday Execution Workstation{% endblock %}
 
 {% block content %}
+<style>
+  details.hist-date-accordion summary::-webkit-details-marker,
+  details.hist-date-accordion summary::marker {
+    display: none;
+    content: "";
+  }
+</style>
 
 <!-- Kill Switch Banner (if active) -->
 {% if kill_switch %}
@@ -303,25 +310,25 @@
     </div>
   </div>
 
-  <!-- Section 2: Today's Live Intraday Trading Session (Dedicated Highlighted Card) -->
+  <!-- Section 2: Today's Live Intraday Trading Session (Dedicated Highlighted Card - Open & Visible) -->
   <div style="padding: 0 14px 14px;">
-    <div style="background: #ffffff; border: 1.5px solid #2563eb; border-radius: 6px; box-shadow: 0 2px 8px rgba(37,99,235,0.06); padding: 12px 14px; margin-bottom: 14px;">
+    <div style="background: #ffffff; border: 1.5px solid #2563eb; border-radius: 6px; box-shadow: 0 2px 8px rgba(37,99,235,0.08); padding: 12px 14px; margin-bottom: 12px;">
       
       <!-- Today's Header Bar -->
       <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">
         <div style="display: flex; align-items: center; gap: 8px;">
           <span style="font-size: 12px; font-weight: 800; color: #1e3a8a; text-transform: uppercase; letter-spacing: 0.5px;">
-            ⚡ Today's Live Intraday Trading Session
+            ⚡ Today's Live Intraday Trading Activity
           </span>
           <span id="today-session-date" style="font-family: var(--font-mono); font-weight: 800; font-size: 11px; background: #e0e7ff; color: #3730a3; padding: 2px 7px; border-radius: 3px;">
             --
           </span>
           <span id="today-session-badge" style="background: #dcfce7; color: #15803d; border: 1px solid #86efac; font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 3px;">
-            ● SESSION ACTIVE
+            ● SESSION OPEN & ACTIVE
           </span>
         </div>
         <div style="font-size: 10px; color: #64748b; display: flex; align-items: center; gap: 8px;">
-          <span>Trailing SL & Target Ratchet Active</span>
+          <span style="background: #eff6ff; color: #1d4ed8; padding: 2px 6px; border-radius: 3px; font-weight: 600;">⚡ Real-Time Ratchet & Auto-Trailing Active</span>
           <button onclick="exportTodayTradesCsv()" class="term-btn" style="background:#e0e7ff; color:#3730a3; border-color:#a5b4fc; padding: 2px 7px; font-size: 10px; font-weight: 700;" title="Download CSV for today's trades">
             📥 Export Today CSV
           </button>
@@ -349,8 +356,8 @@
         </div>
       </div>
 
-      <!-- Today's Trades Table -->
-      <div class="table-container-box" style="margin: 0; max-height: 260px; overflow-y: auto;">
+      <!-- Today's Trades Table (Open on Screen) -->
+      <div class="table-container-box" style="margin: 0; max-height: 400px; min-height: 140px; overflow-y: auto;">
         <table class="terminal-table" style="font-size: 10.5px;">
           <thead style="position: sticky; top: 0; background: #f8fafc; z-index: 1;">
             <tr>
@@ -381,40 +388,57 @@
       </div>
     </div>
 
-    <!-- Section 3: Date-Wise Historical Trading Archives & Management -->
-    <div style="background: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px 14px;">
-      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">
+    <!-- Section 3: Date-Wise Historical Trading Archives & Management (Collapsed / Hidden by Default) -->
+    <div style="background: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px 14px;">
+      <!-- Collapsible Header Bar -->
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; cursor: pointer; user-select: none;" onclick="toggleHistoricalArchives()">
         <div style="display: flex; align-items: center; gap: 8px;">
+          <span id="historical-toggle-icon" style="font-size: 11px; color: #2563eb; font-weight: 900; transition: transform 0.2s;">▶</span>
           <span style="font-size: 11px; font-weight: 800; color: #1e293b; text-transform: uppercase;">
             📜 Manage History by Date
+          </span>
+          <span id="historical-summary-badge" style="font-size: 10px; background: #f1f5f9; color: #475569; padding: 2px 8px; border-radius: 12px; border: 1px solid #cbd5e1; font-weight: 700;">
+            📁 Past Sessions (Hidden / Collapsed)
           </span>
           <span style="font-size: 10px; color: #64748b;">(Inspect, Export CSV & Purge Archived Days)</span>
         </div>
 
+        <button type="button" id="historical-toggle-btn" class="term-btn" style="background:#f1f5f9; color:#1e293b; border-color:#cbd5e1; padding: 3px 10px; font-size: 10.5px; font-weight: 700; cursor: pointer;" onclick="event.stopPropagation(); toggleHistoricalArchives();">
+          ▶ Show Historical Archives
+        </button>
+      </div>
+
+      <!-- Collapsible Historical Content Body (Hidden by Default) -->
+      <div id="historical-archives-body" style="display: none; margin-top: 10px; border-top: 1px solid #e2e8f0; padding-top: 10px;">
         <!-- Management Controls Toolbar -->
-        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-          <label style="font-size: 10.5px; font-weight: 700; color: #475569;">Select Date:</label>
-          <select id="history-date-select" class="nav-select" style="font-size: 11px; padding: 2px 6px; height: 26px; border: 1px solid #cbd5e1; border-radius: 3px;" onchange="filterHistoricalDate(this.value)">
-            <option value="ALL">All Dates</option>
-          </select>
-          <button onclick="exportHistoricalCsv()" class="term-btn" style="background:#f1f5f9; color:#1e293b; border-color:#cbd5e1; padding: 3px 8px; font-size: 10.5px; font-weight: 700;" title="Download CSV of trades for selected date">
-            📥 Export CSV
-          </button>
-          <button onclick="deleteSelectedDateTrades()" class="term-btn" style="background:#fee2e2; color:#991b1b; border-color:#fca5a5; padding: 3px 8px; font-size: 10.5px; font-weight: 700;" title="Purge trades for selected date">
-            🗑 Purge Date Trades
-          </button>
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px;">
+          <div style="font-size: 10.5px; color: #64748b; font-weight: 600;">
+            Archived Daily Intraday Sessions:
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <label style="font-size: 10.5px; font-weight: 700; color: #475569;">Select Date:</label>
+            <select id="history-date-select" class="nav-select" style="font-size: 11px; padding: 2px 6px; height: 26px; border: 1px solid #cbd5e1; border-radius: 3px;" onchange="filterHistoricalDate(this.value)">
+              <option value="ALL">All Dates</option>
+            </select>
+            <button onclick="exportHistoricalCsv()" class="term-btn" style="background:#f1f5f9; color:#1e293b; border-color:#cbd5e1; padding: 3px 8px; font-size: 10.5px; font-weight: 700;" title="Download CSV of trades for selected date">
+              📥 Export CSV
+            </button>
+            <button onclick="deleteSelectedDateTrades()" class="term-btn" style="background:#fee2e2; color:#991b1b; border-color:#fca5a5; padding: 3px 8px; font-size: 10.5px; font-weight: 700;" title="Purge trades for selected date">
+              🗑 Purge Date Trades
+            </button>
+          </div>
         </div>
-      </div>
 
-      <!-- Date Filter Pills -->
-      <div id="historical-date-pills" style="display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 10px;">
-        <button class="time-tab active" onclick="filterHistoricalDate('ALL')">All Dates</button>
-      </div>
+        <!-- Date Filter Pills -->
+        <div id="historical-date-pills" style="display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 10px;">
+          <button class="time-tab active" onclick="filterHistoricalDate('ALL')">All Dates</button>
+        </div>
 
-      <!-- Historical Container -->
-      <div id="historical-sessions-container">
-        <div style="text-align: center; padding: 16px; color: #64748b; font-size: 11px;">
-          Loading historical sessions...
+        <!-- Historical Container -->
+        <div id="historical-sessions-container">
+          <div style="text-align: center; padding: 16px; color: #64748b; font-size: 11px;">
+            Loading historical sessions...
+          </div>
         </div>
       </div>
     </div>
@@ -865,13 +889,44 @@
   }
 
   // -------------------------------------------------------------------------
-  // Helper: Render Historical Sessions Grouped by Date
+  // Helper: Render Historical Sessions Grouped by Date (Collapsible / Accordion)
   // -------------------------------------------------------------------------
   let currentHistoricalFilter = 'ALL';
   let cachedTelemetryData = null;
+  let isHistoricalExpanded = false;
+
+  function toggleHistoricalArchives(forceState) {
+    if (typeof forceState === 'boolean') {
+      isHistoricalExpanded = forceState;
+    } else {
+      isHistoricalExpanded = !isHistoricalExpanded;
+    }
+    const body = document.getElementById('historical-archives-body');
+    const icon = document.getElementById('historical-toggle-icon');
+    const btn = document.getElementById('historical-toggle-btn');
+    const badge = document.getElementById('historical-summary-badge');
+
+    if (body) {
+      body.style.display = isHistoricalExpanded ? 'block' : 'none';
+    }
+    if (icon) {
+      icon.textContent = isHistoricalExpanded ? '▼' : '▶';
+    }
+    if (btn) {
+      btn.innerHTML = isHistoricalExpanded ? '▲ Hide Historical Archives' : '▶ Show Historical Archives';
+      btn.style.background = isHistoricalExpanded ? '#e2e8f0' : '#f1f5f9';
+    }
+    if (badge && cachedTelemetryData) {
+      const count = cachedTelemetryData.historical_dates?.length || 0;
+      badge.textContent = isHistoricalExpanded
+        ? `📂 ${count} Archived Day${count === 1 ? '' : 's'} (Expanded)`
+        : `📁 ${count} Archived Day${count === 1 ? '' : 's'} (Hidden / Collapsed)`;
+    }
+  }
 
   function filterHistoricalDate(dateStr) {
     currentHistoricalFilter = dateStr;
+    toggleHistoricalArchives(true);
     if (cachedTelemetryData) {
       renderHistoricalArchives(cachedTelemetryData);
     }
@@ -882,10 +937,19 @@
     const pillsContainer = document.getElementById('historical-date-pills');
     const dateSelect = document.getElementById('history-date-select');
     const container = document.getElementById('historical-sessions-container');
+    const badge = document.getElementById('historical-summary-badge');
     if (!container) return;
 
     const historicalDates = data.historical_dates || [];
     const tradesByDate = data.trades_by_date || {};
+
+    // Synchronize Collapsed / Expanded Status Badge
+    if (badge) {
+      const count = historicalDates.length;
+      badge.textContent = isHistoricalExpanded
+        ? `📂 ${count} Archived Day${count === 1 ? '' : 's'} (Expanded)`
+        : `📁 ${count} Archived Day${count === 1 ? '' : 's'} (Hidden / Collapsed)`;
+    }
 
     // Synchronize Date Dropdown
     if (dateSelect) {
@@ -941,10 +1005,10 @@
       } catch (e) {}
 
       html += `
-      <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 5px; margin-bottom: 12px; overflow: hidden;">
-        <!-- Date Session Header Banner -->
-        <div style="background: #e2e8f0; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid #cbd5e1;">
-          <div style="display: flex; align-items: center; gap: 10px;">
+      <details class="hist-date-accordion" open style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 5px; margin-bottom: 12px; overflow: hidden;">
+        <!-- Date Session Header Banner (Accordion Summary) -->
+        <summary style="background: #e2e8f0; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid #cbd5e1; cursor: pointer; list-style: none;">
+          <div style="display: flex; align-items: center; gap: 8px;">
             <span style="font-weight: 800; font-size: 11.5px; color: #0f172a;">📅 ${dateLabel} (${d})</span>
             <span style="font-size: 10.5px; background: #ffffff; color: #334155; font-weight: 700; padding: 1px 6px; border-radius: 3px; border: 1px solid #cbd5e1;">
               ${g.total_trades} Trades
@@ -953,7 +1017,7 @@
               Win Rate: <strong style="color: ${g.win_rate >= 50 ? '#059669' : '#cc0000'};">${g.win_rate}%</strong> (${g.winning_trades}W / ${g.losing_trades}L)
             </span>
           </div>
-          <div style="display: flex; align-items: center; gap: 10px; font-size: 10.5px;">
+          <div style="display: flex; align-items: center; gap: 10px; font-size: 10.5px;" onclick="event.stopPropagation()">
             <span>Gross: <strong>${g.gross_pnl >= 0 ? '+' : ''}₹${Number(g.gross_pnl).toFixed(2)}</strong></span>
             <span>Charges: <strong style="color: #64748b;">-₹${Number(g.brokerage_taxes).toFixed(2)}</strong></span>
             <span style="font-size: 11.5px; font-weight: 800; padding: 2px 8px; border-radius: 3px; background: ${pnlBg}; color: ${pnlColor}; font-family: var(--font-mono);">
@@ -966,10 +1030,10 @@
               🗑 Purge
             </button>
           </div>
-        </div>
+        </summary>
 
         <!-- Date Trades Table -->
-        <div class="table-container-box" style="margin: 0; max-height: 200px; overflow-y: auto;">
+        <div class="table-container-box" style="margin: 0; max-height: 220px; overflow-y: auto;">
           <table class="terminal-table" style="font-size: 10px;">
             <thead style="position: sticky; top: 0; background: #ffffff; z-index: 1;">
               <tr>
@@ -996,7 +1060,7 @@
             </tbody>
           </table>
         </div>
-      </div>`;
+      </details>`;
     });
 
     container.innerHTML = html;
