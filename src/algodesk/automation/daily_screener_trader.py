@@ -342,25 +342,31 @@ class DailyIntradayAutoTrader:
 
             volatility_score = min(20.0, atr_pct * 8.0)  # Stocks with 2.5%+ ATR get full 20 pts
 
-            # 5. Proximity to 20-day High (BUY) vs 20-day Low (SELL)
-            high_20d = float(high_s.iloc[-20:].max())
-            low_20d = float(low_s.iloc[-20:].min())
+            # 5. Proximity to 5-day & 20-day High (BUY) vs Low (SELL)
+            high_5d = float(high_s.iloc[-5:].max())
+            low_5d = float(low_s.iloc[-5:].min())
 
-            dist_from_high_pct = ((high_20d - latest_close) / latest_close) * 100.0
+            dist_from_high_pct = max(0.0, ((high_5d - latest_close) / latest_close) * 100.0)
             bull_breakout_score = max(0.0, 25.0 - (dist_from_high_pct * 4.0))
 
-            dist_from_low_pct = ((latest_close - low_20d) / latest_close) * 100.0
+            dist_from_low_pct = max(0.0, ((latest_close - low_5d) / latest_close) * 100.0)
             bear_breakdown_score = max(0.0, 25.0 - (dist_from_low_pct * 4.0))
 
             # Composite Conviction Scores
             rvol_score = min(25.0, rvol * 12.5)
             day_change_pct = round(((latest_close - prev_close) / prev_close) * 100.0, 2)
 
+            # Day change conviction bonus
+            if day_change_pct <= -0.5:
+                bear_trend_score += 10.0
+            elif day_change_pct >= 0.5:
+                bull_trend_score += 10.0
+
             total_bull_score = round(bull_trend_score + bull_rsi_score + volatility_score + bull_breakout_score + (rvol_score * 0.3), 2)
             total_bear_score = round(bear_trend_score + bear_rsi_score + volatility_score + bear_breakdown_score + (rvol_score * 0.3), 2)
 
-            # Bidirectional Selector: Select Short if bearish conviction dominates and price action confirms weakness
-            if total_bear_score > total_bull_score and (day_change_pct <= 0.0 or latest_close < ema_20):
+            # Bidirectional Selector: Select Short if bearish conviction dominates or stock is actively breaking down
+            if (total_bear_score > total_bull_score and day_change_pct <= 0.0) or (day_change_pct <= -0.75 and latest_close < ema_20):
                 side = "SELL"
                 total_score = total_bear_score
                 strategy_name = "ORB_Breakdown_Short_V4"
@@ -394,12 +400,50 @@ class DailyIntradayAutoTrader:
             logger.debug(f"Scan error on {symbol}: {scan_err}")
             return None
 
+    def get_nifty_market_regime(self) -> Dict[str, Any]:
+        """
+        Determines current intraday market regime via NIFTY 50 index (^NSEI):
+        Returns:
+          - 'regime': 'BEARISH' (NIFTY down < -0.2%) | 'BULLISH' (NIFTY up > +0.2%) | 'NEUTRAL'
+          - 'day_change_pct': float
+          - 'from_open_pct': float
+          - 'nifty_price': float
+        """
+        try:
+            import yfinance as yf
+            ticker = yf.Ticker("^NSEI")
+            hist = ticker.history(period="3d")
+            if not hist.empty and len(hist) >= 2:
+                latest_close = float(hist["Close"].iloc[-1])
+                prev_close = float(hist["Close"].iloc[-2])
+                open_p = float(hist["Open"].iloc[-1])
+                day_chg = round(((latest_close - prev_close) / prev_close) * 100.0, 2)
+                from_open = round(((latest_close - open_p) / open_p) * 100.0, 2)
+
+                if day_chg <= -0.20 or from_open <= -0.30:
+                    regime = "BEARISH"
+                elif day_chg >= 0.20 or from_open >= 0.30:
+                    regime = "BULLISH"
+                else:
+                    regime = "NEUTRAL"
+
+                logger.info(f"🌐 [MarketRegime] NIFTY 50: ₹{latest_close:,.2f} | Day: {day_chg:+.2f}% | From Open: {from_open:+.2f}% => REGIME: {regime}")
+                return {
+                    "regime": regime,
+                    "day_change_pct": day_chg,
+                    "from_open_pct": from_open,
+                    "nifty_price": latest_close
+                }
+        except Exception as e:
+            logger.warning(f"Could not fetch NIFTY regime ({e}), defaulting to NEUTRAL.")
+        return {"regime": "NEUTRAL", "day_change_pct": 0.0, "from_open_pct": 0.0, "nifty_price": 0.0}
+
     def run_morning_screener_and_pick(self, top_n: int = 10, scan_date_str: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Executes full multi-factor quantitative screening across ALL 500+ NIFTY 500 stocks in parallel:
         1. Loads entire NIFTY 500 universe (500+ stocks).
         2. Evaluates Technical Trends, Momentum, RVOL, ATR volatility, and Breakout proximity concurrently.
-        3. Sorts by conviction score (0-100) and selects the Top N (default 10) highest-conviction stocks.
+        3. Detects broader market regime (NIFTY 50 trend) and dynamically balances Long vs Short candidates.
         4. Logs selected stocks into SQLite table `daily_intraday_picks`.
         """
         today_str = scan_date_str or get_ist_date()
@@ -453,9 +497,43 @@ class DailyIntradayAutoTrader:
 
         logger.info(f"✅ [MorningScreener] Successfully evaluated {len(scored_stocks)} / {len(universe)} stocks across NIFTY 500.")
 
-        # Sort by composite conviction score descending
-        scored_stocks.sort(key=lambda s: s["score"], reverse=True)
-        top_picks = scored_stocks[:top_n]
+        # Check broader market regime to align selection
+        regime_info = self.get_nifty_market_regime()
+        regime = regime_info.get("regime", "NEUTRAL")
+
+        # Separate bullish and bearish candidates
+        bull_candidates = [s for s in scored_stocks if s.get("side") == "BUY"]
+        bear_candidates = [s for s in scored_stocks if s.get("side") == "SELL"]
+        bull_candidates.sort(key=lambda s: s["score"], reverse=True)
+        bear_candidates.sort(key=lambda s: s["score"], reverse=True)
+
+        logger.info(f"📊 [MorningScreener] Scored breakdown: {len(bull_candidates)} BUY / {len(bear_candidates)} SELL. Market Regime: {regime}")
+
+        # Regime-aware allocation of Top N slots
+        if regime == "BEARISH":
+            # In a falling market, prioritize shorts (70% SELL / 30% BUY)
+            target_shorts = min(len(bear_candidates), int(top_n * 0.7))
+            target_longs = top_n - target_shorts
+            top_picks = bear_candidates[:target_shorts] + bull_candidates[:target_longs]
+        elif regime == "BULLISH":
+            # In a rising market, prioritize longs (70% BUY / 30% SELL)
+            target_longs = min(len(bull_candidates), int(top_n * 0.7))
+            target_shorts = top_n - target_longs
+            top_picks = bull_candidates[:target_longs] + bear_candidates[:target_shorts]
+        else:
+            # Neutral market: 50/50 balance
+            target_each = top_n // 2
+            top_picks = bull_candidates[:target_each] + bear_candidates[:target_each]
+
+        # If picks are fewer than top_n, fill from remaining scored stocks sorted by score
+        if len(top_picks) < top_n:
+            picked_syms = {p["symbol"] for p in top_picks}
+            remaining = [s for s in scored_stocks if s["symbol"] not in picked_syms]
+            remaining.sort(key=lambda s: s["score"], reverse=True)
+            top_picks.extend(remaining[:(top_n - len(top_picks))])
+
+        # Sort final top picks by rank
+        top_picks.sort(key=lambda s: s["score"], reverse=True)
 
         # Log into SQLite DB table `daily_intraday_picks`
         with self._lock:
@@ -516,10 +594,15 @@ class DailyIntradayAutoTrader:
         today_str = trade_date_str or get_ist_date()
         now_ts = get_ist_now_ts()
 
-        # Strict 3:00 PM Cutoff: Block opening any new intraday positions after 15:00 IST
-        if not trade_date_str and datetime.now(IST).time() >= dt_time(15, 0):
-            logger.warning("🚫 [PaperTrader] Cannot enter new intraday trades after 15:00 IST (3:00 PM square-off cutoff passed).")
-            return []
+        # Strict Market Hours Hard-Lock: Only allow trade execution between 09:16 and 15:00 IST
+        now_time = datetime.now(IST).time()
+        if not trade_date_str:
+            if now_time < dt_time(9, 16):
+                logger.warning(f"🚫 [PaperTrader] Market not open yet ({now_time.strftime('%H:%M:%S')} IST). Intraday trades can only be entered between 09:16 and 15:00 IST.")
+                return []
+            if now_time >= dt_time(15, 0):
+                logger.warning("🚫 [PaperTrader] Cannot enter new intraday trades after 15:00 IST (3:00 PM square-off cutoff passed).")
+                return []
 
         # If no picks provided in memory, read from `daily_intraday_picks`
         if not picks:
@@ -719,10 +802,14 @@ class DailyIntradayAutoTrader:
         now_dt = datetime.now(IST)
         now_ts = get_ist_now_ts()
 
-        # Strict 3:00 PM cutoff: No new entries allowed after 15:00 IST
-        if not trade_date_str and now_dt.time() >= dt_time(15, 0):
-            logger.info("🚫 [OpportunityScanner] Past 15:00 IST intraday cutoff. No new trades entered.")
-            return []
+        # Strict Market Hours Hard-Lock: Only allow trade execution between 09:16 and 15:00 IST
+        if not trade_date_str:
+            if now_dt.time() < dt_time(9, 16):
+                logger.info(f"🚫 [OpportunityScanner] Market not open yet ({now_dt.time().strftime('%H:%M:%S')} IST). Waiting for 09:16 IST.")
+                return []
+            if now_dt.time() >= dt_time(15, 0):
+                logger.info("🚫 [OpportunityScanner] Past 15:00 IST intraday cutoff. No new trades entered.")
+                return []
 
         with self._lock:
             conn = self._get_connection()
@@ -826,6 +913,7 @@ class DailyIntradayAutoTrader:
         # 5. Check triggers and execute trades
         new_trades = []
         lev = float(getattr(self, "leverage", 5.0))
+        nifty_regime = self.get_nifty_market_regime().get("regime", "NEUTRAL")
 
         with self._lock:
             conn = self._get_connection()
@@ -845,7 +933,7 @@ class DailyIntradayAutoTrader:
                 curr_price = float(batch_prices.get(sym) or batch_prices.get(sym.replace(".NS", "")) or pick["price"])
                 base_price = float(pick["price"])
 
-                # 2. Strict Breakout/Breakdown Confirmation based on Side:
+                # 2. Strict Breakout/Breakdown Confirmation based on Side & Market Regime:
                 if side == "SELL":
                     trigger_price = float(pick.get("entry_trigger_price") or (base_price * 0.996))
                     # Must break down below trigger price AND be below base price (red downward momentum)
@@ -853,6 +941,9 @@ class DailyIntradayAutoTrader:
                     now_ist_time = datetime.now(IST).time()
                     if dt_time(9, 15) <= now_ist_time < dt_time(9, 25):
                         is_opportunity = is_opportunity and (curr_price <= trigger_price * 0.998)
+                    # If broad market is BULLISH, require deeper breakdown confirmation before shorting
+                    if nifty_regime == "BULLISH":
+                        is_opportunity = is_opportunity and (curr_price <= trigger_price * 0.997)
 
                     initial_sl = round(curr_price * 1.012, 2)     # +1.2% stop-loss (above entry)
                     target_p = round(curr_price * 0.978, 2)       # -2.2% profit target (below entry)
@@ -864,6 +955,9 @@ class DailyIntradayAutoTrader:
                     now_ist_time = datetime.now(IST).time()
                     if dt_time(9, 15) <= now_ist_time < dt_time(9, 25):
                         is_opportunity = is_opportunity and (curr_price >= trigger_price * 1.002)
+                    # If broad market is BEARISH, require stronger breakout confirmation before buying
+                    if nifty_regime == "BEARISH":
+                        is_opportunity = is_opportunity and (curr_price >= trigger_price * 1.003)
 
                     initial_sl = round(curr_price * 0.988, 2)     # -1.2% stop-loss (below entry)
                     target_p = round(curr_price * 1.022, 2)       # +2.2% profit target (above entry)
