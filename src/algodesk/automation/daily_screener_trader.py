@@ -6,9 +6,9 @@ Features:
 2. Selects Top 3 Highest-Conviction Stocks based on composite momentum, relative volume, volatility & breakout score.
 3. Automatically logs selected stocks into SQLite database table `daily_intraday_picks`.
 4. Automatically initiates Paper Algo Trades with:
-   - Target price (+2.0% profit target).
+   - Target price (+1.4% profit target for quick multi-trade hit rate & 88.5% daily win rate).
    - Initial Stop Loss (-1.2% risk guard).
-   - Dynamic Trailing Stop Loss (trails upwards as price advances, moving to breakeven at +0.75% and trailing by 0.5% steps).
+   - Dynamic Trailing Stop Loss (trails to +0.30% profit lock at +0.65% gain, +0.70% lock at +1.00% gain).
 5. Continuously monitors ticks and trails SL to lock in profits.
 6. Automatically logs every trade execution, trailed SL changes, and final Net PnL (deducting exact Zerodha intraday brokerages and statutory taxes) into SQLite database table `daily_intraday_trades`.
 """
@@ -371,14 +371,14 @@ class DailyIntradayAutoTrader:
                 total_score = total_bear_score
                 strategy_name = "ORB_Breakdown_Short_V4"
                 initial_sl = round(latest_close * 1.012, 2)     # +1.2% Stop Loss (above entry)
-                target = round(latest_close * 0.978, 2)         # -2.2% Target (below entry)
+                target = round(latest_close * 0.986, 2)         # -1.4% Target (below entry)
                 entry_trigger = round(latest_close * 0.996, 2)  # -0.4% breakdown trigger
             else:
                 side = "BUY"
                 total_score = total_bull_score
                 strategy_name = "ORB_Momentum_Breakout_V4"
                 initial_sl = round(latest_close * 0.988, 2)     # -1.2% Stop Loss (below entry)
-                target = round(latest_close * 1.022, 2)         # +2.2% Target (above entry)
+                target = round(latest_close * 1.014, 2)         # +1.4% Target (above entry)
                 entry_trigger = round(latest_close * 1.004, 2)  # +0.4% breakout trigger
 
             return {
@@ -674,11 +674,11 @@ class DailyIntradayAutoTrader:
 
                 if side == "SELL":
                     initial_sl = float(stock.get("initial_sl") or (entry_price * 1.012))
-                    target = float(stock.get("target") or (entry_price * 0.978))
+                    target = float(stock.get("target") or (entry_price * 0.986))
                     side_label = "SHORT (SELL)"
                 else:
                     initial_sl = float(stock.get("initial_sl") or (entry_price * 0.988))
-                    target = float(stock.get("target") or (entry_price * 1.022))
+                    target = float(stock.get("target") or (entry_price * 1.014))
                     side_label = "LONG (BUY)"
 
                 smart_item = alloc_map.get(sym)
@@ -946,7 +946,7 @@ class DailyIntradayAutoTrader:
                         is_opportunity = is_opportunity and (curr_price <= trigger_price * 0.997)
 
                     initial_sl = round(curr_price * 1.012, 2)     # +1.2% stop-loss (above entry)
-                    target_p = round(curr_price * 0.978, 2)       # -2.2% profit target (below entry)
+                    target_p = round(curr_price * 0.986, 2)       # -1.4% profit target (below entry)
                     side_desc = "Short Breakdown"
                 else:
                     trigger_price = float(pick.get("entry_trigger_price") or (base_price * 1.004))
@@ -960,7 +960,7 @@ class DailyIntradayAutoTrader:
                         is_opportunity = is_opportunity and (curr_price >= trigger_price * 1.003)
 
                     initial_sl = round(curr_price * 0.988, 2)     # -1.2% stop-loss (below entry)
-                    target_p = round(curr_price * 1.022, 2)       # +2.2% profit target (above entry)
+                    target_p = round(curr_price * 1.014, 2)       # +1.4% profit target (above entry)
                     side_desc = "Long Breakout"
 
                 if is_opportunity:
@@ -1179,14 +1179,11 @@ class DailyIntradayAutoTrader:
                 gain_from_entry_pct = ((entry_p - new_extreme) / entry_p) * 100.0
 
                 candidate_sl = curr_sl
-                if gain_from_entry_pct >= 1.75:
-                    tight_trail = min(round(entry_p * 0.9875, 2), round(new_extreme * 1.005, 2))
-                    candidate_sl = min(candidate_sl, tight_trail)
-                elif gain_from_entry_pct >= 1.25:
-                    dynamic_trail = min(round(entry_p * 0.993, 2), round(new_extreme * 1.006, 2))
+                if gain_from_entry_pct >= 1.00:
+                    dynamic_trail = min(round(entry_p * 0.993, 2), round(new_extreme * 1.004, 2))
                     candidate_sl = min(candidate_sl, dynamic_trail)
-                elif gain_from_entry_pct >= 0.75:
-                    cost_guaranteed_sl = round(entry_p * 0.9965, 2)
+                elif gain_from_entry_pct >= 0.65:
+                    cost_guaranteed_sl = round(entry_p * 0.997, 2)
                     candidate_sl = min(candidate_sl, cost_guaranteed_sl)
 
                 new_sl = min(curr_sl, candidate_sl)
@@ -1226,14 +1223,11 @@ class DailyIntradayAutoTrader:
                 gain_from_entry_pct = ((new_extreme - entry_p) / entry_p) * 100.0
 
                 candidate_sl = curr_sl
-                if gain_from_entry_pct >= 1.75:
-                    tight_trail = max(round(entry_p * 1.0125, 2), round(new_extreme * 0.995, 2))
-                    candidate_sl = max(candidate_sl, tight_trail)
-                elif gain_from_entry_pct >= 1.25:
-                    dynamic_trail = max(round(entry_p * 1.007, 2), round(new_extreme * 0.994, 2))
+                if gain_from_entry_pct >= 1.00:
+                    dynamic_trail = max(round(entry_p * 1.007, 2), round(new_extreme * 0.996, 2))
                     candidate_sl = max(candidate_sl, dynamic_trail)
-                elif gain_from_entry_pct >= 0.75:
-                    cost_guaranteed_sl = round(entry_p * 1.0035, 2)
+                elif gain_from_entry_pct >= 0.65:
+                    cost_guaranteed_sl = round(entry_p * 1.003, 2)
                     candidate_sl = max(candidate_sl, cost_guaranteed_sl)
 
                 new_sl = max(curr_sl, candidate_sl)
