@@ -618,5 +618,68 @@ def test_account_capital_availability_gate(tmp_path):
     assert len(opp_trades) == 0
 
 
+def test_bidirectional_short_selling_mechanics(tmp_path):
+    """
+    Verifies that the engine executes SHORT (SELL) trades:
+    1. Short candidate triggers breakdown below trigger price.
+    2. Short trade enters with SL above entry and Target below entry.
+    3. Trailing SL lowers as price drops, locking in profit.
+    4. Target hit realizes full short profit.
+    """
+    db_file = tmp_path / "test_short_selling.db"
+    trader = DailyIntradayAutoTrader(db_path=db_file, initial_capital=100000.0, leverage=5.0)
+
+    # 1. Insert a SHORT candidate into daily_intraday_picks
+    conn = sqlite3.connect(str(db_file))
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO daily_intraday_picks (
+            date, rank, symbol, company_name, sector, price, conviction_score,
+            rvol, strategy_name, entry_trigger_price, initial_sl, target_price,
+            trailing_step_pct, status, side, created_at
+        ) VALUES
+        ('2026-10-28', 1, 'TATAMOTORS', 'Tata Motors', 'Auto', 1000.0, 88.0, 2.2, 'ORB_Breakdown_Short_V4', 996.0, 1014.0, 978.0, 0.5, 'WATCHING', 'SELL', '2026-10-28 09:16:00')
+    """)
+    conn.commit()
+    conn.close()
+
+    # 2. Trigger breakdown: Price drops to 995.0 (below 996 trigger)
+    entered_trades = trader.scan_and_execute_intraday_opportunities(
+        current_prices={"TATAMOTORS": 995.0},
+        trade_date_str="2026-10-28"
+    )
+    assert len(entered_trades) == 1
+    short_trade = entered_trades[0]
+    assert short_trade["symbol"] == "TATAMOTORS"
+    assert short_trade["side"] == "SELL"
+    assert short_trade["entry_price"] == 995.0
+    assert short_trade["initial_sl"] > 995.0  # SL is above entry for short
+    assert short_trade["target_price"] < 995.0  # Target is below entry for short
+
+    # 3. Price drops to +0.8% profit for short (price drops to 987.0)
+    # Trailing SL should lower below entry to lock in cost-guaranteed profit
+    updates = trader.monitor_and_update_trailing_sl(current_prices={"TATAMOTORS": 987.0})
+    conn = sqlite3.connect(str(db_file))
+    cur = conn.cursor()
+    cur.execute("SELECT current_sl, status FROM daily_intraday_trades WHERE symbol='TATAMOTORS'")
+    row = cur.fetchone()
+    conn.close()
+    assert row[0] < 995.0  # SL lowered below entry price for short!
+    assert row[1] == "OPEN"
+
+    # 4. Price reaches target: drops to 970.0 (below 978 target) -> TARGET_HIT!
+    exits = trader.monitor_and_update_trailing_sl(current_prices={"TATAMOTORS": 970.0})
+    conn = sqlite3.connect(str(db_file))
+    cur = conn.cursor()
+    cur.execute("SELECT status, exit_reason, net_pnl, gross_pnl FROM daily_intraday_trades WHERE symbol='TATAMOTORS'")
+    row = cur.fetchone()
+    conn.close()
+    assert row[0] == "CLOSED"
+    assert row[1] == "TARGET_HIT"
+    assert row[2] > 0.0  # Positive net profit on short!
+    assert row[3] > 0.0  # Positive gross profit on short!
+
+
+
 
 

@@ -138,6 +138,12 @@ class DailyIntradayAutoTrader:
                 )
             """)
 
+            # Schema migration: ensure 'side' exists in daily_intraday_picks
+            try:
+                cur.execute("ALTER TABLE daily_intraday_picks ADD COLUMN side TEXT DEFAULT 'BUY';")
+            except Exception:
+                pass
+
             # Load persisted settings if available
             try:
                 cur.execute("SELECT key, value FROM daily_automation_settings")
@@ -284,14 +290,21 @@ class DailyIntradayAutoTrader:
             # 1. Relative Volume (RVOL)
             rvol = latest_vol / avg_vol if avg_vol > 0 else 1.0
 
-            # 2. Moving Average Trend (EMA 20 & SMA 50)
+            # 2. Moving Average Trend (Bullish & Bearish)
             ema_20 = float(close_series.ewm(span=20, adjust=False).mean().iloc[-1])
             sma_50 = float(close_series.rolling(window=min(len(df), 50)).mean().iloc[-1])
-            trend_score = 0.0
+
+            bull_trend_score = 0.0
             if latest_close > ema_20:
-                trend_score += 15.0
+                bull_trend_score += 15.0
             if ema_20 > sma_50:
-                trend_score += 15.0
+                bull_trend_score += 15.0
+
+            bear_trend_score = 0.0
+            if latest_close < ema_20:
+                bear_trend_score += 15.0
+            if ema_20 < sma_50:
+                bear_trend_score += 15.0
 
             # 3. Momentum (RSI 14)
             delta = close_series.diff()
@@ -300,13 +313,21 @@ class DailyIntradayAutoTrader:
             rs = gain / (loss + 1e-8)
             rsi = float((100 - (100 / (1 + rs))).iloc[-1])
 
-            rsi_score = 0.0
+            bull_rsi_score = 0.0
             if 50.0 <= rsi <= 72.0:
-                rsi_score = 25.0  # Sweet spot for bullish continuation
+                bull_rsi_score = 25.0  # Bullish continuation zone
             elif rsi > 72.0:
-                rsi_score = 15.0  # Overbought but strong
+                bull_rsi_score = 15.0
             elif 40.0 <= rsi < 50.0:
-                rsi_score = 10.0
+                bull_rsi_score = 10.0
+
+            bear_rsi_score = 0.0
+            if 28.0 <= rsi <= 50.0:
+                bear_rsi_score = 25.0  # Bearish breakdown zone
+            elif rsi < 28.0:
+                bear_rsi_score = 15.0
+            elif 50.0 < rsi <= 60.0:
+                bear_rsi_score = 10.0
 
             # 4. Volatility / ATR Range (Ensuring intraday range for profit)
             high_s = df["high"]
@@ -321,28 +342,52 @@ class DailyIntradayAutoTrader:
 
             volatility_score = min(20.0, atr_pct * 8.0)  # Stocks with 2.5%+ ATR get full 20 pts
 
-            # 5. Breakout Proximity (Near 20-day high)
+            # 5. Proximity to 20-day High (BUY) vs 20-day Low (SELL)
             high_20d = float(high_s.iloc[-20:].max())
+            low_20d = float(low_s.iloc[-20:].min())
+
             dist_from_high_pct = ((high_20d - latest_close) / latest_close) * 100.0
-            breakout_score = max(0.0, 25.0 - (dist_from_high_pct * 4.0))
+            bull_breakout_score = max(0.0, 25.0 - (dist_from_high_pct * 4.0))
 
-            # Composite Conviction Score (0 to 100)
+            dist_from_low_pct = ((latest_close - low_20d) / latest_close) * 100.0
+            bear_breakdown_score = max(0.0, 25.0 - (dist_from_low_pct * 4.0))
+
+            # Composite Conviction Scores
             rvol_score = min(25.0, rvol * 12.5)
-            total_score = round(trend_score + rsi_score + volatility_score + breakout_score + (rvol_score * 0.3), 2)
-
             day_change_pct = round(((latest_close - prev_close) / prev_close) * 100.0, 2)
+
+            total_bull_score = round(bull_trend_score + bull_rsi_score + volatility_score + bull_breakout_score + (rvol_score * 0.3), 2)
+            total_bear_score = round(bear_trend_score + bear_rsi_score + volatility_score + bear_breakdown_score + (rvol_score * 0.3), 2)
+
+            # Bidirectional Selector: Select Short if bearish conviction dominates and price action confirms weakness
+            if total_bear_score > total_bull_score and (day_change_pct <= 0.0 or latest_close < ema_20):
+                side = "SELL"
+                total_score = total_bear_score
+                strategy_name = "ORB_Breakdown_Short_V4"
+                initial_sl = round(latest_close * 1.014, 2)     # +1.4% Stop Loss (above entry)
+                target = round(latest_close * 0.978, 2)         # -2.2% Target (below entry)
+                entry_trigger = round(latest_close * 0.996, 2)  # -0.4% breakdown trigger
+            else:
+                side = "BUY"
+                total_score = total_bull_score
+                strategy_name = "ORB_Momentum_Breakout_V4"
+                initial_sl = round(latest_close * 0.986, 2)     # -1.4% Stop Loss (below entry)
+                target = round(latest_close * 1.022, 2)         # +2.2% Target (above entry)
+                entry_trigger = round(latest_close * 1.004, 2)  # +0.4% breakout trigger
 
             return {
                 "symbol": symbol,
                 "price": round(latest_close, 2),
+                "side": side,
                 "day_change_pct": day_change_pct,
                 "rvol": round(rvol, 2),
                 "rsi": round(rsi, 1),
                 "atr_pct": round(atr_pct, 2),
                 "score": total_score,
-                "strategy_name": "ORB_Momentum_Breakout_V4",
-                "initial_sl": round(latest_close * 0.986, 2),   # -1.4% Stop Loss (Volatility-Adaptive)
-                "target": round(latest_close * 1.022, 2),       # +2.2% Target (1.6:1 Reward-to-Risk)
+                "strategy_name": strategy_name,
+                "entry_trigger": entry_trigger,
+                "initial_sl": initial_sl,
+                "target": target,
                 "trailing_step_pct": 0.5,
             }
         except Exception as scan_err:
@@ -425,8 +470,8 @@ class DailyIntradayAutoTrader:
                     INSERT INTO daily_intraday_picks (
                         date, rank, symbol, company_name, sector, price,
                         conviction_score, rvol, strategy_name, entry_trigger_price,
-                        initial_sl, target_price, trailing_step_pct, status, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        initial_sl, target_price, trailing_step_pct, status, side, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     today_str,
                     rank,
@@ -437,11 +482,12 @@ class DailyIntradayAutoTrader:
                     stock["score"],
                     stock["rvol"],
                     stock["strategy_name"],
-                    round(stock["price"] * 1.004, 2),  # Intraday confirmed breakout entry trigger (+0.4%)
+                    stock.get("entry_trigger") or (round(stock["price"] * 0.996, 2) if stock.get("side") == "SELL" else round(stock["price"] * 1.004, 2)),
                     stock["initial_sl"],
                     stock["target"],
                     stock["trailing_step_pct"],
                     "WATCHING",
+                    stock.get("side", "BUY"),
                     now_ts
                 ))
 
@@ -540,9 +586,17 @@ class DailyIntradayAutoTrader:
                     break
 
                 sym = stock["symbol"]
+                side = str(stock.get("side") or "BUY").upper()
                 entry_price = float(stock["price"])
-                initial_sl = float(stock.get("initial_sl") or (entry_price * 0.986))
-                target = float(stock.get("target") or (entry_price * 1.022))
+
+                if side == "SELL":
+                    initial_sl = float(stock.get("initial_sl") or (entry_price * 1.014))
+                    target = float(stock.get("target") or (entry_price * 0.978))
+                    side_label = "SHORT (SELL)"
+                else:
+                    initial_sl = float(stock.get("initial_sl") or (entry_price * 0.986))
+                    target = float(stock.get("target") or (entry_price * 1.022))
+                    side_label = "LONG (BUY)"
 
                 smart_item = alloc_map.get(sym)
                 if smart_item:
@@ -550,16 +604,16 @@ class DailyIntradayAutoTrader:
                     expected_qty = max(1, int((allocated_for_trade * lev) / entry_price))
                     qty = max(1, int(smart_item.qty)) if smart_item.qty and smart_item.qty >= expected_qty * 0.7 else expected_qty
                     exposure = round(qty * entry_price, 2)
-                    entry_note = f"Smart AI Sizing ({lev:.0f}x MIS): Margin ₹{allocated_for_trade:,.2f} | Exposure ₹{exposure:,.2f} ({smart_item.weight_pct:.1f}%) | {smart_item.rationale}"
+                    entry_note = f"Smart AI Sizing ({lev:.0f}x MIS {side}): Margin ₹{allocated_for_trade:,.2f} | Exposure ₹{exposure:,.2f} ({smart_item.weight_pct:.1f}%) | {smart_item.rationale}"
                     weight_val = smart_item.weight_pct
                     rationale_val = smart_item.rationale
                 else:
                     allocated_for_trade = round(capital_per_trade, 2)
                     qty = max(1, int((allocated_for_trade * lev) / entry_price))
                     exposure = round(qty * entry_price, 2)
-                    entry_note = f"Standard sizing ({lev:.0f}x MIS): Margin ₹{allocated_for_trade:,.2f} | Exposure ₹{exposure:,.2f} | 1.4% SL & 2.2% Target"
+                    entry_note = f"Standard sizing ({lev:.0f}x MIS {side}): Margin ₹{allocated_for_trade:,.2f} | Exposure ₹{exposure:,.2f} | {side_label}"
                     weight_val = round((allocated_for_trade / pool_capital) * 100.0, 1)
-                    rationale_val = f"Equal distribution ({lev:.0f}x MIS leverage)"
+                    rationale_val = f"Equal distribution ({lev:.0f}x MIS {side})"
 
                 # Check if trade already exists for today
                 cur.execute("SELECT id FROM daily_intraday_trades WHERE trade_date = ? AND symbol = ?", (today_str, sym))
@@ -709,7 +763,7 @@ class DailyIntradayAutoTrader:
             # 3. Fetch candidate picks for today waiting for entry
             cur.execute("""
                 SELECT id, symbol, price, entry_trigger_price, initial_sl, target_price,
-                       trailing_step_pct, conviction_score, rvol, strategy_name, status
+                       trailing_step_pct, conviction_score, rvol, strategy_name, status, side
                 FROM daily_intraday_picks
                 WHERE date = ? AND status IN ('WATCHING', 'PICKED', 'PENDING_ENTRY')
                 ORDER BY rank ASC
@@ -787,18 +841,33 @@ class DailyIntradayAutoTrader:
                     continue
 
                 sym = pick["symbol"]
+                side = str(pick.get("side") or "BUY").upper()
                 curr_price = float(batch_prices.get(sym) or batch_prices.get(sym.replace(".NS", "")) or pick["price"])
                 base_price = float(pick["price"])
-                trigger_price = float(pick.get("entry_trigger_price") or (base_price * 1.004))
 
-                # 2. Strict Breakout Confirmation:
-                # Must cross the trigger price AND be above baseline/open price (green momentum)
-                is_opportunity = (curr_price >= trigger_price) and (curr_price > base_price)
+                # 2. Strict Breakout/Breakdown Confirmation based on Side:
+                if side == "SELL":
+                    trigger_price = float(pick.get("entry_trigger_price") or (base_price * 0.996))
+                    # Must break down below trigger price AND be below base price (red downward momentum)
+                    is_opportunity = (curr_price <= trigger_price) and (curr_price < base_price)
+                    now_ist_time = datetime.now(IST).time()
+                    if dt_time(9, 15) <= now_ist_time < dt_time(9, 25):
+                        is_opportunity = is_opportunity and (curr_price <= trigger_price * 0.998)
 
-                # Avoid opening 10-minute false spikes (09:15-09:25 IST requires stronger confirmation)
-                now_ist_time = datetime.now(IST).time()
-                if dt_time(9, 15) <= now_ist_time < dt_time(9, 25):
-                    is_opportunity = is_opportunity and (curr_price >= trigger_price * 1.002)
+                    initial_sl = round(curr_price * 1.014, 2)     # +1.4% stop-loss (above entry)
+                    target_p = round(curr_price * 0.978, 2)       # -2.2% profit target (below entry)
+                    side_desc = "Short Breakdown"
+                else:
+                    trigger_price = float(pick.get("entry_trigger_price") or (base_price * 1.004))
+                    # Must cross above trigger price AND be above base price (green upward momentum)
+                    is_opportunity = (curr_price >= trigger_price) and (curr_price > base_price)
+                    now_ist_time = datetime.now(IST).time()
+                    if dt_time(9, 15) <= now_ist_time < dt_time(9, 25):
+                        is_opportunity = is_opportunity and (curr_price >= trigger_price * 1.002)
+
+                    initial_sl = round(curr_price * 0.986, 2)     # -1.4% stop-loss (below entry)
+                    target_p = round(curr_price * 1.022, 2)       # +2.2% profit target (above entry)
+                    side_desc = "Long Breakout"
 
                 if is_opportunity:
                     # Allocate portion of available margin
@@ -807,14 +876,12 @@ class DailyIntradayAutoTrader:
                     actual_margin = round((qty * curr_price) / lev, 2)
                     exposure = round(qty * curr_price, 2)
 
-                    initial_sl = round(curr_price * 0.986, 2)     # -1.4% stop-loss (volatility-adaptive)
-                    target_p = round(curr_price * 1.022, 2)       # +2.2% profit target (1.6:1 Reward-to-Risk)
-
                     initial_log = json.dumps([{
                         "ts": now_ts,
                         "price": curr_price,
+                        "side": side,
                         "sl": initial_sl,
-                        "note": f"🎯 Confirmed Breakout Opportunity Triggered ({lev:.0f}x MIS): Margin ₹{actual_margin:,.2f} | 5x Exp ₹{exposure:,.2f} | Score: {conviction:.1f}"
+                        "note": f"🎯 Confirmed {side_desc} Opportunity Triggered ({lev:.0f}x MIS {side}): Margin ₹{actual_margin:,.2f} | 5x Exp ₹{exposure:,.2f} | Score: {conviction:.1f}"
                     }])
 
                     # Prevent duplicate insertion
@@ -832,7 +899,7 @@ class DailyIntradayAutoTrader:
                     """, (
                         today_str,
                         sym,
-                        "BUY",
+                        side,
                         qty,
                         actual_margin,
                         now_ts,
@@ -861,6 +928,7 @@ class DailyIntradayAutoTrader:
                     new_trades.append({
                         "trade_id": trade_id,
                         "symbol": sym,
+                        "side": side,
                         "qty": qty,
                         "allocated_capital": actual_margin,
                         "leverage": lev,
@@ -869,10 +937,10 @@ class DailyIntradayAutoTrader:
                         "initial_sl": initial_sl,
                         "target_price": target_p,
                         "status": "OPEN",
-                        "opportunity_note": f"Intraday Breakout Opportunity Triggered at ₹{curr_price:,.2f}"
+                        "opportunity_note": f"Intraday {side_desc} Opportunity Triggered at ₹{curr_price:,.2f}"
                     })
 
-                    logger.info(f"🎯 [IntradayOpportunity] Trade ENTERED: {sym} at ₹{curr_price} | Qty: {qty} ({lev:.0f}x MIS) | Margin: ₹{actual_margin:,.2f} | Target: ₹{target_p} | SL: ₹{initial_sl}")
+                    logger.info(f"🎯 [IntradayOpportunity] Trade ENTERED ({side}): {sym} at ₹{curr_price} | Qty: {qty} ({lev:.0f}x MIS) | Margin: ₹{actual_margin:,.2f} | Target: ₹{target_p} | SL: ₹{initial_sl}")
 
                     available_margin -= actual_margin
                     slots_available -= 1
@@ -975,6 +1043,7 @@ class DailyIntradayAutoTrader:
         for row in open_trades:
             t_id = row["id"]
             sym = row["symbol"]
+            side = str(row.get("side") or "BUY").upper()
             qty = row["qty"]
             entry_p = float(row["entry_price"])
             curr_sl = float(row["current_sl"])
@@ -1009,72 +1078,111 @@ class DailyIntradayAutoTrader:
             if curr_p is None or curr_p <= 0:
                 curr_p = entry_p  # fallback
 
-            # Update highest price watermark
-            new_highest = max(highest_p, curr_p)
-            gain_from_entry_pct = ((new_highest - entry_p) / entry_p) * 100.0
+            # Bidirectional Trailing SL & Exit Logic
+            if side == "SELL":
+                # SHORT POSITION: Price falling generates profit
+                new_extreme = min(highest_p if highest_p > 0 else entry_p, curr_p)
+                gain_from_entry_pct = ((entry_p - new_extreme) / entry_p) * 100.0
 
-            # Trailing SL & Target Logic (High-Profitability Multi-tier Protection):
-            # Tier 1 (Gain >= +0.75%): Move SL to cost-guaranteed profit (+0.35% cushion ensures net green PnL after all Zerodha brokerage, STT & taxes)
-            # Tier 2 (Gain >= +1.25%): Trail SL to lock in at least +0.70% net profit
-            # Tier 3 (Gain >= +1.75%): Tighten trail to lock in at least +1.25% net profit
-            # Tier 4 (Target Hit >= target_p): Realize full target profit (+2.2% or higher)
-            candidate_sl = curr_sl
+                candidate_sl = curr_sl
+                if gain_from_entry_pct >= 1.75:
+                    tight_trail = min(round(entry_p * 0.9875, 2), round(new_extreme * 1.005, 2))
+                    candidate_sl = min(candidate_sl, tight_trail)
+                elif gain_from_entry_pct >= 1.25:
+                    dynamic_trail = min(round(entry_p * 0.993, 2), round(new_extreme * 1.006, 2))
+                    candidate_sl = min(candidate_sl, dynamic_trail)
+                elif gain_from_entry_pct >= 0.75:
+                    cost_guaranteed_sl = round(entry_p * 0.9965, 2)
+                    candidate_sl = min(candidate_sl, cost_guaranteed_sl)
 
-            if gain_from_entry_pct >= 1.75:
-                tight_trail = max(round(entry_p * 1.0125, 2), round(new_highest * 0.995, 2))
-                candidate_sl = max(candidate_sl, tight_trail)
-            elif gain_from_entry_pct >= 1.25:
-                dynamic_trail = max(round(entry_p * 1.007, 2), round(new_highest * 0.994, 2))
-                candidate_sl = max(candidate_sl, dynamic_trail)
-            elif gain_from_entry_pct >= 0.75:
-                cost_guaranteed_sl = round(entry_p * 1.0035, 2)
-                candidate_sl = max(candidate_sl, cost_guaranteed_sl)
+                new_sl = min(curr_sl, candidate_sl)
+                sl_event = None
+                if new_sl < curr_sl:
+                    if curr_sl > entry_p and new_sl <= entry_p:
+                        sl_event = f"SHORT_SL_TRAILED_TO_COST_PLUS_PROFIT ({new_sl})"
+                    else:
+                        sl_event = f"SHORT_SL_TRAILED_DOWN_TO_{new_sl}"
 
-            new_sl = max(curr_sl, candidate_sl)
-            sl_event = None
+                    history.append({
+                        "time": now_ts,
+                        "event": sl_event,
+                        "highest_price": new_extreme,
+                        "new_sl": new_sl,
+                        "note": f"Low reached ₹{new_extreme:.2f} (+{gain_from_entry_pct:.2f}% short gain). Trailing SL lowered to ₹{new_sl:.2f}."
+                    })
 
-            if new_sl > curr_sl:
-                if curr_sl < entry_p and new_sl >= entry_p:
-                    sl_event = f"SL_TRAILED_TO_COST_PLUS_PROFIT ({new_sl})"
-                else:
-                    sl_event = f"SL_TRAILED_UP_TO_{new_sl}"
+                exit_price = None
+                exit_reason = None
+                if is_eod_cutoff:
+                    exit_price = curr_p
+                    exit_reason = "3PM_SQUAREOFF"
+                elif curr_p <= target_p:
+                    exit_price = min(curr_p, target_p)
+                    exit_reason = "TARGET_HIT"
+                elif curr_p >= new_sl:
+                    exit_price = new_sl
+                    exit_reason = "TRAILING_SL_HIT" if new_sl < entry_p else "STOP_LOSS_HIT"
 
-                history.append({
-                    "time": now_ts,
-                    "event": sl_event,
-                    "highest_price": new_highest,
-                    "new_sl": new_sl,
-                    "note": f"High reached ₹{new_highest:.2f} (+{gain_from_entry_pct:.2f}%). Trailing SL raised to ₹{new_sl:.2f}."
-                })
+                calc_side = "SHORT"
+                gross_pnl = round((entry_p - exit_price) * qty, 2) if exit_price is not None else 0.0
 
-            # Check Exit Conditions:
-            # 1. Strict 3:00 PM Cutoff Square-Off (by 3pm all positions must be squared off even if target not achieved)
-            # 2. Target Hit (Full Target profit booked, capturing any upside gap)
-            # 3. Trailing SL Hit / Stop Loss Hit (Banks locked profit or caps initial risk)
-            exit_price = None
-            exit_reason = None
+            else:
+                # LONG (BUY) POSITION: Price rising generates profit
+                new_extreme = max(highest_p, curr_p)
+                gain_from_entry_pct = ((new_extreme - entry_p) / entry_p) * 100.0
 
-            if is_eod_cutoff:
-                exit_price = curr_p
-                exit_reason = "3PM_SQUAREOFF"
-            elif curr_p >= target_p:
-                exit_price = max(curr_p, target_p)
-                exit_reason = "TARGET_HIT"
-            elif curr_p <= new_sl:
-                exit_price = new_sl
-                exit_reason = "TRAILING_SL_HIT" if new_sl >= entry_p else "STOP_LOSS_HIT"
+                candidate_sl = curr_sl
+                if gain_from_entry_pct >= 1.75:
+                    tight_trail = max(round(entry_p * 1.0125, 2), round(new_extreme * 0.995, 2))
+                    candidate_sl = max(candidate_sl, tight_trail)
+                elif gain_from_entry_pct >= 1.25:
+                    dynamic_trail = max(round(entry_p * 1.007, 2), round(new_extreme * 0.994, 2))
+                    candidate_sl = max(candidate_sl, dynamic_trail)
+                elif gain_from_entry_pct >= 0.75:
+                    cost_guaranteed_sl = round(entry_p * 1.0035, 2)
+                    candidate_sl = max(candidate_sl, cost_guaranteed_sl)
+
+                new_sl = max(curr_sl, candidate_sl)
+                sl_event = None
+                if new_sl > curr_sl:
+                    if curr_sl < entry_p and new_sl >= entry_p:
+                        sl_event = f"SL_TRAILED_TO_COST_PLUS_PROFIT ({new_sl})"
+                    else:
+                        sl_event = f"SL_TRAILED_UP_TO_{new_sl}"
+
+                    history.append({
+                        "time": now_ts,
+                        "event": sl_event,
+                        "highest_price": new_extreme,
+                        "new_sl": new_sl,
+                        "note": f"High reached ₹{new_extreme:.2f} (+{gain_from_entry_pct:.2f}%). Trailing SL raised to ₹{new_sl:.2f}."
+                    })
+
+                exit_price = None
+                exit_reason = None
+                if is_eod_cutoff:
+                    exit_price = curr_p
+                    exit_reason = "3PM_SQUAREOFF"
+                elif curr_p >= target_p:
+                    exit_price = max(curr_p, target_p)
+                    exit_reason = "TARGET_HIT"
+                elif curr_p <= new_sl:
+                    exit_price = new_sl
+                    exit_reason = "TRAILING_SL_HIT" if new_sl > entry_p else "STOP_LOSS_HIT"
+
+                calc_side = "LONG"
+                gross_pnl = round((exit_price - entry_p) * qty, 2) if exit_price is not None else 0.0
 
             if exit_price is not None:
                 # Calculate exact Zerodha statutory intraday cost
                 cost_breakdown = self.cost_calculator.calculate_roundtrip(
-                    side="LONG",
+                    side=calc_side,
                     qty=qty,
                     raw_entry_price=entry_p,
                     raw_exit_price=exit_price,
                     trailing_turnover_cr=120.0
                 )
                 brokerage_taxes = round(cost_breakdown.total_costs, 2)
-                gross_pnl = round((exit_price - entry_p) * qty, 2)
                 net_pnl = round(gross_pnl - brokerage_taxes, 2)
                 ret_pct = round((net_pnl / allocated) * 100.0, 2)
 
@@ -1095,7 +1203,7 @@ class DailyIntradayAutoTrader:
                     "exit_time": now_ts,
                     "exit_price": exit_price,
                     "exit_reason": exit_reason,
-                    "highest_price": new_highest,
+                    "highest_price": new_extreme,
                     "current_sl": new_sl,
                     "gross_pnl": gross_pnl,
                     "brokerage_taxes": brokerage_taxes,
@@ -1121,7 +1229,7 @@ class DailyIntradayAutoTrader:
                 trade_db_writes.append({
                     "type": "TRAILING_UPDATE",
                     "trade_id": t_id,
-                    "highest_price": new_highest,
+                    "highest_price": new_extreme,
                     "current_sl": new_sl,
                     "price_history": json.dumps(history),
                     "updated_at": now_ts
@@ -1132,7 +1240,7 @@ class DailyIntradayAutoTrader:
                     "symbol": sym,
                     "action": "TRAILING_UPDATE",
                     "current_price": curr_p,
-                    "highest_price": new_highest,
+                    "highest_price": new_extreme,
                     "current_sl": new_sl
                 })
 
