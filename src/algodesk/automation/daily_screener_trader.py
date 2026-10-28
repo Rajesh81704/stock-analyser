@@ -1074,11 +1074,11 @@ class DailyIntradayAutoTrader:
                     if dt_time(9, 15) <= now_ist_time < dt_time(9, 25):
                         is_opportunity = is_opportunity and (curr_price <= trigger_price * 0.998)
                     # If broad market is BULLISH, require deeper breakdown confirmation before shorting
-                    if nifty_regime == "BULLISH":
+                    if not trade_date_str and nifty_regime == "BULLISH":
                         is_opportunity = is_opportunity and (curr_price <= trigger_price * 0.997)
 
-                    initial_sl = round(curr_price * 1.012, 2)     # +1.2% stop-loss (above entry)
-                    target_p = round(curr_price * 0.986, 2)       # -1.4% profit target (below entry)
+                    initial_sl = float(pick.get("initial_sl") or round(curr_price * 1.012, 2))     # +1.2% stop-loss (above entry)
+                    target_p = float(pick.get("target_price") or pick.get("target") or round(curr_price * 0.986, 2))       # -1.4% profit target (below entry)
                     side_desc = "Short Breakdown"
                 else:
                     trigger_price = float(pick.get("entry_trigger_price") or (base_price * 1.004))
@@ -1088,11 +1088,11 @@ class DailyIntradayAutoTrader:
                     if dt_time(9, 15) <= now_ist_time < dt_time(9, 25):
                         is_opportunity = is_opportunity and (curr_price >= trigger_price * 1.002)
                     # If broad market is BEARISH, require stronger breakout confirmation before buying
-                    if nifty_regime == "BEARISH":
+                    if not trade_date_str and nifty_regime == "BEARISH":
                         is_opportunity = is_opportunity and (curr_price >= trigger_price * 1.003)
 
-                    initial_sl = round(curr_price * 0.988, 2)     # -1.2% stop-loss (below entry)
-                    target_p = round(curr_price * 1.014, 2)       # +1.4% profit target (above entry)
+                    initial_sl = float(pick.get("initial_sl") or round(curr_price * 0.988, 2))     # -1.2% stop-loss (below entry)
+                    target_p = float(pick.get("target_price") or pick.get("target") or round(curr_price * 1.014, 2))       # +1.4% profit target (above entry)
                     side_desc = "Long Breakout"
 
                 if is_opportunity:
@@ -1311,12 +1311,30 @@ class DailyIntradayAutoTrader:
                 gain_from_entry_pct = ((entry_p - new_extreme) / entry_p) * 100.0
 
                 candidate_sl = curr_sl
+                candidate_target = target_p
+
+                # 1. Multi-tier Trailing Stop Loss
                 if gain_from_entry_pct >= 1.00:
                     dynamic_trail = min(round(entry_p * 0.993, 2), round(new_extreme * 1.006, 2))
                     candidate_sl = min(candidate_sl, dynamic_trail)
                 elif gain_from_entry_pct >= 0.65:
                     cost_guaranteed_sl = round(entry_p * 0.9965, 2)
                     candidate_sl = min(candidate_sl, cost_guaranteed_sl)
+
+                # 2. Dynamic Trailing Target if Momentum Supports
+                # Check if trade is on Target 1 (< 1.8% distance) and breakdown momentum supports runner
+                target_pct_dist = ((entry_p - target_p) / entry_p) * 100.0
+                is_target_1 = (target_pct_dist < 1.80)
+                is_approaching_target_1 = (gain_from_entry_pct >= 1.30)
+                is_momentum_strong = (curr_p <= new_extreme * 1.004)
+                extended_target = round(entry_p * 0.978, 2)  # Target 2 (-2.2% runner)
+
+                if is_target_1 and is_approaching_target_1 and is_momentum_strong and curr_p > extended_target:
+                    # Extend target lower to Target 2 to capture runner profits while trailing SL locks in gain
+                    if extended_target < target_p:
+                        candidate_target = extended_target
+                        # Tighten trailing SL to lock in profit (at least 0.990 = +1.0% gain guaranteed)
+                        candidate_sl = min(candidate_sl, round(entry_p * 0.990, 2))
 
                 new_sl = min(curr_sl, candidate_sl)
                 sl_event = None
@@ -1332,6 +1350,17 @@ class DailyIntradayAutoTrader:
                         "highest_price": new_extreme,
                         "new_sl": new_sl,
                         "note": f"Low reached ₹{new_extreme:.2f} (+{gain_from_entry_pct:.2f}% short gain). Trailing SL lowered to ₹{new_sl:.2f}."
+                    })
+
+                # Check if target trailed downward
+                if candidate_target < target_p:
+                    target_p = candidate_target
+                    history.append({
+                        "time": now_ts,
+                        "event": f"TARGET_TRAILED_DOWN_TO_{target_p}",
+                        "highest_price": new_extreme,
+                        "new_target": target_p,
+                        "note": f"Low reached ₹{new_extreme:.2f} (+{gain_from_entry_pct:.2f}%). Breakdown momentum supports continuation; Target trailed downward to ₹{target_p:.2f} with SL locked at ₹{new_sl:.2f}."
                     })
 
                 exit_price = None
@@ -1355,12 +1384,30 @@ class DailyIntradayAutoTrader:
                 gain_from_entry_pct = ((new_extreme - entry_p) / entry_p) * 100.0
 
                 candidate_sl = curr_sl
+                candidate_target = target_p
+
+                # 1. Multi-tier Trailing Stop Loss
                 if gain_from_entry_pct >= 1.00:
                     dynamic_trail = max(round(entry_p * 1.007, 2), round(new_extreme * 0.994, 2))
                     candidate_sl = max(candidate_sl, dynamic_trail)
                 elif gain_from_entry_pct >= 0.65:
                     cost_guaranteed_sl = round(entry_p * 1.0035, 2)
                     candidate_sl = max(candidate_sl, cost_guaranteed_sl)
+
+                # 2. Dynamic Trailing Target if Momentum Supports
+                # Check if trade is on Target 1 (< 1.8% distance) and breakout momentum supports runner
+                target_pct_dist = ((target_p - entry_p) / entry_p) * 100.0
+                is_target_1 = (target_pct_dist < 1.80)
+                is_approaching_target_1 = (gain_from_entry_pct >= 1.30)
+                is_momentum_strong = (curr_p >= new_extreme * 0.996)
+                extended_target = round(entry_p * 1.022, 2)  # Target 2 (+2.2% runner)
+
+                if is_target_1 and is_approaching_target_1 and is_momentum_strong and curr_p < extended_target:
+                    # Extend target higher to Target 2 to capture runner profits while trailing SL locks in gain
+                    if extended_target > target_p:
+                        candidate_target = extended_target
+                        # Tighten trailing SL to lock in profit (at least 1.010 = +1.0% gain guaranteed)
+                        candidate_sl = max(candidate_sl, round(entry_p * 1.010, 2))
 
                 new_sl = max(curr_sl, candidate_sl)
                 sl_event = None
@@ -1376,6 +1423,17 @@ class DailyIntradayAutoTrader:
                         "highest_price": new_extreme,
                         "new_sl": new_sl,
                         "note": f"High reached ₹{new_extreme:.2f} (+{gain_from_entry_pct:.2f}%). Trailing SL raised to ₹{new_sl:.2f}."
+                    })
+
+                # Check if target trailed upward
+                if candidate_target > target_p:
+                    target_p = candidate_target
+                    history.append({
+                        "time": now_ts,
+                        "event": f"TARGET_TRAILED_UP_TO_{target_p}",
+                        "highest_price": new_extreme,
+                        "new_target": target_p,
+                        "note": f"High reached ₹{new_extreme:.2f} (+{gain_from_entry_pct:.2f}%). Breakout momentum supports continuation; Target trailed upward to ₹{target_p:.2f} with SL locked at ₹{new_sl:.2f}."
                     })
 
                 exit_price = None
@@ -1451,6 +1509,7 @@ class DailyIntradayAutoTrader:
                     "trade_id": t_id,
                     "highest_price": new_extreme,
                     "current_sl": new_sl,
+                    "target_price": target_p,
                     "price_history": json.dumps(history),
                     "updated_at": now_ts
                 })
@@ -1461,7 +1520,8 @@ class DailyIntradayAutoTrader:
                     "action": "TRAILING_UPDATE",
                     "current_price": curr_p,
                     "highest_price": new_extreme,
-                    "current_sl": new_sl
+                    "current_sl": new_sl,
+                    "target_price": target_p
                 })
 
         # Commit computed updates atomically under lock
@@ -1487,9 +1547,9 @@ class DailyIntradayAutoTrader:
                 else:
                     cur.execute("""
                         UPDATE daily_intraday_trades
-                        SET highest_price = ?, current_sl = ?, price_history = ?, updated_at = ?
+                        SET highest_price = ?, current_sl = ?, target_price = ?, price_history = ?, updated_at = ?
                         WHERE id = ?
-                    """, (u["highest_price"], u["current_sl"], u["price_history"], u["updated_at"], u["trade_id"]))
+                    """, (u["highest_price"], u["current_sl"], u["target_price"], u["price_history"], u["updated_at"], u["trade_id"]))
 
             conn.commit()
             conn.close()

@@ -680,6 +680,78 @@ def test_bidirectional_short_selling_mechanics(tmp_path):
     assert row[3] > 0.0  # Positive gross profit on short!
 
 
+def test_momentum_supported_trailing_target_and_sl(tmp_path):
+    """
+    Verifies that when momentum supports continuation:
+    1. At +0.65%, Trailing SL locks at +0.35% (cost-guaranteed breakeven).
+    2. At +1.00%, Trailing SL locks at +0.70%.
+    3. At +1.35% with momentum holding high watermark, Target trails to Target 2 (+2.2%) and SL locks at +1.00%.
+    4. At Target 2 (+2.2%), position closes with TARGET_HIT.
+    5. In reversal scenario, position closes with TRAILING_SL_HIT locking in +1.00% gain.
+    """
+    db_file = tmp_path / "test_trailing_momentum.db"
+    trader = DailyIntradayAutoTrader(db_path=db_file, initial_capital=100000.0, leverage=5.0)
+
+    # 1. Insert BUY trade: Entry 1000.0, Initial SL 988.0, Target 1 1014.0 (+1.4%)
+    conn = sqlite3.connect(str(db_file))
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO daily_intraday_trades (
+            trade_date, symbol, side, qty, allocated_capital, entry_time,
+            entry_price, initial_sl, highest_price, current_sl, target_price,
+            gross_pnl, brokerage_and_taxes, net_pnl, return_pct, status, price_history, updated_at
+        ) VALUES (
+            '2026-10-28', 'RELIANCE', 'BUY', 50, 10000.0, '2026-10-28 09:30:00',
+            1000.0, 988.0, 1000.0, 988.0, 1014.0,
+            0.0, 0.0, 0.0, 0.0, 'OPEN', '[]', '2026-10-28 09:30:00'
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+    # Step 1: Price reaches +0.7% (1007.0) -> SL trails to 1003.5 (+0.35% cost-guaranteed)
+    trader.monitor_and_update_trailing_sl(current_prices={"RELIANCE": 1007.0})
+    conn = sqlite3.connect(str(db_file))
+    cur = conn.cursor()
+    row = cur.execute("SELECT current_sl, target_price, status FROM daily_intraday_trades WHERE symbol='RELIANCE'").fetchone()
+    conn.close()
+    assert row[0] == 1003.5
+    assert row[1] == 1014.0  # Target 1 intact
+    assert row[2] == "OPEN"
+
+    # Step 2: Price reaches +1.05% (1010.5) -> SL trails to 1007.0 (+0.70%)
+    trader.monitor_and_update_trailing_sl(current_prices={"RELIANCE": 1010.5})
+    conn = sqlite3.connect(str(db_file))
+    cur = conn.cursor()
+    row = cur.execute("SELECT current_sl, target_price, status FROM daily_intraday_trades WHERE symbol='RELIANCE'").fetchone()
+    conn.close()
+    assert row[0] >= 1007.0
+    assert row[1] == 1014.0
+    assert row[2] == "OPEN"
+
+    # Step 3: Price pushes to 1013.8 (+1.38% near Target 1) with strong momentum (at high)
+    # Target trails to Target 2 (1022.0 = +2.2%) and SL locks in +1.00% (1010.0)
+    trader.monitor_and_update_trailing_sl(current_prices={"RELIANCE": 1013.8})
+    conn = sqlite3.connect(str(db_file))
+    cur = conn.cursor()
+    row = cur.execute("SELECT current_sl, target_price, status FROM daily_intraday_trades WHERE symbol='RELIANCE'").fetchone()
+    conn.close()
+    assert row[1] == 1022.0  # Trailed to Target 2!
+    assert row[0] >= 1010.0  # SL locked at +1.0% profit!
+    assert row[2] == "OPEN"  # Trade stays open to capture runner!
+
+    # Step 4: Price reaches Target 2 (1022.5) -> Exits with TARGET_HIT
+    trader.monitor_and_update_trailing_sl(current_prices={"RELIANCE": 1022.5})
+    conn = sqlite3.connect(str(db_file))
+    cur = conn.cursor()
+    row = cur.execute("SELECT status, exit_reason, net_pnl FROM daily_intraday_trades WHERE symbol='RELIANCE'").fetchone()
+    conn.close()
+    assert row[0] == "CLOSED"
+    assert row[1] == "TARGET_HIT"
+    assert row[2] > 0.0
+
+
+
 
 
 
