@@ -7,7 +7,7 @@ Features:
 3. Automatically logs selected stocks into SQLite database table `daily_intraday_picks`.
 4. Automatically initiates Paper Algo Trades with:
    - Target price (+2.0% profit target).
-   - Initial Stop Loss (-1.0% risk guard).
+   - Initial Stop Loss (-1.2% risk guard).
    - Dynamic Trailing Stop Loss (trails upwards as price advances, moving to breakeven at +0.75% and trailing by 0.5% steps).
 5. Continuously monitors ticks and trails SL to lock in profits.
 6. Automatically logs every trade execution, trailed SL changes, and final Net PnL (deducting exact Zerodha intraday brokerages and statutory taxes) into SQLite database table `daily_intraday_trades`.
@@ -364,14 +364,14 @@ class DailyIntradayAutoTrader:
                 side = "SELL"
                 total_score = total_bear_score
                 strategy_name = "ORB_Breakdown_Short_V4"
-                initial_sl = round(latest_close * 1.014, 2)     # +1.4% Stop Loss (above entry)
+                initial_sl = round(latest_close * 1.012, 2)     # +1.2% Stop Loss (above entry)
                 target = round(latest_close * 0.978, 2)         # -2.2% Target (below entry)
                 entry_trigger = round(latest_close * 0.996, 2)  # -0.4% breakdown trigger
             else:
                 side = "BUY"
                 total_score = total_bull_score
                 strategy_name = "ORB_Momentum_Breakout_V4"
-                initial_sl = round(latest_close * 0.986, 2)     # -1.4% Stop Loss (below entry)
+                initial_sl = round(latest_close * 0.988, 2)     # -1.2% Stop Loss (below entry)
                 target = round(latest_close * 1.022, 2)         # +2.2% Target (above entry)
                 entry_trigger = round(latest_close * 1.004, 2)  # +0.4% breakout trigger
 
@@ -590,11 +590,11 @@ class DailyIntradayAutoTrader:
                 entry_price = float(stock["price"])
 
                 if side == "SELL":
-                    initial_sl = float(stock.get("initial_sl") or (entry_price * 1.014))
+                    initial_sl = float(stock.get("initial_sl") or (entry_price * 1.012))
                     target = float(stock.get("target") or (entry_price * 0.978))
                     side_label = "SHORT (SELL)"
                 else:
-                    initial_sl = float(stock.get("initial_sl") or (entry_price * 0.986))
+                    initial_sl = float(stock.get("initial_sl") or (entry_price * 0.988))
                     target = float(stock.get("target") or (entry_price * 1.022))
                     side_label = "LONG (BUY)"
 
@@ -854,7 +854,7 @@ class DailyIntradayAutoTrader:
                     if dt_time(9, 15) <= now_ist_time < dt_time(9, 25):
                         is_opportunity = is_opportunity and (curr_price <= trigger_price * 0.998)
 
-                    initial_sl = round(curr_price * 1.014, 2)     # +1.4% stop-loss (above entry)
+                    initial_sl = round(curr_price * 1.012, 2)     # +1.2% stop-loss (above entry)
                     target_p = round(curr_price * 0.978, 2)       # -2.2% profit target (below entry)
                     side_desc = "Short Breakdown"
                 else:
@@ -865,7 +865,7 @@ class DailyIntradayAutoTrader:
                     if dt_time(9, 15) <= now_ist_time < dt_time(9, 25):
                         is_opportunity = is_opportunity and (curr_price >= trigger_price * 1.002)
 
-                    initial_sl = round(curr_price * 0.986, 2)     # -1.4% stop-loss (below entry)
+                    initial_sl = round(curr_price * 0.988, 2)     # -1.2% stop-loss (below entry)
                     target_p = round(curr_price * 1.022, 2)       # +2.2% profit target (above entry)
                     side_desc = "Long Breakout"
 

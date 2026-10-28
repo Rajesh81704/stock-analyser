@@ -173,7 +173,7 @@ def _morning_intraday_screener_and_trade_job():
         if daily_auto_trader.is_market_day():
             logger.info("🌅 [09:16 AM IST] Running Morning Screener across NIFTY 500 & Arming Watchlist for Confirmed Breakout Algo Trading...")
             picks = daily_auto_trader.run_morning_screener_and_pick(top_n=10)
-            logger.info(f"✅ [Morning Screener] Picked {len(picks)} elite stocks. Watchlist armed with confirmed breakout triggers (SL: -1.4%, Target: +2.2%).")
+            logger.info(f"✅ [Morning Screener] Picked {len(picks)} elite stocks. Watchlist armed with confirmed breakout triggers (SL: -1.2%, Target: +2.2%).")
             # Let the 30-second continuous intraday opportunity engine execute entries when triggers are validated
             daily_auto_trader.scan_and_execute_intraday_opportunities()
         else:
