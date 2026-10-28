@@ -163,15 +163,20 @@ def deploy_remote_mode(args):
 
     # Step 5: Verify Health
     print_step("🩺", "Verifying service health on VPS...")
-    check_cmd = f"curl -s http://127.0.0.1:8500/api/automation/capital/verify"
-    stdin, stdout, stderr = ssh.exec_command(check_cmd)
-    res_text = stdout.read().decode().strip()
+    res_text = ""
+    for attempt in range(1, 4):
+        time.sleep(2)
+        check_cmd = "curl -s http://127.0.0.1:8500/api/automation/capital/verify"
+        stdin, stdout, stderr = ssh.exec_command(check_cmd)
+        res_text = stdout.read().decode().strip()
+        if "success" in res_text or "capital_summary" in res_text:
+            break
 
     if "success" in res_text or "capital_summary" in res_text:
         print_success("Service is verified ONLINE and capital gate is active!")
         print(f"Server response: {res_text[:160]}...")
     else:
-        print(f"Health response: {res_text}")
+        print(f"Health response: {res_text or 'Connecting...'}")
 
     ssh.close()
     print("\n" + "=" * 72)
