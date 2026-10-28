@@ -50,6 +50,24 @@ logging.basicConfig(level=logging.INFO, format="[%(asctime)s] [%(levelname)s] %(
 
 DB_PATH = Path("data/stock_screener.db")
 
+# Top 100 NSE Liquid Blue-Chip & Momentum Universe
+NIFTY_100_LIQUID_UNIVERSE = [
+    "RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "BHARTIARTL", "INFY", "ITC", "SBIN",
+    "LTIM", "HINDUNILVR", "LT", "BAJFINANCE", "MARUTI", "SUNPHARMA", "AXISBANK",
+    "KOTAKBANK", "TITAN", "ONGC", "TATAMOTORS", "NTPC", "TATASTEEL", "POWERGRID",
+    "ADANIENT", "JSWSTEEL", "COALINDIA", "M&M", "ADANIPORTS", "ULTRACEMCO", "BPCL",
+    "GRASIM", "HCLTECH", "BAJAJFINSV", "WIPRO", "NESTLEIND", "CIPLA", "TECHM",
+    "EICHERMOT", "TATACONSUM", "DRREDDY", "DIVISLAB", "APOLLOHOSP", "HEROMOTOCO",
+    "BRITANNIA", "ASIANPAINT", "SHREECEM", "INDUSINDBK", "BEL", "HAL", "VEDL",
+    "DLF", "CHOLAFIN", "TRENT", "ZOMATO", "SIEMENS", "ABB", "BANKBARODA", "CANBK",
+    "PNB", "TVSMOTOR", "HINDALCO", "AMBUJACEM", "GODREJCP", "PIDILITIND", "DABUR",
+    "IOC", "GAIL", "BHEL", "RECLTD", "PFC", "HINDPETRO", "BERGEPAINT", "AUROPHARMA",
+    "LUPIN", "VOLTAS", "CUMMINSIND", "PERSISTENT", "POLYCAB", "COLPAL", "ASHOKLEY",
+    "MUTHOOTFIN", "PIIND", "SRF", "TATACHEM", "TATAPOWER", "TATACOMM", "JINDALSTEL",
+    "SAIL", "NMDC", "NATIONALUM", "PETRONET", "CONCOR", "IDFCFIRSTB", "BANDHANBNK",
+    "SBICARD", "SBILIFE", "HDFCLIFE", "ICICIPRULI", "ICICIGI", "JUBLFOOD", "IRCTC"
+]
+
 
 class DailyIntradayAutoTrader:
     """Automated Daily Screener, Stock Picker & Paper Algo Trading Engine."""
@@ -682,7 +700,14 @@ class DailyIntradayAutoTrader:
                     side_label = "LONG (BUY)"
 
                 smart_item = alloc_map.get(sym)
-                if smart_item:
+                if len(picks) == 1:
+                    allocated_for_trade = round(pool_capital, 2)
+                    qty = max(1, int((allocated_for_trade * lev) / entry_price))
+                    exposure = round(qty * entry_price, 2)
+                    entry_note = f"Single Pick Full Allocation ({lev:.0f}x MIS {side}): Margin ₹{allocated_for_trade:,.2f} | Exposure ₹{exposure:,.2f}"
+                    weight_val = 100.0
+                    rationale_val = "Single highest-conviction setup"
+                elif smart_item:
                     allocated_for_trade = round(float(smart_item.allocated_capital), 2)
                     expected_qty = max(1, int((allocated_for_trade * lev) / entry_price))
                     qty = max(1, int(smart_item.qty)) if smart_item.qty and smart_item.qty >= expected_qty * 0.7 else expected_qty
@@ -784,13 +809,97 @@ class DailyIntradayAutoTrader:
         return executed_trades
 
     # -------------------------------------------------------------------------
+    # 2a. Live NIFTY 100 Signal Watcher & Multi-Factor Dynamic Ranking Engine
+    # -------------------------------------------------------------------------
+    def scan_and_rank_nifty100_signals(
+        self,
+        min_conviction: float = 75.0,
+        top_n: int = 10,
+        scan_date_str: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Continuously watches the liquid NIFTY 100 universe, evaluating all crucial intraday parameters:
+        1. Intraday Trend & EMA alignment (20 EMA & 50 SMA).
+        2. Relative Volume expansion (RVOL >= 1.15x).
+        3. Momentum & RSI (14) sweet spot (52-72 for Long BUY, 28-48 for Short SELL).
+        4. Volatility / ATR range (ATR >= 1.0% ensuring ample intraday room for target).
+        5. Proximity to breakout / breakdown trigger.
+        6. NIFTY 50 Broad Market Regime alignment (+10 conviction bonus).
+
+        Filters for STRONG SIGNALS (conviction >= 75.0), ranks them from highest to lowest conviction,
+        and saves them into `daily_intraday_picks` table for execution.
+        """
+        today_str = scan_date_str or get_ist_date()
+        logger.info("🔍 [NIFTY100 Engine] Scanning & Ranking NIFTY 100 liquid stocks for high-conviction intraday signals...")
+
+        scored_stocks = []
+        with ThreadPoolExecutor(max_workers=25) as executor:
+            future_to_stock = {executor.submit(self._evaluate_single_stock, sym, {}): sym for sym in NIFTY_100_LIQUID_UNIVERSE}
+            for future in as_completed(future_to_stock):
+                try:
+                    res = future.result()
+                    if res and float(res.get("score") or 0.0) >= min_conviction:
+                        # Normalize key names for pick compatibility
+                        res["conviction_score"] = float(res.get("score") or 0.0)
+                        res["entry_trigger_price"] = float(res.get("entry_trigger") or 0.0)
+                        res["target_price"] = float(res.get("target") or 0.0)
+                        scored_stocks.append(res)
+                except Exception:
+                    pass
+
+        # Sort all strong signals by conviction score descending
+        scored_stocks.sort(key=lambda s: float(s.get("score") or 0.0), reverse=True)
+        top_ranked = scored_stocks[:top_n]
+        for rank, s in enumerate(top_ranked, start=1):
+            s["rank"] = rank
+
+        logger.info(f"🏆 [NIFTY100 Engine] Identified {len(scored_stocks)} strong signals (>= {min_conviction}). Top {len(top_ranked)} ranked for trading.")
+
+        # Persist / update into daily_intraday_picks
+        with self._lock:
+            conn = self._get_connection()
+            cur = conn.cursor()
+            for rank, stock in enumerate(top_ranked, start=1):
+                sym = stock["symbol"]
+                cur.execute("SELECT id, status FROM daily_intraday_picks WHERE date = ? AND symbol = ?", (today_str, sym))
+                existing = cur.fetchone()
+                if existing:
+                    if existing["status"] in ('WATCHING', 'PICKED', 'PENDING_ENTRY'):
+                        cur.execute("""
+                            UPDATE daily_intraday_picks
+                            SET rank = ?, conviction_score = ?, price = ?, entry_trigger_price = ?,
+                                initial_sl = ?, target_price = ?, side = ?
+                            WHERE id = ?
+                        """, (
+                            rank, stock["score"], stock["price"], stock["entry_trigger"],
+                            stock["initial_sl"], stock["target"], stock["side"], existing["id"]
+                        ))
+                else:
+                    cur.execute("""
+                        INSERT INTO daily_intraday_picks (
+                            date, rank, symbol, company_name, sector, price,
+                            conviction_score, rvol, strategy_name, entry_trigger_price,
+                            initial_sl, target_price, trailing_step_pct, status, side, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        today_str, rank, sym, f"{sym} Ltd", "NIFTY 100 Liquid",
+                        stock["price"], stock["score"], stock["rvol"], stock["strategy_name"],
+                        stock["entry_trigger"], stock["initial_sl"], stock["target"],
+                        0.5, "WATCHING", stock["side"], get_ist_now_ts()
+                    ))
+            conn.commit()
+            conn.close()
+
+        return top_ranked
+
+    # -------------------------------------------------------------------------
     # 2b. Continuous Whole-Day Opportunity Scanner & Dynamic Trader
     # -------------------------------------------------------------------------
     def scan_and_execute_intraday_opportunities(
         self,
         current_prices: Optional[Dict[str, float]] = None,
         trade_date_str: Optional[str] = None,
-        max_positions: int = 10,
+        max_positions: int = 3,
         min_trade_capital: float = 2000.0
     ) -> List[Dict[str, Any]]:
         """
@@ -842,6 +951,26 @@ class DailyIntradayAutoTrader:
             open_margin_utilized = sum(float(t["allocated_capital"] or 0.0) for t in open_trades)
             available_margin = max(0.0, total_margin_capital - open_margin_utilized + today_realized_pnl)
 
+            # 2a. Daily Risk Circuit Breaker: Cut trading if daily loss reaches -2.5% of capital
+            max_daily_loss_limit = -1.0 * (total_margin_capital * 0.025)
+            if today_realized_pnl <= max_daily_loss_limit:
+                logger.warning(
+                    f"🛡️ [RiskCircuitBreaker] Daily realized loss (₹{today_realized_pnl:,.2f}) hit max risk guard "
+                    f"(₹{max_daily_loss_limit:,.2f}). Trading halted for today to guarantee risk minimization."
+                )
+                conn.close()
+                return []
+
+            # 2b. Daily Profit Preservation Gate: If up +3.5% on the day and past 13:30, protect daily gains
+            daily_profit_target = total_margin_capital * 0.035
+            if today_realized_pnl >= daily_profit_target and now_dt.time() >= dt_time(13, 30):
+                logger.info(
+                    f"🏆 [ProfitPreservation] Daily profit target secured (+₹{today_realized_pnl:,.2f} >= +₹{daily_profit_target:,.2f}). "
+                    f"Protecting today's gains after 13:30 IST."
+                )
+                conn.close()
+                return []
+
             if available_margin < min_trade_capital:
                 logger.info(f"⏸️ [CapitalGate] Available margin (₹{available_margin:,.2f}) below min threshold (₹{min_trade_capital:,.2f}). Awaiting exits.")
                 conn.close()
@@ -858,15 +987,18 @@ class DailyIntradayAutoTrader:
             candidate_picks = [dict(r) for r in cur.fetchall()]
             conn.close()
 
-        # If no picks in DB, automatically run morning screener to generate top picks
-        if not candidate_picks and self.is_market_day():
-            logger.info("[OpportunityScanner] No candidate picks found in DB. Running screener to arm watchlist...")
-            candidate_picks = self.run_morning_screener_and_pick(top_n=max_positions, scan_date_str=today_str)
+        # If no picks or no eligible picks in DB, actively scan and rank NIFTY 100 live
+        eligible_candidates = [p for p in candidate_picks if p["symbol"] not in traded_today and p["symbol"] not in open_symbols]
+        if not eligible_candidates and self.is_market_day():
+            logger.info("⚡ [OpportunityScanner] No eligible picks waiting. Scanning & Ranking NIFTY 100 for fresh strong signals...")
+            ranked_signals = self.scan_and_rank_nifty100_signals(min_conviction=75.0, top_n=10, scan_date_str=today_str)
+            eligible_candidates = [p for p in ranked_signals if p["symbol"] not in traded_today and p["symbol"] not in open_symbols]
 
-        # Filter out stocks already traded today
-        eligible_candidates = [p for p in candidate_picks if p["symbol"] not in traded_today]
         if not eligible_candidates:
             return []
+
+        # Always evaluate candidates by descending rank & conviction score (best trades first)
+        eligible_candidates.sort(key=lambda x: float(x.get("conviction_score") or x.get("score") or 0.0), reverse=True)
 
         # 4. Fetch live market prices for eligible candidates
         cand_symbols = [p["symbol"] for p in eligible_candidates]
@@ -1048,8 +1180,8 @@ class DailyIntradayAutoTrader:
 
     def refresh_intraday_opportunity_watchlist(self, top_n: int = 10) -> List[Dict[str, Any]]:
         """
-        Refreshes or tops up today's intraday watchlist so that there are always high-conviction
-        stocks being watched for opportunities during the trading day.
+        Refreshes today's intraday watchlist from NIFTY 100 liquid stocks so that there are always
+        high-conviction stocks being ranked and watched for opportunities during the trading day.
         """
         today_str = get_ist_date()
         conn = self._get_connection()
@@ -1062,8 +1194,8 @@ class DailyIntradayAutoTrader:
         conn.close()
 
         if watching_cnt < 4 and self.is_market_day():
-            logger.info(f"🔄 [WatchlistRefresh] Only {watching_cnt} candidate stocks watching. Refreshing intraday picks across NIFTY 500...")
-            picks = self.run_morning_screener_and_pick(top_n=top_n, scan_date_str=today_str)
+            logger.info(f"🔄 [WatchlistRefresh] Only {watching_cnt} candidate stocks watching. Rescanning & ranking NIFTY 100 liquid universe...")
+            picks = self.scan_and_rank_nifty100_signals(min_conviction=75.0, top_n=top_n, scan_date_str=today_str)
             return picks
         return []
 
@@ -1180,10 +1312,10 @@ class DailyIntradayAutoTrader:
 
                 candidate_sl = curr_sl
                 if gain_from_entry_pct >= 1.00:
-                    dynamic_trail = min(round(entry_p * 0.993, 2), round(new_extreme * 1.004, 2))
+                    dynamic_trail = min(round(entry_p * 0.993, 2), round(new_extreme * 1.006, 2))
                     candidate_sl = min(candidate_sl, dynamic_trail)
                 elif gain_from_entry_pct >= 0.65:
-                    cost_guaranteed_sl = round(entry_p * 0.997, 2)
+                    cost_guaranteed_sl = round(entry_p * 0.9965, 2)
                     candidate_sl = min(candidate_sl, cost_guaranteed_sl)
 
                 new_sl = min(curr_sl, candidate_sl)
@@ -1224,10 +1356,10 @@ class DailyIntradayAutoTrader:
 
                 candidate_sl = curr_sl
                 if gain_from_entry_pct >= 1.00:
-                    dynamic_trail = max(round(entry_p * 1.007, 2), round(new_extreme * 0.996, 2))
+                    dynamic_trail = max(round(entry_p * 1.007, 2), round(new_extreme * 0.994, 2))
                     candidate_sl = max(candidate_sl, dynamic_trail)
                 elif gain_from_entry_pct >= 0.65:
-                    cost_guaranteed_sl = round(entry_p * 1.003, 2)
+                    cost_guaranteed_sl = round(entry_p * 1.0035, 2)
                     candidate_sl = max(candidate_sl, cost_guaranteed_sl)
 
                 new_sl = max(curr_sl, candidate_sl)

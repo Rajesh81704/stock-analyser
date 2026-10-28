@@ -215,18 +215,18 @@ def _eod_intraday_squareoff_job():
 
 
 def _market_hours_job():
-    """Triggered every 30 mins; checks if market is open before running."""
+    """Triggered every 15 mins during market hours to watch NIFTY 100, rank signals, and execute trades."""
     if is_market_hours():
-        logger.info("Market hours active (09:15-15:30 IST). Running 30-min automated scan & opportunity watchlist refresh...")
+        logger.info("Market hours active (09:15-15:30 IST). Running 15-min NIFTY 100 signal scan, ranking & opportunity execution...")
         try:
             from src.algodesk.automation.daily_screener_trader import daily_auto_trader
             daily_auto_trader.refresh_intraday_opportunity_watchlist(top_n=10)
             daily_auto_trader.scan_and_execute_intraday_opportunities()
         except Exception as e:
-            logger.warning(f"Notice during 30-min watchlist refresh: {e}")
-        run_automatic_scheduled_scan(trigger_name="30MIN_MARKET_HOURS_SCAN")
+            logger.warning(f"Notice during 15-min NIFTY 100 watchlist refresh: {e}")
+        run_automatic_scheduled_scan(trigger_name="15MIN_MARKET_HOURS_SCAN")
     else:
-        logger.info("Outside market hours. Skipping 30-min intra-day scan.")
+        logger.info("Outside market hours. Skipping 15-min intra-day scan.")
 
 
 def _post_market_job():
@@ -238,19 +238,19 @@ def _post_market_job():
 _global_scheduler: Optional[BackgroundScheduler] = None
 
 def start_automated_scheduler() -> BackgroundScheduler:
-    """Starts the background APScheduler daemon with intraday 30-min & EOD post-market jobs."""
+    """Starts the background APScheduler daemon with intraday 15-min & EOD post-market jobs."""
     global _global_scheduler
     if _global_scheduler and _global_scheduler.running:
         return _global_scheduler
 
     scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
 
-    # 1. Market Hours Job: Runs every 30 minutes
+    # 1. Market Hours Job: Runs every 15 minutes
     scheduler.add_job(
         _market_hours_job,
-        trigger=IntervalTrigger(minutes=30),
-        id="job_market_hours_30m",
-        name="Market Hours 30-Min Auto Scan",
+        trigger=IntervalTrigger(minutes=15),
+        id="job_market_hours_15m",
+        name="Market Hours 15-Min NIFTY 100 Signal Watch & Ranking",
         replace_existing=True
     )
 
