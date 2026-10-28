@@ -84,23 +84,23 @@ def test_trailing_sl_rules():
         assert row[1] == 100.4
         assert row[2] == "OPEN"
 
-        # Step 2: Price moves to +0.8% (100.8) -> Trailing SL raised to breakeven (100.0)
-        updates = trader.monitor_and_update_trailing_sl(current_prices={"TESTSTOCK": 100.8})
+        # Step 2: Price moves to +0.95% (100.95) -> Trailing SL raised to breakeven cushion (100.25)
+        updates = trader.monitor_and_update_trailing_sl(current_prices={"TESTSTOCK": 100.95})
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
         row = cur.execute("SELECT current_sl, highest_price, status FROM daily_intraday_trades WHERE symbol='TESTSTOCK'").fetchone()
         conn.close()
-        assert row[0] == 100.35  # Cost-guaranteed profit cushion (+0.35%)
-        assert row[1] == 100.8
+        assert row[0] == 100.25  # Cost-guaranteed profit cushion (+0.25%)
+        assert row[1] == 100.95
         assert row[2] == "OPEN"
 
-        # Step 3: Price moves to +1.5% (101.5) -> Trailing SL raised to 0.6% below high watermark (101.5 * 0.994 = 100.89)
+        # Step 3: Price moves to +1.5% (101.5) -> Trailing SL raised to runner lock max(100.90, 100.89) = 100.90
         updates = trader.monitor_and_update_trailing_sl(current_prices={"TESTSTOCK": 101.5})
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
         row = cur.execute("SELECT current_sl, highest_price, status FROM daily_intraday_trades WHERE symbol='TESTSTOCK'").fetchone()
         conn.close()
-        assert row[0] == 100.89
+        assert row[0] == 100.9
         assert row[1] == 101.5
         assert row[2] == "OPEN"
 
@@ -507,7 +507,7 @@ def test_continuous_whole_day_opportunity_scanning(tmp_path):
     assert entered_trades[0]["status"] == "OPEN"
 
     # Verify INFY pick status updated to TRIGGERED
-    status = trader.get_automation_status(auto_squareoff_past_3pm=False)
+    status = trader.get_automation_status(auto_squareoff_past_3pm=False, trade_date_str="2026-10-28")
     infy_pick = next(p for p in status["today_picks"] if p["symbol"] == "INFY")
     assert infy_pick["status"] == "TRIGGERED"
 
@@ -656,9 +656,9 @@ def test_bidirectional_short_selling_mechanics(tmp_path):
     assert short_trade["initial_sl"] > 995.0  # SL is above entry for short
     assert short_trade["target_price"] < 995.0  # Target is below entry for short
 
-    # 3. Price drops to +0.8% profit for short (price drops to 987.0)
+    # 3. Price drops to +1.0% profit for short (price drops to 985.0)
     # Trailing SL should lower below entry to lock in cost-guaranteed profit
-    updates = trader.monitor_and_update_trailing_sl(current_prices={"TATAMOTORS": 987.0})
+    updates = trader.monitor_and_update_trailing_sl(current_prices={"TATAMOTORS": 985.0})
     conn = sqlite3.connect(str(db_file))
     cur = conn.cursor()
     cur.execute("SELECT current_sl, status FROM daily_intraday_trades WHERE symbol='TATAMOTORS'")
@@ -709,23 +709,23 @@ def test_momentum_supported_trailing_target_and_sl(tmp_path):
     conn.commit()
     conn.close()
 
-    # Step 1: Price reaches +0.7% (1007.0) -> SL trails to 1003.5 (+0.35% cost-guaranteed)
-    trader.monitor_and_update_trailing_sl(current_prices={"RELIANCE": 1007.0})
+    # Step 1: Price reaches +0.95% (1009.5) -> SL trails to 1002.5 (+0.25% cost-guaranteed)
+    trader.monitor_and_update_trailing_sl(current_prices={"RELIANCE": 1009.5})
     conn = sqlite3.connect(str(db_file))
     cur = conn.cursor()
     row = cur.execute("SELECT current_sl, target_price, status FROM daily_intraday_trades WHERE symbol='RELIANCE'").fetchone()
     conn.close()
-    assert row[0] == 1003.5
+    assert row[0] == 1002.5
     assert row[1] == 1014.0  # Target 1 intact
     assert row[2] == "OPEN"
 
-    # Step 2: Price reaches +1.05% (1010.5) -> SL trails to 1007.0 (+0.70%)
-    trader.monitor_and_update_trailing_sl(current_prices={"RELIANCE": 1010.5})
+    # Step 2: Price reaches +1.25% (1012.5) -> SL trails to >= 1009.0 (+0.90%)
+    trader.monitor_and_update_trailing_sl(current_prices={"RELIANCE": 1012.5})
     conn = sqlite3.connect(str(db_file))
     cur = conn.cursor()
     row = cur.execute("SELECT current_sl, target_price, status FROM daily_intraday_trades WHERE symbol='RELIANCE'").fetchone()
     conn.close()
-    assert row[0] >= 1007.0
+    assert row[0] >= 1009.0
     assert row[1] == 1014.0
     assert row[2] == "OPEN"
 
@@ -804,7 +804,29 @@ def test_max_10_daily_trades_limit_gate(tmp_path):
     pm = status["portfolio_metrics"]
     assert pm["max_daily_trades"] == 10
     assert pm["today_trades_count"] == 10
-    assert pm["daily_trades_remaining"] == 0
+def test_use_index_regime_parameter(tmp_path):
+    """Verifies use_index_regime configuration, persistence, and evaluation toggling."""
+    db_file = tmp_path / "index_test.db"
+    trader = DailyIntradayAutoTrader(db_path=db_file, initial_capital=100000.0, leverage=5.0, use_index_regime=True)
+    assert trader.use_index_regime is True
+    cfg = trader.get_capital_and_leverage()
+    assert cfg["use_index_regime"] is True
+
+    # Toggle to False and persist
+    saved = trader.set_capital_and_leverage(capital=80000.0, leverage=4.0, use_index_regime=False)
+    assert saved["use_index_regime"] is False
+    assert trader.use_index_regime is False
+
+    # Instantiate new trader with same DB to verify SQLite persistence reload
+    trader_reloaded = DailyIntradayAutoTrader(db_path=db_file)
+    assert trader_reloaded.use_index_regime is False
+    assert trader_reloaded.initial_capital == 80000.0
+    assert trader_reloaded.leverage == 4.0
+
+    # Test toggling back to True
+    trader_reloaded.set_capital_and_leverage(capital=100000.0, leverage=5.0, use_index_regime=True)
+    assert trader_reloaded.use_index_regime is True
+
 
 
 

@@ -2384,15 +2384,16 @@ def get_automation_config():
 @app.post("/api/automation/config", summary="Set & Save User Margin Capital & Leverage")
 def set_automation_config(
     capital: float = Query(..., ge=1000.0, le=50000000.0, description="Capital in ₹"),
-    leverage: float = Query(5.0, ge=1.0, le=20.0, description="Intraday leverage multiplier (e.g. 5.0 for 5x)")
+    leverage: float = Query(5.0, ge=1.0, le=20.0, description="Intraday leverage multiplier (e.g. 5.0 for 5x)"),
+    use_index_regime: Optional[bool] = Query(None, description="Whether to align trade direction and conviction with NIFTY 50 index regime")
 ):
     """Saves user-defined capital and leverage in SQLite database for all current and automated morning runs."""
     try:
         from src.algodesk.automation.daily_screener_trader import daily_auto_trader
-        saved = daily_auto_trader.set_capital_and_leverage(capital=capital, leverage=leverage)
+        saved = daily_auto_trader.set_capital_and_leverage(capital=capital, leverage=leverage, use_index_regime=use_index_regime)
         return {
             "status": "success",
-            "message": f"Saved Capital ₹{saved['capital']:,.2f} with {saved['leverage']:.1f}x leverage (Buying Power: ₹{saved['buying_power']:,.2f})",
+            "message": f"Saved Capital ₹{saved['capital']:,.2f} with {saved['leverage']:.1f}x leverage (Use Index: {saved.get('use_index_regime', True)}, Buying Power: ₹{saved['buying_power']:,.2f})",
             "config": saved
         }
     except Exception as e:
@@ -2435,20 +2436,21 @@ def get_daily_automation_status(
 def trigger_daily_automation_run(
     top_n: int = Query(10, ge=1, le=25),
     total_capital: Optional[float] = Query(None, ge=1000.0, le=50000000.0, description="Total capital (₹) to smartly distribute across trades"),
-    leverage: Optional[float] = Query(None, ge=1.0, le=20.0, description="Intraday margin leverage (e.g. 5.0 for 5x)")
+    leverage: Optional[float] = Query(None, ge=1.0, le=20.0, description="Intraday margin leverage (e.g. 5.0 for 5x)"),
+    use_index_regime: Optional[bool] = Query(None, description="Whether to align trade direction and conviction with NIFTY 50 index regime")
 ):
     """Runs the morning quantitative screener across NIFTY 500, selects top stocks, and smartly distributes capital using Gemini AI."""
     try:
         from src.algodesk.automation.daily_screener_trader import daily_auto_trader
-        if total_capital is not None or leverage is not None:
+        if total_capital is not None or leverage is not None or use_index_regime is not None:
             c = total_capital if total_capital is not None else daily_auto_trader.initial_capital
             l = leverage if leverage is not None else daily_auto_trader.leverage
-            daily_auto_trader.set_capital_and_leverage(capital=c, leverage=l)
+            daily_auto_trader.set_capital_and_leverage(capital=c, leverage=l, use_index_regime=use_index_regime)
 
         active_capital = daily_auto_trader.initial_capital
         active_leverage = daily_auto_trader.leverage
 
-        picks = daily_auto_trader.run_morning_screener_and_pick(top_n=top_n)
+        picks = daily_auto_trader.run_morning_screener_and_pick(top_n=top_n, use_index_regime=use_index_regime)
         trades = daily_auto_trader.execute_paper_algo_trades(picks=picks, total_capital=active_capital, leverage=active_leverage)
         from src.algodesk.automation.daily_screener_trader import IST
         if not trades and datetime.now(IST).hour >= 15:

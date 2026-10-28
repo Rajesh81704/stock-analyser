@@ -6,10 +6,10 @@ Features:
 2. Selects Top 3 Highest-Conviction Stocks based on composite momentum, relative volume, volatility & breakout score.
 3. Automatically logs selected stocks into SQLite database table `daily_intraday_picks`.
 4. Automatically initiates Paper Algo Trades with:
-   - Target price (+1.4% profit target for quick multi-trade hit rate & 88.5% daily win rate).
-   - Initial Stop Loss (-1.2% risk guard).
-   - Dynamic Trailing Stop Loss (trails to +0.30% profit lock at +0.65% gain, +0.70% lock at +1.00% gain).
-5. Continuously monitors ticks and trails SL to lock in profits.
+   - Target price (+1.4% profit target for asymmetric positive expectancy).
+   - Initial Stop Loss (-0.9% risk guard to maintain >1.0 payoff ratio against target).
+   - Dynamic Trailing Stop Loss (trails to +0.25% breakeven cost cushion at +0.90% advance, and +0.90% runner lock at +1.20% gain).
+5. Continuously monitors ticks and trails SL with noise buffer to protect gains without choking winning trades.
 6. Automatically logs every trade execution, trailed SL changes, and final Net PnL (deducting exact Zerodha intraday brokerages and statutory taxes) into SQLite database table `daily_intraday_trades`.
 """
 
@@ -72,10 +72,17 @@ NIFTY_100_LIQUID_UNIVERSE = [
 class DailyIntradayAutoTrader:
     """Automated Daily Screener, Stock Picker & Paper Algo Trading Engine."""
 
-    def __init__(self, db_path: Optional[Path] = None, initial_capital: float = 100000.0, leverage: float = 5.0):
+    def __init__(
+        self,
+        db_path: Optional[Path] = None,
+        initial_capital: float = 100000.0,
+        leverage: float = 5.0,
+        use_index_regime: bool = True
+    ):
         self.db_path = Path(db_path) if db_path else DB_PATH
         self.initial_capital = initial_capital
         self.leverage = float(leverage)
+        self.use_index_regime = bool(use_index_regime)
         self.cost_calculator = CostCalculator(ZerodhaIntradayCostsConfig())
         self._lock = threading.Lock()
         self._init_database_tables()
@@ -170,17 +177,26 @@ class DailyIntradayAutoTrader:
                         self.initial_capital = float(row["value"])
                     elif row["key"] == "leverage" and row["value"]:
                         self.leverage = float(row["value"])
+                    elif row["key"] == "use_index_regime" and row["value"]:
+                        self.use_index_regime = str(row["value"]).strip().lower() in ("true", "1", "yes")
             except Exception:
                 pass
 
             conn.commit()
             conn.close()
 
-    def set_capital_and_leverage(self, capital: float, leverage: float) -> Dict[str, float]:
-        """Sets and persists user-defined capital and leverage for the automation engine."""
+    def set_capital_and_leverage(
+        self,
+        capital: float,
+        leverage: float,
+        use_index_regime: Optional[bool] = None
+    ) -> Dict[str, Any]:
+        """Sets and persists user-defined capital, leverage, and index regime filter for the automation engine."""
         with self._lock:
             self.initial_capital = float(capital)
             self.leverage = float(leverage)
+            if use_index_regime is not None:
+                self.use_index_regime = bool(use_index_regime)
             try:
                 conn = self._get_connection()
                 cur = conn.cursor()
@@ -193,22 +209,32 @@ class DailyIntradayAutoTrader:
                     INSERT OR REPLACE INTO daily_automation_settings (key, value, updated_at)
                     VALUES ('leverage', ?, ?)
                 """, (str(self.leverage), now_ts))
+                cur.execute("""
+                    INSERT OR REPLACE INTO daily_automation_settings (key, value, updated_at)
+                    VALUES ('use_index_regime', ?, ?)
+                """, (str(self.use_index_regime), now_ts))
                 conn.commit()
                 conn.close()
-                logger.info(f"⚙️ [AutomationSettings] Saved: Capital=₹{self.initial_capital:,.2f}, Leverage={self.leverage:.1f}x (Buying Power: ₹{self.initial_capital * self.leverage:,.2f})")
+                logger.info(
+                    f"⚙️ [AutomationSettings] Saved: Capital=₹{self.initial_capital:,.2f}, "
+                    f"Leverage={self.leverage:.1f}x, UseIndexRegime={self.use_index_regime} "
+                    f"(Buying Power: ₹{self.initial_capital * self.leverage:,.2f})"
+                )
             except Exception as e:
                 logger.warning(f"Failed to persist automation settings: {e}")
             return {
                 "capital": self.initial_capital,
                 "leverage": self.leverage,
+                "use_index_regime": self.use_index_regime,
                 "buying_power": round(self.initial_capital * self.leverage, 2)
             }
 
-    def get_capital_and_leverage(self) -> Dict[str, float]:
-        """Returns current capital, leverage, and total buying power."""
+    def get_capital_and_leverage(self) -> Dict[str, Any]:
+        """Returns current capital, leverage, index regime filter setting, and total buying power."""
         return {
             "capital": getattr(self, "initial_capital", 100000.0),
             "leverage": getattr(self, "leverage", 5.0),
+            "use_index_regime": getattr(self, "use_index_regime", True),
             "buying_power": round(getattr(self, "initial_capital", 100000.0) * getattr(self, "leverage", 5.0), 2)
         }
 
@@ -285,8 +311,13 @@ class DailyIntradayAutoTrader:
     # -------------------------------------------------------------------------
     # 1. Multi-Factor Intraday Stock Screener & Top Stock Picking
     # -------------------------------------------------------------------------
-    def _evaluate_single_stock(self, symbol: str, meta_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Worker to fetch OHLCV and compute multi-factor conviction score for an individual stock."""
+    def _evaluate_single_stock(
+        self,
+        symbol: str,
+        meta_dict: Dict[str, Any],
+        nifty_regime: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Worker to fetch OHLCV and compute multi-factor conviction score aligned with overall index condition."""
         try:
             resolved = resolve_ticker(symbol)
             df = fetch_stock_data(resolved, period="3mo")
@@ -377,25 +408,44 @@ class DailyIntradayAutoTrader:
             # Day change conviction bonus
             if day_change_pct <= -0.5:
                 bear_trend_score += 10.0
-            elif day_change_pct >= 0.5:
-                bull_trend_score += 10.0
+            # 6. Overall Index Condition & Macro-Regime Factor (NIFTY 50 alignment)
+            regime = (nifty_regime or {}).get("regime", "NEUTRAL")
+            nifty_chg = float((nifty_regime or {}).get("day_change_pct", 0.0))
+
+            if regime == "BULLISH" or nifty_chg >= 0.20:
+                # Strong macro tailwind for Longs; headwind for Shorts
+                bull_trend_score += 15.0
+                bear_trend_score = max(0.0, bear_trend_score - 15.0)
+            elif regime == "BEARISH" or nifty_chg <= -0.20:
+                # Strong macro tailwind for Shorts; headwind for Longs
+                bear_trend_score += 15.0
+                bull_trend_score = max(0.0, bull_trend_score - 15.0)
 
             total_bull_score = round(bull_trend_score + bull_rsi_score + volatility_score + bull_breakout_score + (rvol_score * 0.3), 2)
             total_bear_score = round(bear_trend_score + bear_rsi_score + volatility_score + bear_breakdown_score + (rvol_score * 0.3), 2)
 
-            # Bidirectional Selector: Select Short if bearish conviction dominates or stock is actively breaking down
-            if (total_bear_score > total_bull_score and day_change_pct <= 0.0) or (day_change_pct <= -0.75 and latest_close < ema_20):
+            # Bidirectional Selector: Regulated by composite conviction and overall index condition
+            if regime == "BEARISH":
+                # Market is dropping: favor shorts unless individual stock has overwhelming relative strength (> +15 pts)
+                is_short = (total_bear_score >= total_bull_score - 10.0 and day_change_pct <= 0.2) or (day_change_pct <= -0.5)
+            elif regime == "BULLISH":
+                # Market is rallying: favor longs unless stock is crashing on severe idiosyncratic breakdown
+                is_short = (total_bear_score > total_bull_score + 15.0 and day_change_pct <= -1.0 and latest_close < ema_20)
+            else:
+                is_short = (total_bear_score > total_bull_score and day_change_pct <= 0.0) or (day_change_pct <= -0.75 and latest_close < ema_20)
+
+            if is_short:
                 side = "SELL"
                 total_score = total_bear_score
                 strategy_name = "ORB_Breakdown_Short_V4"
-                initial_sl = round(latest_close * 1.012, 2)     # +1.2% Stop Loss (above entry)
+                initial_sl = round(latest_close * 1.009, 2)     # +0.9% Stop Loss (above entry)
                 target = round(latest_close * 0.986, 2)         # -1.4% Target (below entry)
                 entry_trigger = round(latest_close * 0.996, 2)  # -0.4% breakdown trigger
             else:
                 side = "BUY"
                 total_score = total_bull_score
                 strategy_name = "ORB_Momentum_Breakout_V4"
-                initial_sl = round(latest_close * 0.988, 2)     # -1.2% Stop Loss (below entry)
+                initial_sl = round(latest_close * 0.991, 2)     # -0.9% Stop Loss (below entry)
                 target = round(latest_close * 1.014, 2)         # +1.4% Target (above entry)
                 entry_trigger = round(latest_close * 1.004, 2)  # +0.4% breakout trigger
 
@@ -413,6 +463,8 @@ class DailyIntradayAutoTrader:
                 "initial_sl": initial_sl,
                 "target": target,
                 "trailing_step_pct": 0.5,
+                "market_regime": regime,
+                "nifty_change_pct": nifty_chg,
             }
         except Exception as scan_err:
             logger.debug(f"Scan error on {symbol}: {scan_err}")
@@ -456,7 +508,12 @@ class DailyIntradayAutoTrader:
             logger.warning(f"Could not fetch NIFTY regime ({e}), defaulting to NEUTRAL.")
         return {"regime": "NEUTRAL", "day_change_pct": 0.0, "from_open_pct": 0.0, "nifty_price": 0.0}
 
-    def run_morning_screener_and_pick(self, top_n: int = 10, scan_date_str: Optional[str] = None) -> List[Dict[str, Any]]:
+    def run_morning_screener_and_pick(
+        self,
+        top_n: int = 10,
+        scan_date_str: Optional[str] = None,
+        use_index_regime: Optional[bool] = None
+    ) -> List[Dict[str, Any]]:
         """
         Executes full multi-factor quantitative screening across ALL 500+ NIFTY 500 stocks in parallel:
         1. Loads entire NIFTY 500 universe (500+ stocks).
@@ -503,21 +560,28 @@ class DailyIntradayAutoTrader:
             if s not in universe:
                 universe.append(s)
 
+        # Check broader market regime before scoring to align individual stock conviction
+        apply_index = self.use_index_regime if use_index_regime is None else bool(use_index_regime)
+        if apply_index:
+            regime_info = self.get_nifty_market_regime()
+            regime = regime_info.get("regime", "NEUTRAL")
+            logger.info(f"🌐 [MorningScreener] Active Index Condition: {regime} (NIFTY {regime_info.get('day_change_pct', 0.0):+.2f}%)")
+        else:
+            regime_info = {"regime": "NEUTRAL", "day_change_pct": 0.0, "from_open_pct": 0.0, "nifty_price": 0.0, "reason": "Index regime parameter disabled"}
+            regime = "NEUTRAL"
+            logger.info("🌐 [MorningScreener] Index Condition parameter is DISABLED (operating in neutral single-stock mode).")
+
         logger.info(f"🚀 [MorningScreener] Scanning full NIFTY 500 universe ({len(universe)} stocks) with 25 parallel worker threads...")
 
         scored_stocks = []
         with ThreadPoolExecutor(max_workers=25) as executor:
-            future_to_stock = {executor.submit(self._evaluate_single_stock, sym, meta_dict): sym for sym in universe}
+            future_to_stock = {executor.submit(self._evaluate_single_stock, sym, meta_dict, regime_info): sym for sym in universe}
             for future in as_completed(future_to_stock):
                 res = future.result()
                 if res:
                     scored_stocks.append(res)
 
         logger.info(f"✅ [MorningScreener] Successfully evaluated {len(scored_stocks)} / {len(universe)} stocks across NIFTY 500.")
-
-        # Check broader market regime to align selection
-        regime_info = self.get_nifty_market_regime()
-        regime = regime_info.get("regime", "NEUTRAL")
 
         # Separate bullish and bearish candidates
         bull_candidates = [s for s in scored_stocks if s.get("side") == "BUY"]
@@ -703,11 +767,11 @@ class DailyIntradayAutoTrader:
                 entry_price = float(stock["price"])
 
                 if side == "SELL":
-                    initial_sl = float(stock.get("initial_sl") or (entry_price * 1.012))
+                    initial_sl = float(stock.get("initial_sl") or (entry_price * 1.009))
                     target = float(stock.get("target") or (entry_price * 0.986))
                     side_label = "SHORT (SELL)"
                 else:
-                    initial_sl = float(stock.get("initial_sl") or (entry_price * 0.988))
+                    initial_sl = float(stock.get("initial_sl") or (entry_price * 0.991))
                     target = float(stock.get("target") or (entry_price * 1.014))
                     side_label = "LONG (BUY)"
 
@@ -827,7 +891,8 @@ class DailyIntradayAutoTrader:
         self,
         min_conviction: float = 75.0,
         top_n: int = 10,
-        scan_date_str: Optional[str] = None
+        scan_date_str: Optional[str] = None,
+        use_index_regime: Optional[bool] = None
     ) -> List[Dict[str, Any]]:
         """
         Continuously watches the liquid NIFTY 100 universe, evaluating all crucial intraday parameters:
@@ -836,17 +901,25 @@ class DailyIntradayAutoTrader:
         3. Momentum & RSI (14) sweet spot (52-72 for Long BUY, 28-48 for Short SELL).
         4. Volatility / ATR range (ATR >= 1.0% ensuring ample intraday room for target).
         5. Proximity to breakout / breakdown trigger.
-        6. NIFTY 50 Broad Market Regime alignment (+10 conviction bonus).
+        6. NIFTY 50 Broad Market Regime alignment (+15 conviction bonus when enabled).
 
         Filters for STRONG SIGNALS (conviction >= 75.0), ranks them from highest to lowest conviction,
         and saves them into `daily_intraday_picks` table for execution.
         """
         today_str = scan_date_str or get_ist_date()
-        logger.info("🔍 [NIFTY100 Engine] Scanning & Ranking NIFTY 100 liquid stocks for high-conviction intraday signals...")
+        apply_index = self.use_index_regime if use_index_regime is None else bool(use_index_regime)
+        if apply_index:
+            regime_info = self.get_nifty_market_regime()
+            regime = regime_info.get("regime", "NEUTRAL")
+            logger.info(f"🔍 [NIFTY100 Engine] Scanning & Ranking NIFTY 100 with Index Condition: {regime} (NIFTY {regime_info.get('day_change_pct', 0.0):+.2f}%)...")
+        else:
+            regime_info = {"regime": "NEUTRAL", "day_change_pct": 0.0, "from_open_pct": 0.0, "nifty_price": 0.0, "reason": "Index regime parameter disabled"}
+            regime = "NEUTRAL"
+            logger.info("🔍 [NIFTY100 Engine] Scanning & Ranking NIFTY 100 with Index Condition: DISABLED (neutral mode)...")
 
         scored_stocks = []
         with ThreadPoolExecutor(max_workers=25) as executor:
-            future_to_stock = {executor.submit(self._evaluate_single_stock, sym, {}): sym for sym in NIFTY_100_LIQUID_UNIVERSE}
+            future_to_stock = {executor.submit(self._evaluate_single_stock, sym, {}, regime_info): sym for sym in NIFTY_100_LIQUID_UNIVERSE}
             for future in as_completed(future_to_stock):
                 try:
                     res = future.result()
@@ -913,7 +986,8 @@ class DailyIntradayAutoTrader:
         trade_date_str: Optional[str] = None,
         max_positions: int = 5,
         max_daily_trades: int = 10,
-        min_trade_capital: float = 2000.0
+        min_trade_capital: float = 2000.0,
+        use_index_regime: Optional[bool] = None
     ) -> List[Dict[str, Any]]:
         """
         Continuously scans today's best intraday stocks throughout the market day (09:15 - 15:00 IST)
@@ -1068,7 +1142,8 @@ class DailyIntradayAutoTrader:
         # 5. Check triggers and execute trades
         new_trades = []
         lev = float(getattr(self, "leverage", 5.0))
-        nifty_regime = self.get_nifty_market_regime().get("regime", "NEUTRAL")
+        apply_index = self.use_index_regime if use_index_regime is None else bool(use_index_regime)
+        nifty_regime = self.get_nifty_market_regime().get("regime", "NEUTRAL") if apply_index else "NEUTRAL"
 
         with self._lock:
             conn = self._get_connection()
@@ -1100,7 +1175,7 @@ class DailyIntradayAutoTrader:
                     if not trade_date_str and nifty_regime == "BULLISH":
                         is_opportunity = is_opportunity and (curr_price <= trigger_price * 0.997)
 
-                    initial_sl = float(pick.get("initial_sl") or round(curr_price * 1.012, 2))     # +1.2% stop-loss (above entry)
+                    initial_sl = float(pick.get("initial_sl") or round(curr_price * 1.009, 2))     # +0.9% stop-loss (above entry)
                     target_p = float(pick.get("target_price") or pick.get("target") or round(curr_price * 0.986, 2))       # -1.4% profit target (below entry)
                     side_desc = "Short Breakdown"
                 else:
@@ -1114,7 +1189,7 @@ class DailyIntradayAutoTrader:
                     if not trade_date_str and nifty_regime == "BEARISH":
                         is_opportunity = is_opportunity and (curr_price >= trigger_price * 1.003)
 
-                    initial_sl = float(pick.get("initial_sl") or round(curr_price * 0.988, 2))     # -1.2% stop-loss (below entry)
+                    initial_sl = float(pick.get("initial_sl") or round(curr_price * 0.991, 2))     # -0.9% stop-loss (below entry)
                     target_p = float(pick.get("target_price") or pick.get("target") or round(curr_price * 1.014, 2))       # +1.4% profit target (above entry)
                     side_desc = "Long Breakout"
 
@@ -1336,12 +1411,12 @@ class DailyIntradayAutoTrader:
                 candidate_sl = curr_sl
                 candidate_target = target_p
 
-                # 1. Multi-tier Trailing Stop Loss
-                if gain_from_entry_pct >= 1.00:
-                    dynamic_trail = min(round(entry_p * 0.993, 2), round(new_extreme * 1.006, 2))
+                # 1. Multi-tier Trailing Stop Loss (Breakeven cushion at +0.90%, runner lock at +1.20%)
+                if gain_from_entry_pct >= 1.20:
+                    dynamic_trail = min(round(entry_p * 0.991, 2), round(new_extreme * 1.006, 2))
                     candidate_sl = min(candidate_sl, dynamic_trail)
-                elif gain_from_entry_pct >= 0.65:
-                    cost_guaranteed_sl = round(entry_p * 0.9965, 2)
+                elif gain_from_entry_pct >= 0.90:
+                    cost_guaranteed_sl = round(entry_p * 0.9975, 2)  # Lock +0.25% gain to cover Zerodha friction
                     candidate_sl = min(candidate_sl, cost_guaranteed_sl)
 
                 # 2. Dynamic Trailing Target if Momentum Supports
@@ -1409,12 +1484,12 @@ class DailyIntradayAutoTrader:
                 candidate_sl = curr_sl
                 candidate_target = target_p
 
-                # 1. Multi-tier Trailing Stop Loss
-                if gain_from_entry_pct >= 1.00:
-                    dynamic_trail = max(round(entry_p * 1.007, 2), round(new_extreme * 0.994, 2))
+                # 1. Multi-tier Trailing Stop Loss (Breakeven cushion at +0.90%, runner lock at +1.20%)
+                if gain_from_entry_pct >= 1.20:
+                    dynamic_trail = max(round(entry_p * 1.009, 2), round(new_extreme * 0.994, 2))
                     candidate_sl = max(candidate_sl, dynamic_trail)
-                elif gain_from_entry_pct >= 0.65:
-                    cost_guaranteed_sl = round(entry_p * 1.0035, 2)
+                elif gain_from_entry_pct >= 0.90:
+                    cost_guaranteed_sl = round(entry_p * 1.0025, 2)  # Lock +0.25% gain to cover Zerodha friction
                     candidate_sl = max(candidate_sl, cost_guaranteed_sl)
 
                 # 2. Dynamic Trailing Target if Momentum Supports
@@ -1835,6 +1910,7 @@ class DailyIntradayAutoTrader:
         portfolio_metrics = {
             "simulated_capital": base_simulated_capital,
             "intraday_leverage": lev,
+            "use_index_regime": getattr(self, "use_index_regime", True),
             "total_buying_power": total_buying_power,
             "capital_utilized": round(open_capital_utilized, 2),
             "capital_utilization_pct": capital_utilization_pct,
@@ -1859,6 +1935,7 @@ class DailyIntradayAutoTrader:
             "is_market_day": self.is_market_day(),
             "capital": base_simulated_capital,
             "leverage": lev,
+            "use_index_regime": getattr(self, "use_index_regime", True),
             "buying_power": total_buying_power,
             "today_date": today_str,
             "today_picks_count": len(today_picks),
