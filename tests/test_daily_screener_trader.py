@@ -751,6 +751,63 @@ def test_momentum_supported_trailing_target_and_sl(tmp_path):
     assert row[2] > 0.0
 
 
+def test_max_10_daily_trades_limit_gate(tmp_path):
+    """
+    Verifies that the engine strictly enforces the maximum 10 trades per day ceiling:
+    1. Once 10 trades are entered for a single day, scan_and_execute_intraday_opportunities
+       halts new entries.
+    2. get_automation_status accurately reports max_daily_trades=10, today_trades_count=10,
+       and daily_trades_remaining=0.
+    """
+    db_file = tmp_path / "test_max_10_trades.db"
+    trader = DailyIntradayAutoTrader(db_path=db_file, initial_capital=200000.0, leverage=5.0)
+
+    # 1. Insert 10 existing trades for today (2026-10-28)
+    conn = sqlite3.connect(str(db_file))
+    cur = conn.cursor()
+    for i in range(1, 11):
+        cur.execute(f"""
+            INSERT INTO daily_intraday_trades (
+                trade_date, symbol, side, qty, allocated_capital, entry_time,
+                entry_price, initial_sl, highest_price, current_sl, target_price,
+                gross_pnl, brokerage_and_taxes, net_pnl, return_pct, status, price_history, updated_at
+            ) VALUES (
+                '2026-10-28', 'STOCK_{i}', 'BUY', 10, 5000.0, '2026-10-28 09:30:00',
+                100.0, 98.8, 100.0, 98.8, 101.4,
+                10.0, 1.0, 9.0, 0.9, 'CLOSED', '[]', '2026-10-28 10:00:00'
+            )
+        """)
+
+    # Also insert an 11th high-conviction breakout candidate in daily_intraday_picks
+    cur.execute("""
+        INSERT INTO daily_intraday_picks (
+            date, rank, symbol, company_name, sector, price, conviction_score,
+            rvol, strategy_name, entry_trigger_price, initial_sl, target_price,
+            trailing_step_pct, status, created_at
+        ) VALUES
+        ('2026-10-28', 11, 'BONUS_STOCK', 'Bonus Stock Ltd', 'Tech', 500.0, 95.0, 3.0, 'ORB_Breakout', 501.0, 494.0, 508.0, 0.5, 'WATCHING', '2026-10-28 09:16:00')
+    """)
+    conn.commit()
+    conn.close()
+
+    # 2. Attempt to scan and execute with price triggering breakout at 505.0
+    # Must be BLOCKED because 10 trades already occurred today
+    new_trades = trader.scan_and_execute_intraday_opportunities(
+        current_prices={"BONUS_STOCK": 505.0},
+        trade_date_str="2026-10-28",
+        max_daily_trades=10
+    )
+    assert len(new_trades) == 0
+
+    # 3. Verify portfolio status reports 0 remaining trades
+    status = trader.get_automation_status(trade_date_str="2026-10-28")
+    pm = status["portfolio_metrics"]
+    assert pm["max_daily_trades"] == 10
+    assert pm["today_trades_count"] == 10
+    assert pm["daily_trades_remaining"] == 0
+
+
+
 
 
 

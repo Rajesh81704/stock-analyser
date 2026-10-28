@@ -681,6 +681,18 @@ class DailyIntradayAutoTrader:
             conn = self._get_connection()
             cur = conn.cursor()
 
+            # Enforce strict max 10 trades per day limit
+            cur.execute("SELECT COUNT(*) FROM daily_intraday_trades WHERE trade_date = ?", (today_str,))
+            existing_today_cnt = cur.fetchone()[0] or 0
+            if existing_today_cnt >= 10:
+                logger.info(f"⏸️ [DailyLimitGate] Max 10 trades already taken for {today_str}. Skipping further entries.")
+                conn.close()
+                return []
+
+            picks_budget = max(0, 10 - existing_today_cnt)
+            if len(picks) > picks_budget:
+                picks = picks[:picks_budget]
+
             for stock in picks:
                 if available_margin_tracker <= 0:
                     logger.info("⏸️ [CapitalGate] Available account capital exhausted. Skipping remaining picks.")
@@ -899,13 +911,15 @@ class DailyIntradayAutoTrader:
         self,
         current_prices: Optional[Dict[str, float]] = None,
         trade_date_str: Optional[str] = None,
-        max_positions: int = 3,
+        max_positions: int = 5,
+        max_daily_trades: int = 10,
         min_trade_capital: float = 2000.0
     ) -> List[Dict[str, Any]]:
         """
         Continuously scans today's best intraday stocks throughout the market day (09:15 - 15:00 IST)
         for breakout and entry opportunities. Whenever an opportunity triggers and margin capital / position
         slots are available, automatically enters a paper trade with 5x leverage and dynamic trailing SL.
+        Enforces a strict ceiling of max 10 trades per day.
         """
         today_str = trade_date_str or get_ist_date()
         now_dt = datetime.now(IST)
@@ -935,9 +949,18 @@ class DailyIntradayAutoTrader:
 
             # Avoid re-trading symbols that already completed or are open today
             cur.execute("SELECT symbol FROM daily_intraday_trades WHERE trade_date = ?", (today_str,))
-            traded_today = {r["symbol"] for r in cur.fetchall()}
+            today_symbols = [r[0] for r in cur.fetchall()]
+            today_trades_count = len(today_symbols)
+            traded_today = set(today_symbols)
 
-            slots_available = max_positions - len(open_trades)
+            # Strict Max 10 Daily Trades Limit Gate
+            if today_trades_count >= max_daily_trades:
+                logger.info(f"⏸️ [DailyLimitGate] Max daily trades reached ({today_trades_count}/{max_daily_trades}). Trading completed for today.")
+                conn.close()
+                return []
+
+            daily_slots_left = max_daily_trades - today_trades_count
+            slots_available = min(max_positions - len(open_trades), daily_slots_left)
             if slots_available <= 0:
                 logger.info(f"⏸️ [OpportunityScanner] Max intraday positions ({len(open_trades)}/{max_positions}) active. Awaiting exits.")
                 conn.close()
@@ -1563,10 +1586,11 @@ class DailyIntradayAutoTrader:
         self,
         auto_squareoff_past_3pm: bool = True,
         total_capital: Optional[float] = None,
-        leverage: Optional[float] = None
+        leverage: Optional[float] = None,
+        trade_date_str: Optional[str] = None
     ) -> Dict[str, Any]:
         """Returns comprehensive status, today's picks, open positions, and all trade logs."""
-        today_str = get_ist_date()
+        today_str = trade_date_str or get_ist_date()
 
         # Enforce 3:00 PM strict squareoff check: If past 15:00 IST and open trades exist, square them off
         if auto_squareoff_past_3pm and datetime.now(IST).time() >= dt_time(15, 0):
@@ -1819,7 +1843,10 @@ class DailyIntradayAutoTrader:
             "available_cash": available_cash,
             "portfolio_equity": portfolio_equity,
             "active_positions_count": len(open_trades),
-            "max_positions_allowed": 10,
+            "max_positions_allowed": 5,
+            "max_daily_trades": 10,
+            "today_trades_count": len(today_trades),
+            "daily_trades_remaining": max(0, 10 - len(today_trades)),
             "unrealized_pnl": round(unrealized_pnl, 2),
             "today_realized_net_pnl": today_realized_net_pnl,
             "execution_mode": f"PAPER (AI ALGO • {lev_display} MIS LEVERAGE)"
