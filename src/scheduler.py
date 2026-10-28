@@ -167,14 +167,15 @@ def is_market_hours() -> bool:
 
 
 def _morning_intraday_screener_and_trade_job():
-    """Triggered Mon-Fri at 09:16 IST to screen top 10 stocks and execute paper algo trades."""
+    """Triggered Mon-Fri at 09:16 IST to screen top 10 stocks and arm watchlist for confirmed breakout entries."""
     try:
         from src.algodesk.automation.daily_screener_trader import daily_auto_trader
         if daily_auto_trader.is_market_day():
-            logger.info("🌅 [09:16 AM IST] Running Morning Screener & Picking Top 10 Stocks across NIFTY 500 for Intraday Algo Trading...")
+            logger.info("🌅 [09:16 AM IST] Running Morning Screener across NIFTY 500 & Arming Watchlist for Confirmed Breakout Algo Trading...")
             picks = daily_auto_trader.run_morning_screener_and_pick(top_n=10)
-            trades = daily_auto_trader.execute_paper_algo_trades(picks=picks)
-            logger.info(f"✅ [Morning Screener] Picked {len(picks)} stocks and initiated {len(trades)} algo trades.")
+            logger.info(f"✅ [Morning Screener] Picked {len(picks)} elite stocks. Watchlist armed with confirmed breakout triggers (SL: -1.4%, Target: +2.2%).")
+            # Let the 30-second continuous intraday opportunity engine execute entries when triggers are validated
+            daily_auto_trader.scan_and_execute_intraday_opportunities()
         else:
             logger.info("Skipping morning screener: Weekend or non-market day.")
     except Exception as e:

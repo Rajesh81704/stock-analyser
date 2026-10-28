@@ -90,17 +90,17 @@ def test_trailing_sl_rules():
         cur = conn.cursor()
         row = cur.execute("SELECT current_sl, highest_price, status FROM daily_intraday_trades WHERE symbol='TESTSTOCK'").fetchone()
         conn.close()
-        assert row[0] == 100.0  # Breakeven
+        assert row[0] == 100.35  # Cost-guaranteed profit cushion (+0.35%)
         assert row[1] == 100.8
         assert row[2] == "OPEN"
 
-        # Step 3: Price moves to +1.5% (101.5) -> Trailing SL raised to 0.5% below high watermark (101.5 * 0.995 = 100.99)
+        # Step 3: Price moves to +1.5% (101.5) -> Trailing SL raised to 0.6% below high watermark (101.5 * 0.994 = 100.89)
         updates = trader.monitor_and_update_trailing_sl(current_prices={"TESTSTOCK": 101.5})
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
         row = cur.execute("SELECT current_sl, highest_price, status FROM daily_intraday_trades WHERE symbol='TESTSTOCK'").fetchone()
         conn.close()
-        assert row[0] == 100.99
+        assert row[0] == 100.89
         assert row[1] == 101.5
         assert row[2] == "OPEN"
 

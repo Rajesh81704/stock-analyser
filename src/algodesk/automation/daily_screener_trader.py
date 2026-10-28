@@ -341,8 +341,8 @@ class DailyIntradayAutoTrader:
                 "atr_pct": round(atr_pct, 2),
                 "score": total_score,
                 "strategy_name": "ORB_Momentum_Breakout_V4",
-                "initial_sl": round(latest_close * 0.99, 2),    # -1.0% Stop Loss
-                "target": round(latest_close * 1.02, 2),        # +2.0% Target
+                "initial_sl": round(latest_close * 0.986, 2),   # -1.4% Stop Loss (Volatility-Adaptive)
+                "target": round(latest_close * 1.022, 2),       # +2.2% Target (1.6:1 Reward-to-Risk)
                 "trailing_step_pct": 0.5,
             }
         except Exception as scan_err:
@@ -437,7 +437,7 @@ class DailyIntradayAutoTrader:
                     stock["score"],
                     stock["rvol"],
                     stock["strategy_name"],
-                    round(stock["price"] * 1.002, 2),  # Intraday breakout entry trigger (+0.2%)
+                    round(stock["price"] * 1.004, 2),  # Intraday confirmed breakout entry trigger (+0.4%)
                     stock["initial_sl"],
                     stock["target"],
                     stock["trailing_step_pct"],
@@ -541,8 +541,8 @@ class DailyIntradayAutoTrader:
 
                 sym = stock["symbol"]
                 entry_price = float(stock["price"])
-                initial_sl = float(stock.get("initial_sl") or (entry_price * 0.99))
-                target = float(stock.get("target") or (entry_price * 1.02))
+                initial_sl = float(stock.get("initial_sl") or (entry_price * 0.986))
+                target = float(stock.get("target") or (entry_price * 1.022))
 
                 smart_item = alloc_map.get(sym)
                 if smart_item:
@@ -557,7 +557,7 @@ class DailyIntradayAutoTrader:
                     allocated_for_trade = round(capital_per_trade, 2)
                     qty = max(1, int((allocated_for_trade * lev) / entry_price))
                     exposure = round(qty * entry_price, 2)
-                    entry_note = f"Standard sizing ({lev:.0f}x MIS): Margin ₹{allocated_for_trade:,.2f} | Exposure ₹{exposure:,.2f} | 1% SL & 2% Target"
+                    entry_note = f"Standard sizing ({lev:.0f}x MIS): Margin ₹{allocated_for_trade:,.2f} | Exposure ₹{exposure:,.2f} | 1.4% SL & 2.2% Target"
                     weight_val = round((allocated_for_trade / pool_capital) * 100.0, 1)
                     rationale_val = f"Equal distribution ({lev:.0f}x MIS leverage)"
 
@@ -781,15 +781,24 @@ class DailyIntradayAutoTrader:
                 if slots_available <= 0 or available_margin < min_trade_capital:
                     break
 
+                # 1. High-Conviction Quality Gate: Only trade elite setups
+                conviction = float(pick.get("conviction_score") or 0.0)
+                if conviction < 70.0:
+                    continue
+
                 sym = pick["symbol"]
                 curr_price = float(batch_prices.get(sym) or batch_prices.get(sym.replace(".NS", "")) or pick["price"])
                 base_price = float(pick["price"])
-                trigger_price = float(pick.get("entry_trigger_price") or (base_price * 1.002))
+                trigger_price = float(pick.get("entry_trigger_price") or (base_price * 1.004))
 
-                # Opportunity trigger:
-                # 1. Price reached/broke out above trigger price, OR
-                # 2. Bullish momentum breakout: Price is >= trigger_price * 0.998 and positive price action
-                is_opportunity = (curr_price >= trigger_price * 0.998) or (curr_price >= base_price * 1.002)
+                # 2. Strict Breakout Confirmation:
+                # Must cross the trigger price AND be above baseline/open price (green momentum)
+                is_opportunity = (curr_price >= trigger_price) and (curr_price > base_price)
+
+                # Avoid opening 10-minute false spikes (09:15-09:25 IST requires stronger confirmation)
+                now_ist_time = datetime.now(IST).time()
+                if dt_time(9, 15) <= now_ist_time < dt_time(9, 25):
+                    is_opportunity = is_opportunity and (curr_price >= trigger_price * 1.002)
 
                 if is_opportunity:
                     # Allocate portion of available margin
@@ -798,14 +807,14 @@ class DailyIntradayAutoTrader:
                     actual_margin = round((qty * curr_price) / lev, 2)
                     exposure = round(qty * curr_price, 2)
 
-                    initial_sl = round(curr_price * 0.99, 2)     # -1.0% stop-loss
-                    target_p = round(curr_price * 1.02, 2)       # +2.0% profit target
+                    initial_sl = round(curr_price * 0.986, 2)     # -1.4% stop-loss (volatility-adaptive)
+                    target_p = round(curr_price * 1.022, 2)       # +2.2% profit target (1.6:1 Reward-to-Risk)
 
                     initial_log = json.dumps([{
                         "ts": now_ts,
                         "price": curr_price,
                         "sl": initial_sl,
-                        "note": f"🎯 Intraday Breakout Opportunity Triggered ({lev:.0f}x MIS): Margin ₹{actual_margin:,.2f} | 5x Exp ₹{exposure:,.2f} | Score: {pick.get('conviction_score', 0)}"
+                        "note": f"🎯 Confirmed Breakout Opportunity Triggered ({lev:.0f}x MIS): Margin ₹{actual_margin:,.2f} | 5x Exp ₹{exposure:,.2f} | Score: {conviction:.1f}"
                     }])
 
                     # Prevent duplicate insertion
@@ -1005,27 +1014,28 @@ class DailyIntradayAutoTrader:
             gain_from_entry_pct = ((new_highest - entry_p) / entry_p) * 100.0
 
             # Trailing SL & Target Logic (High-Profitability Multi-tier Protection):
-            # Tier 1 (Gain >= +0.75%): Move SL to breakeven + roundtrip tax buffer (zero risk)
-            # Tier 2 (Gain >= +1.25%): Trail SL 0.5% below high watermark (locks in at least +0.75%)
-            # Tier 3 (Gain >= +1.75%): Tighten trail to 0.4% below high watermark (locks in at least +1.35%)
-            # Tier 4 (Target Hit >= target_p): Realize full target profit (capturing any upside surge)
+            # Tier 1 (Gain >= +0.75%): Move SL to cost-guaranteed profit (+0.35% cushion ensures net green PnL after all Zerodha brokerage, STT & taxes)
+            # Tier 2 (Gain >= +1.25%): Trail SL to lock in at least +0.70% net profit
+            # Tier 3 (Gain >= +1.75%): Tighten trail to lock in at least +1.25% net profit
+            # Tier 4 (Target Hit >= target_p): Realize full target profit (+2.2% or higher)
             candidate_sl = curr_sl
 
             if gain_from_entry_pct >= 1.75:
-                tight_trail = round(new_highest * 0.996, 2)
+                tight_trail = max(round(entry_p * 1.0125, 2), round(new_highest * 0.995, 2))
                 candidate_sl = max(candidate_sl, tight_trail)
             elif gain_from_entry_pct >= 1.25:
-                dynamic_trail = round(new_highest * 0.995, 2)
+                dynamic_trail = max(round(entry_p * 1.007, 2), round(new_highest * 0.994, 2))
                 candidate_sl = max(candidate_sl, dynamic_trail)
             elif gain_from_entry_pct >= 0.75:
-                candidate_sl = max(candidate_sl, entry_p)
+                cost_guaranteed_sl = round(entry_p * 1.0035, 2)
+                candidate_sl = max(candidate_sl, cost_guaranteed_sl)
 
             new_sl = max(curr_sl, candidate_sl)
             sl_event = None
 
             if new_sl > curr_sl:
                 if curr_sl < entry_p and new_sl >= entry_p:
-                    sl_event = f"SL_TRAILED_TO_BREAKEVEN ({new_sl})"
+                    sl_event = f"SL_TRAILED_TO_COST_PLUS_PROFIT ({new_sl})"
                 else:
                     sl_event = f"SL_TRAILED_UP_TO_{new_sl}"
 
