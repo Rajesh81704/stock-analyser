@@ -842,6 +842,9 @@
             setTimeout(() => priceEl.classList.remove('realtime-tick-flash-down'), 400);
           }
           lastLiveTickPrice = livePrice;
+          if (typeof window.updateChartLiveTradeBadge === 'function') {
+            window.updateChartLiveTradeBadge(livePrice);
+          }
         }
 
         if (changeEl) {

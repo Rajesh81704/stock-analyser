@@ -31,10 +31,11 @@
 <div class="main-chart-card" id="main-chart-card" style="margin-bottom: 12px;">
   <!-- Chart Header Row -->
   <div class="chart-header-row">
-    <div class="chart-symbol-group">
+    <div class="chart-symbol-group" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
       <h3 id="chart-stock-symbol">RELIANCE.NS</h3>
       <span id="chart-stock-price">₹1,190.00</span>
       <span id="chart-stock-change" class="badge-signal-bullish">+0.51%</span>
+      <span id="chart-live-trade-badge" style="display:none; font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 4px; font-family: var(--font-mono);"></span>
     </div>
 
     <div class="chart-meta-group">
@@ -340,19 +341,29 @@
 
       <!-- Today's Mini Performance Strip -->
       <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; padding: 8px 12px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 11px;">
-        <div style="display: flex; gap: 14px; align-items: center; flex-wrap: wrap;">
+        <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
           <span><strong>Capital Deployed:</strong> <span id="today-total-capital" style="font-weight:700; color:#1e293b;">₹0.00</span></span>
           <span><strong>Open Positions:</strong> <span id="today-open-count" style="font-weight:800; color:#d97706;">0</span></span>
           <span><strong>Closed Trades:</strong> <span id="today-closed-count" style="font-weight:700;">0</span></span>
           <span><strong>Win Rate Today:</strong> <span id="today-win-rate" style="font-weight:800; color:#059669;">--%</span> (<span id="today-win-ratio" style="color:#64748b;">0W / 0L</span>)</span>
-          <span><strong>Gross PnL:</strong> <span id="today-gross-pnl" style="font-weight:700;">₹0.00</span></span>
           <span><strong>Charges & Taxes:</strong> <span id="today-charges" style="color:#64748b;">-₹0.00</span></span>
-        </div>
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <span style="font-size: 11.5px; font-weight: 800; color: #334155;">Today's Realized Net P&L:</span>
-          <span id="today-net-pnl" style="font-size: 14px; font-weight: 800; padding: 3px 10px; border-radius: 4px; background: #e2e8f0; color: #1e293b; font-family: var(--font-mono);">
-            ₹0.00
+          <span style="background: #f1f5f9; padding: 2px 7px; border-radius: 4px; border: 1px solid #cbd5e1;">
+            <strong>Live Open MTM:</strong> <span id="today-unrealized-pnl" style="font-weight:800; font-family: var(--font-mono); color: #1e293b;">₹0.00</span>
           </span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+          <div style="text-align: right;">
+            <div style="font-size: 9.5px; color: #64748b; font-weight: 700;">Realized (Closed)</div>
+            <span id="today-net-pnl" style="font-size: 11px; font-weight: 800; padding: 2px 7px; border-radius: 3px; background: #e2e8f0; color: #1e293b; font-family: var(--font-mono);">
+              ₹0.00
+            </span>
+          </div>
+          <div style="text-align: right; border-left: 1px solid #cbd5e1; padding-left: 10px;">
+            <div style="font-size: 10px; font-weight: 800; color: #1e3a8a;">Total Combined Net P&L:</div>
+            <span id="today-total-net-pnl" style="font-size: 13.5px; font-weight: 900; padding: 2px 9px; border-radius: 4px; background: #e2e8f0; color: #1e293b; font-family: var(--font-mono); display: inline-block;">
+              ₹0.00
+            </span>
+          </div>
         </div>
       </div>
 
@@ -368,14 +379,14 @@
               <th>Qty</th>
               <th>Capital</th>
               <th>Entry</th>
-              <th>Highest</th>
+              <th>Extreme (H/L)</th>
               <th>Trailed SL</th>
               <th>Target</th>
-              <th>Exit Price</th>
+              <th>Exit / Live CMP</th>
               <th>Exit Reason</th>
               <th>Gross PnL</th>
               <th>Brokerage & Tax</th>
-              <th>Net P&L</th>
+              <th>Net P&L (Live MTM)</th>
               <th>Status</th>
             </tr>
           </thead>
@@ -666,17 +677,17 @@
             const pnlColor = isWin ? '#059669' : '#cc0000';
             const capVal = t.allocated_capital ? '₹' + Number(t.allocated_capital).toLocaleString('en-IN', {minimumFractionDigits: 2}) : '--';
             const expVal = (t.qty && t.entry_price) ? '₹' + Number(t.qty * t.entry_price).toLocaleString('en-IN', {minimumFractionDigits: 2}) : '--';
-            const currPrice = Number(t.highest_price || t.entry_price || 0).toFixed(2);
+            const currPrice = Number(t.current_price || t.highest_price || t.entry_price || 0).toFixed(2);
             return `<tr style="background: #fffbeb;">
-              <td style="font-weight: 800; color: #000080;">${t.symbol}</td>
-              <td><span style="font-weight: 700; color: #059669;">BUY</span></td>
+              <td style="font-weight: 800; color: #000080; cursor: pointer;" onclick="selectChartStock('${t.symbol}')" title="Click to view ${t.symbol} on chart">${t.symbol} 🔍</td>
+              <td><span style="font-weight: 700; color: ${t.side === 'SELL' ? '#dc2626' : '#059669'};">${t.side || 'BUY'}</span></td>
               <td style="font-weight: 700;">${t.qty}</td>
               <td style="font-family: var(--font-mono); color: #475569;">${capVal}</td>
               <td style="font-family: var(--font-mono); color: #1e293b; font-weight: 700;">${expVal}</td>
               <td>₹${Number(t.entry_price || 0).toFixed(2)}</td>
-              <td style="font-family: var(--font-mono); color: #1e293b;">₹${currPrice}</td>
+              <td style="font-family: var(--font-mono); color: #1e293b; font-weight: 700;">₹${currPrice} <span style="font-size: 8.5px; color: #2563eb;">⚡ CMP</span></td>
               <td style="font-weight: 800; color: ${pnlColor}; font-family: var(--font-mono);">
-                ${t.net_pnl !== null ? sign + '₹' + Number(t.net_pnl).toFixed(2) : '₹0.00'}
+                ${sign}₹${Number(t.net_pnl || 0).toFixed(2)} <span style="font-size: 8.5px; background: ${isWin ? '#dcfce7' : '#fee2e2'}; color: ${pnlColor}; padding: 1px 4px; border-radius: 2px; font-weight: 800;">LIVE</span>
               </td>
               <td style="font-family: var(--font-mono); font-weight: 700; color: #b91c1c;">₹${Number(t.current_sl || t.initial_sl || 0).toFixed(2)}</td>
               <td style="font-family: var(--font-mono); font-weight: 700; color: #059669;">₹${Number(t.target_price || 0).toFixed(2)}</td>
@@ -819,13 +830,43 @@
       const todayChargesEl = document.getElementById('today-charges');
       if (todayChargesEl) todayChargesEl.innerText = `-₹${Number(todaySummary.brokerage_taxes || 0).toFixed(2)}`;
 
+      // Live Open MTM Profit
+      const todayUnrealizedEl = document.getElementById('today-unrealized-pnl');
+      if (todayUnrealizedEl) {
+        const unpnl = Number(todaySummary.unrealized_net_pnl || 0.0);
+        const uSign = unpnl >= 0 ? '+' : '';
+        const uColor = unpnl >= 0 ? '#15803d' : '#991b1b';
+        const uBg = unpnl >= 0 ? '#dcfce7' : '#fee2e2';
+        todayUnrealizedEl.innerText = `${uSign}₹${unpnl.toFixed(2)} MTM`;
+        todayUnrealizedEl.style.background = uBg;
+        todayUnrealizedEl.style.color = uColor;
+        todayUnrealizedEl.style.padding = '2px 7px';
+        todayUnrealizedEl.style.borderRadius = '3px';
+      }
+
+      // Realized Net P&L (Closed Trades)
       const todayNetPnlEl = document.getElementById('today-net-pnl');
       if (todayNetPnlEl) {
-        const npnl = todaySummary.net_pnl || 0.0;
+        const npnl = Number(todaySummary.net_pnl || 0.0);
         const sign = npnl >= 0 ? '+' : '';
         todayNetPnlEl.innerText = `${sign}₹${npnl.toFixed(2)}`;
         todayNetPnlEl.style.background = npnl >= 0 ? '#dcfce7' : '#fee2e2';
         todayNetPnlEl.style.color = npnl >= 0 ? '#15803d' : '#991b1b';
+      }
+
+      // Combined Today Total Net P&L (Realized + Live MTM)
+      const todayTotalNetEl = document.getElementById('today-total-net-pnl');
+      if (todayTotalNetEl) {
+        const totPnl = (todaySummary.total_combined_net_pnl !== undefined) 
+          ? Number(todaySummary.total_combined_net_pnl) 
+          : (Number(todaySummary.net_pnl || 0.0) + Number(todaySummary.unrealized_net_pnl || 0.0));
+        const totSign = totPnl >= 0 ? '+' : '';
+        const totColor = totPnl >= 0 ? '#15803d' : '#991b1b';
+        const totBg = totPnl >= 0 ? '#dcfce7' : '#fee2e2';
+        todayTotalNetEl.innerText = `${totSign}₹${totPnl.toFixed(2)}`;
+        todayTotalNetEl.style.background = totBg;
+        todayTotalNetEl.style.color = totColor;
+        todayTotalNetEl.style.border = `1.5px solid ${totPnl >= 0 ? '#86efac' : '#fca5a5'}`;
       }
 
       // Render Today's Trades Table
@@ -839,6 +880,9 @@
         }
       }
 
+      // Update Top Candlestick Chart Live Trade Badge
+      updateChartLiveTradeBadge();
+
       // -----------------------------------------------------------------------
       // Render Historical Date-Wise Archives
       // -----------------------------------------------------------------------
@@ -850,40 +894,153 @@
   }
 
   // -------------------------------------------------------------------------
-  // Helper: Render Individual Trade Row
+  // Helper: Select stock in candlestick chart
+  // -------------------------------------------------------------------------
+  function selectChartStock(symbol) {
+    if (!symbol) return;
+    const cleanSym = symbol.endsWith('.NS') ? symbol : `${symbol}.NS`;
+    if (typeof loadLiveMainChart === 'function') {
+      loadLiveMainChart(cleanSym, window.currentChartInterval || '5m', window.currentChartPeriod || '5d');
+    }
+    const chartCard = document.getElementById('main-chart-card');
+    if (chartCard) {
+      chartCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    setTimeout(updateChartLiveTradeBadge, 500);
+  }
+
+  window.updateChartLiveTradeBadge = function(liveTickPrice) {
+    const badge = document.getElementById('chart-live-trade-badge');
+    if (!badge) return;
+    const currentSym = (document.getElementById('chart-stock-symbol')?.textContent || '').trim().replace('.NS', '');
+    if (!currentSym || !cachedTelemetryData) {
+      badge.style.display = 'none';
+      return;
+    }
+    const openTrade = (cachedTelemetryData.open_trades || []).find(t => 
+      t.symbol === currentSym || t.symbol === currentSym + '.NS' || t.symbol.replace('.NS', '') === currentSym
+    );
+    if (openTrade) {
+      const entryP = Number(openTrade.entry_price || 0);
+      const qty = Number(openTrade.qty || 1);
+      const isShort = (openTrade.side || 'BUY').toUpperCase() === 'SELL';
+      const cmp = (liveTickPrice && liveTickPrice > 0) ? liveTickPrice : Number(openTrade.current_price || openTrade.highest_price || entryP);
+      const gross = isShort ? ((entryP - cmp) * qty) : ((cmp - entryP) * qty);
+      const estCharges = Number(openTrade.brokerage_and_taxes || 0);
+      const netVal = gross - estCharges;
+      const alloc = Number(openTrade.allocated_capital || (qty * entryP));
+      const retPct = alloc > 0 ? ((netVal / alloc) * 100) : 0;
+
+      const isWin = netVal >= 0;
+      const sign = isWin ? '+' : '';
+      const color = isWin ? '#15803d' : '#991b1b';
+      const bg = isWin ? '#dcfce7' : '#fee2e2';
+      const border = isWin ? '#86efac' : '#fca5a5';
+      badge.style.display = 'inline-flex';
+      badge.style.alignItems = 'center';
+      badge.style.gap = '6px';
+      badge.style.background = bg;
+      badge.style.color = color;
+      badge.style.border = `1.5px solid ${border}`;
+      badge.innerHTML = `🟢 <strong>LIVE POSITION (${openTrade.side || 'BUY'} ${qty} @ ₹${entryP.toFixed(2)})</strong>: Live Profit: <strong>${sign}₹${netVal.toFixed(2)}</strong> (${sign}${retPct.toFixed(2)}%)`;
+    } else {
+      badge.style.display = 'none';
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // Helper: Render Individual Trade Row (With Live MTM & Real-Time Tracking)
   // -------------------------------------------------------------------------
   function renderTradeRowHtml(t) {
-    const isWin = (t.net_pnl || 0) >= 0;
+    const isOpen = t.status === 'OPEN';
+    const netPnlVal = Number(t.net_pnl || 0);
+    const isWin = netPnlVal >= 0;
     const pnlColor = isWin ? '#059669' : '#cc0000';
     const sign = isWin ? '+' : '';
-    const isOpen = t.status === 'OPEN';
+
     const statusBadge = isOpen 
-      ? `<span style="background:#fef3c7; color:#92400e; font-weight:800; font-size:9.5px; padding:2px 6px; border-radius:3px; border:1px solid #f59e0b;">ACTIVE OPEN</span>`
+      ? `<span style="background:#fef3c7; color:#92400e; font-weight:800; font-size:9.5px; padding:2px 6px; border-radius:3px; border:1px solid #f59e0b; display:inline-flex; align-items:center; gap:4px;">
+           <span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:#d97706;"></span>ACTIVE OPEN
+         </span>`
       : `<span style="background:#e2e8f0; color:#334155; font-weight:700; font-size:9.5px; padding:2px 6px; border-radius:3px;">CLOSED</span>`;
 
     const timeStr = (t.entry_time || '').split(' ')[1] || t.entry_time || '--';
     const exitTimeStr = t.exit_time ? ((t.exit_time || '').split(' ')[1] || t.exit_time) : '';
     const capStr = t.allocated_capital ? '₹' + Number(t.allocated_capital).toLocaleString('en-IN') : '--';
 
-    return `<tr style="${isOpen ? 'background: #fffbeb;' : ''}">
+    // Live or Exit Price Column
+    let priceCell = '--';
+    if (t.exit_price) {
+      priceCell = '₹' + Number(t.exit_price).toFixed(2);
+    } else if (isOpen) {
+      const cmp = t.current_price || t.highest_price || t.entry_price || 0;
+      priceCell = `<div style="font-family:var(--font-mono); font-weight:800; color:#0f172a;">₹${Number(cmp).toFixed(2)}</div>
+                   <div style="font-size:8.5px; color:#2563eb; font-weight:700;">⚡ LIVE CMP</div>`;
+    }
+
+    // Exit Reason / Live Status Column
+    let reasonCell = t.exit_reason ? `<span style="background:#f1f5f9; padding:2px 4px; border-radius:2px; font-weight:600;">${t.exit_reason}</span>` : '--';
+    if (isOpen) {
+      reasonCell = `<span style="background:#dbeafe; color:#1e40af; padding:2px 5px; border-radius:3px; font-weight:800; font-size:9.5px;">⚡ IN PLAY</span>`;
+    }
+
+    // Gross PnL Column
+    let grossPnlCell = '--';
+    if (t.gross_pnl !== null && t.gross_pnl !== undefined) {
+      const gVal = Number(t.gross_pnl);
+      const gWin = gVal >= 0;
+      const gColor = gWin ? '#059669' : '#cc0000';
+      grossPnlCell = `<span style="font-weight:700; color:${gColor}; font-family:var(--font-mono);">${gWin ? '+' : ''}₹${gVal.toFixed(2)}</span>`;
+      if (isOpen) {
+        grossPnlCell += `<div style="font-size:8.5px; color:#64748b;">(Floating)</div>`;
+      }
+    }
+
+    // Brokerage & Taxes Column
+    let chargesCell = '--';
+    if (t.brokerage_and_taxes !== null && t.brokerage_and_taxes !== undefined) {
+      chargesCell = `<span style="color:#64748b; font-size:10px;">-₹${Number(t.brokerage_and_taxes).toFixed(2)}</span>`;
+      if (isOpen) {
+        chargesCell += ` <span style="font-size:8.5px; color:#94a3b8;">(est)</span>`;
+      }
+    }
+
+    // Net PnL Column (Live MTM highlighted)
+    let netPnlCell = '--';
+    if (t.net_pnl !== null && t.net_pnl !== undefined) {
+      if (isOpen) {
+        netPnlCell = `<div style="font-weight:900; color:${pnlColor}; font-size:12px; font-family:var(--font-mono);">${sign}₹${netPnlVal.toFixed(2)}</div>
+                      <div style="font-size:8.5px; font-weight:800; background:${isWin ? '#dcfce7' : '#fee2e2'}; color:${pnlColor}; padding:1px 5px; border-radius:3px; display:inline-block;">⚡ LIVE MTM</div>`;
+      } else {
+        netPnlCell = `<span style="font-weight:800; color:${pnlColor}; font-size:11.5px; font-family:var(--font-mono);">${sign}₹${netPnlVal.toFixed(2)}</span>`;
+      }
+    }
+
+    const sideBadge = t.side === 'SELL'
+      ? `<span style="font-weight:800; color:#dc2626; background:#fee2e2; padding:1px 5px; border-radius:2px; font-size:10px;">SELL</span>`
+      : `<span style="font-weight:800; color:#059669; background:#dcfce7; padding:1px 5px; border-radius:2px; font-size:10px;">BUY</span>`;
+
+    return `<tr style="${isOpen ? 'background: #fffbeb; border-left: 3px solid #f59e0b;' : ''}">
       <td style="font-family:var(--font-mono); font-size:10px;">${t.id}</td>
       <td style="font-size:10px; color:#64748b;" title="Entry: ${t.entry_time || '--'} ${t.exit_time ? '| Exit: ' + t.exit_time : ''}">
         ${timeStr}
         ${exitTimeStr ? `<div style="font-size:9px; color:#94a3b8;">${exitTimeStr}</div>` : ''}
       </td>
-      <td style="font-weight:800; color:#000080;">${t.symbol}</td>
-      <td><span style="font-weight:700; color:#059669;">${t.side}</span></td>
+      <td style="font-weight:800; color:#000080; cursor:pointer;" onclick="selectChartStock('${t.symbol}')" title="Click to view chart for ${t.symbol}">
+        ${t.symbol} 🔍
+      </td>
+      <td>${sideBadge}</td>
       <td style="font-weight:700;">${t.qty}</td>
       <td style="font-size:10px; color:#475569; font-family:var(--font-mono);">${capStr}</td>
       <td>₹${Number(t.entry_price || 0).toFixed(2)}</td>
       <td style="font-family:var(--font-mono); color:#1e293b;">₹${Number(t.highest_price || t.entry_price || 0).toFixed(2)}</td>
       <td style="font-family:var(--font-mono); font-weight:700; color:#b91c1c;">₹${Number(t.current_sl || t.initial_sl || 0).toFixed(2)}</td>
       <td style="font-family:var(--font-mono); font-weight:700; color:#059669;">₹${Number(t.target_price || 0).toFixed(2)}</td>
-      <td>${t.exit_price ? '₹' + Number(t.exit_price).toFixed(2) : '--'}</td>
-      <td style="font-size:10px;"><span style="background:#f1f5f9; padding:2px 4px; border-radius:2px; font-weight:600;">${t.exit_reason || '--'}</span></td>
-      <td style="font-weight:700; color:${pnlColor};">${t.gross_pnl !== null ? sign + '₹' + Number(t.gross_pnl).toFixed(2) : '--'}</td>
-      <td style="color:#64748b; font-size:10px;">${t.brokerage_and_taxes !== null ? '-₹' + Number(t.brokerage_and_taxes).toFixed(2) : '--'}</td>
-      <td style="font-weight:800; color:${pnlColor}; font-size:11.5px;">${t.net_pnl !== null ? sign + '₹' + Number(t.net_pnl).toFixed(2) : '--'}</td>
+      <td>${priceCell}</td>
+      <td style="font-size:10px;">${reasonCell}</td>
+      <td>${grossPnlCell}</td>
+      <td>${chargesCell}</td>
+      <td>${netPnlCell}</td>
       <td>${statusBadge}</td>
     </tr>`;
   }

@@ -1323,6 +1323,86 @@ class DailyIntradayAutoTrader:
         """)
         open_trades = [dict(r) for r in cur.fetchall()]
 
+        # ---------------------------------------------------------------------
+        # Real-Time Live Floating (MTM) P&L Calculation for Active Open Trades
+        # ---------------------------------------------------------------------
+        open_syms = [r["symbol"] for r in open_trades]
+        live_quotes = {}
+        if open_syms:
+            try:
+                from src.data_loader import KITE_API_KEY, KITE_ACCESS_TOKEN
+                if KITE_API_KEY and KITE_ACCESS_TOKEN:
+                    from kiteconnect import KiteConnect
+                    kc = KiteConnect(api_key=KITE_API_KEY)
+                    kc.set_access_token(KITE_ACCESS_TOKEN)
+                    instruments = [f"NSE:{s.replace('.NS', '')}" for s in open_syms]
+                    q_map = kc.quote(instruments)
+                    if q_map:
+                        for s in open_syms:
+                            s_clean = s.replace(".NS", "")
+                            k_key = f"NSE:{s_clean}"
+                            if k_key in q_map:
+                                lp = float(q_map[k_key].get("last_price") or 0.0)
+                                if lp > 0:
+                                    live_quotes[s] = lp
+                                    live_quotes[s_clean] = lp
+            except Exception as e_quote:
+                logger.debug(f"Live quote fetch notice in status: {e_quote}")
+
+        open_trades_by_id = {}
+        for r in open_trades:
+            sym = r["symbol"]
+            side = str(r.get("side") or "BUY").upper()
+            qty = int(r["qty"])
+            entry_p = float(r["entry_price"])
+            highest_p = float(r.get("highest_price") or entry_p)
+            allocated = float(r.get("allocated_capital") or (qty * entry_p))
+
+            curr_p = live_quotes.get(sym) or live_quotes.get(sym.replace(".NS", ""))
+            if curr_p is None:
+                try:
+                    resolved = resolve_ticker(sym)
+                    import yfinance as yf
+                    tk = yf.Ticker(resolved)
+                    fi = getattr(tk, "fast_info", None)
+                    if fi and getattr(fi, "last_price", None):
+                        curr_p = float(fi.last_price)
+                except Exception:
+                    pass
+            if curr_p is None or curr_p <= 0:
+                curr_p = highest_p if highest_p > 0 else entry_p
+
+            if side == "SELL":
+                live_gross = round((entry_p - curr_p) * qty, 2)
+                calc_side = "SHORT"
+            else:
+                live_gross = round((curr_p - entry_p) * qty, 2)
+                calc_side = "LONG"
+
+            try:
+                cost_res = self.cost_calculator.calculate_roundtrip(
+                    side=calc_side,
+                    qty=qty,
+                    raw_entry_price=entry_p,
+                    raw_exit_price=curr_p,
+                    trailing_turnover_cr=120.0
+                )
+                est_charges = round(cost_res.total_costs, 2)
+            except Exception:
+                est_charges = round(allocated * 0.0006, 2)
+
+            live_net = round(live_gross - est_charges, 2)
+            live_ret = round((live_net / allocated) * 100.0, 2) if allocated > 0 else 0.0
+
+            r["current_price"] = curr_p
+            r["gross_pnl"] = live_gross
+            r["brokerage_and_taxes"] = est_charges
+            r["net_pnl"] = live_net
+            r["return_pct"] = live_ret
+            r["is_open"] = True
+            r["unrealized"] = True
+            open_trades_by_id[r["id"]] = r
+
         # All trades ordered chronologically descending (LIMIT 250)
         cur.execute("""
             SELECT id, trade_date, symbol, side, qty, allocated_capital,
@@ -1333,6 +1413,18 @@ class DailyIntradayAutoTrader:
             ORDER BY trade_date DESC, id DESC LIMIT 250
         """)
         all_trades = [dict(r) for r in cur.fetchall()]
+
+        # Inject real-time live floating prices & PnL into all open trade records
+        for t in all_trades:
+            if t["status"] == "OPEN" and t["id"] in open_trades_by_id:
+                live_rec = open_trades_by_id[t["id"]]
+                t["current_price"] = live_rec["current_price"]
+                t["gross_pnl"] = live_rec["gross_pnl"]
+                t["brokerage_and_taxes"] = live_rec["brokerage_and_taxes"]
+                t["net_pnl"] = live_rec["net_pnl"]
+                t["return_pct"] = live_rec["return_pct"]
+                t["is_open"] = True
+                t["unrealized"] = True
 
         # Calculate overall metrics
         total_trades = len(all_trades)
@@ -1360,6 +1452,9 @@ class DailyIntradayAutoTrader:
                     "gross_pnl": 0.0,
                     "brokerage_taxes": 0.0,
                     "net_pnl": 0.0,
+                    "unrealized_gross_pnl": 0.0,
+                    "unrealized_net_pnl": 0.0,
+                    "total_combined_net_pnl": 0.0,
                     "total_allocated": 0.0
                 }
             g = trades_by_date[t_date]
@@ -1368,6 +1463,8 @@ class DailyIntradayAutoTrader:
             g["total_allocated"] += float(t.get("allocated_capital") or 0.0)
             if t.get("status") == "OPEN":
                 g["open_trades"] += 1
+                g["unrealized_gross_pnl"] = round(g.get("unrealized_gross_pnl", 0.0) + float(t.get("gross_pnl") or 0.0), 2)
+                g["unrealized_net_pnl"] = round(g.get("unrealized_net_pnl", 0.0) + float(t.get("net_pnl") or 0.0), 2)
             else:
                 g["closed_trades"] += 1
                 npnl = float(t.get("net_pnl") or 0.0)
@@ -1387,6 +1484,9 @@ class DailyIntradayAutoTrader:
             g["gross_pnl"] = round(g["gross_pnl"], 2)
             g["brokerage_taxes"] = round(g["brokerage_taxes"], 2)
             g["net_pnl"] = round(g["net_pnl"], 2)
+            g["unrealized_gross_pnl"] = round(g.get("unrealized_gross_pnl", 0.0), 2)
+            g["unrealized_net_pnl"] = round(g.get("unrealized_net_pnl", 0.0), 2)
+            g["total_combined_net_pnl"] = round(g["net_pnl"] + g["unrealized_net_pnl"], 2)
             g["total_allocated"] = round(g["total_allocated"], 2)
 
         today_trades = trades_by_date.get(today_str, {}).get("trades", [])
@@ -1403,6 +1503,9 @@ class DailyIntradayAutoTrader:
             "gross_pnl": 0.0,
             "brokerage_taxes": 0.0,
             "net_pnl": 0.0,
+            "unrealized_gross_pnl": 0.0,
+            "unrealized_net_pnl": 0.0,
+            "total_combined_net_pnl": 0.0,
             "total_allocated": 0.0
         })
 
@@ -1415,11 +1518,12 @@ class DailyIntradayAutoTrader:
         open_capital_utilized = sum(float(t.get("allocated_capital") or (t.get("qty", 0) * t.get("entry_price", 0))) for t in open_trades)
         gross_exposure = round(sum(float(t.get("qty", 0) * t.get("entry_price", 0)) for t in open_trades), 2)
         total_buying_power = round(base_simulated_capital * lev, 2)
-        unrealized_pnl = sum(float(t.get("net_pnl") or t.get("gross_pnl") or 0.0) for t in open_trades)
+        unrealized_pnl = round(sum(float(t.get("net_pnl") or 0.0) for t in open_trades), 2)
         today_realized_net_pnl = float(today_summary.get("net_pnl") or 0.0)
+        total_combined_pnl = round(today_realized_net_pnl + unrealized_pnl, 2)
 
         available_cash = max(0.0, round(base_simulated_capital - open_capital_utilized + today_realized_net_pnl, 2))
-        portfolio_equity = round(base_simulated_capital + today_realized_net_pnl + unrealized_pnl, 2)
+        portfolio_equity = round(base_simulated_capital + total_combined_pnl, 2)
         capital_utilization_pct = round((open_capital_utilized / base_simulated_capital * 100.0), 1) if base_simulated_capital > 0 else 0.0
         effective_leverage = round(gross_exposure / portfolio_equity, 2) if portfolio_equity > 0 else 0.0
 
