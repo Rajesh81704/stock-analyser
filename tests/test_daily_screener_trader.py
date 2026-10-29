@@ -7,7 +7,7 @@ import sqlite3
 import tempfile
 import os
 from zoneinfo import ZoneInfo
-from datetime import datetime
+from datetime import datetime, time as dt_time
 from src.algodesk.automation.daily_screener_trader import (
     DailyIntradayAutoTrader,
     get_ist_date,
@@ -279,7 +279,7 @@ def test_datewise_segregation_and_today_summary():
         assert pm["available_cash"] == 100000.0 - 15000.0 + 40.0  # 85,040.0
 
         # 5. Test close_single_position
-        closed_res = trader.close_single_position("TODAY_OPEN")
+        closed_res = trader.close_single_position("TODAY_OPEN", auto_recycle_margin=False)
         assert closed_res is not None
         assert closed_res["symbol"] == "TODAY_OPEN"
         assert closed_res["action"] == "CLOSED"
@@ -963,6 +963,138 @@ def test_orb_and_vwap_confluence_gate(tmp_path, monkeypatch):
     assert len(trades_approved) == 1
     assert trades_approved[0]["symbol"] == "RELIANCE"
     assert trades_approved[0]["side"] == "BUY"
+
+
+def test_market_hour_session_resolution_and_strategies(tmp_path):
+    """
+    Verifies that get_market_hour_session correctly resolves:
+    1. 09:15 - 09:30: OPENING_DISCOVERY (trading_allowed=False, RANGE_BUILDER)
+    2. 09:30 - 11:30: MORNING_EXPANSION (trading_allowed=True, ORB_MOMENTUM_BREAKOUT)
+    3. 11:30 - 13:30: MIDDAY_EUROPEAN (trading_allowed=True, VWAP_PULLBACK_REVERSION)
+    4. 13:30 - 14:45: AFTERNOON_POWER (trading_allowed=True, POWER_HOUR_MOMENTUM_RUNNER)
+    5. 14:45 - 15:30: EOD_SQUAREOFF (trading_allowed=False, RISK_SHIELD)
+    6. Off-hours: MARKET_CLOSED (trading_allowed=False)
+    """
+    db_file = tmp_path / "test_sessions.db"
+    trader = DailyIntradayAutoTrader(db_path=str(db_file))
+
+    # 1. 09:20 IST -> OPENING_DISCOVERY
+    s1 = trader.get_market_hour_session(check_time=dt_time(9, 20))
+    assert s1["session_id"] == "OPENING_DISCOVERY"
+    assert s1["strategy_id"] == "RANGE_BUILDER"
+    assert s1["trading_allowed"] is False
+
+    # 2. 10:15 IST -> MORNING_EXPANSION
+    s2 = trader.get_market_hour_session(check_time=dt_time(10, 15))
+    assert s2["session_id"] == "MORNING_EXPANSION"
+    assert s2["strategy_id"] == "ORB_MOMENTUM_BREAKOUT"
+    assert s2["trading_allowed"] is True
+    assert s2["target_pct"] == 1.5
+    assert s2["sl_pct"] == 0.8
+
+    # 3. 12:30 IST -> MIDDAY_EUROPEAN
+    s3 = trader.get_market_hour_session(check_time=dt_time(12, 30))
+    assert s3["session_id"] == "MIDDAY_EUROPEAN"
+    assert s3["strategy_id"] == "VWAP_PULLBACK_REVERSION"
+    assert s3["trading_allowed"] is True
+    assert s3["target_pct"] == 1.0
+    assert s3["sl_pct"] == 0.5
+
+    # 4. 14:00 IST -> AFTERNOON_POWER
+    s4 = trader.get_market_hour_session(check_time=dt_time(14, 0))
+    assert s4["session_id"] == "AFTERNOON_POWER"
+    assert s4["strategy_id"] == "POWER_HOUR_MOMENTUM_RUNNER"
+    assert s4["trading_allowed"] is True
+    assert s4["target_pct"] == 1.2
+    assert s4["sl_pct"] == 0.65
+
+    # 5. 15:05 IST -> EOD_SQUAREOFF
+    s5 = trader.get_market_hour_session(check_time=dt_time(15, 5))
+    assert s5["session_id"] == "EOD_SQUAREOFF"
+    assert s5["strategy_id"] == "RISK_SHIELD"
+    assert s5["trading_allowed"] is False
+
+    # 6. 18:30 IST -> MARKET_CLOSED
+    s6 = trader.get_market_hour_session(check_time=dt_time(18, 30))
+    assert s6["session_id"] == "MARKET_CLOSED"
+    assert s6["trading_allowed"] is False
+
+
+def test_market_hour_strategy_execution_and_midday_reversion(tmp_path, monkeypatch):
+    """
+    Verifies that scan_and_execute_intraday_opportunities executes different strategy rules
+    based on the market hour session:
+    1. During OPENING_DISCOVERY (09:20): rejects trade execution.
+    2. During MIDDAY_EUROPEAN (12:30): rejects breakout spikes at high of day, approves pullback to VWAP.
+    3. Status payload surfaces active session and strategy.
+    """
+    db_file = tmp_path / "test_session_exec.db"
+    trader = DailyIntradayAutoTrader(db_path=str(db_file))
+
+    conn = sqlite3.connect(str(db_file))
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO daily_intraday_picks (
+            date, rank, symbol, company_name, sector, price, conviction_score,
+            rvol, strategy_name, entry_trigger_price, initial_sl, target_price,
+            trailing_step_pct, status, side, created_at
+        ) VALUES (
+            '2026-10-29', 1, 'INFY', 'Infosys Ltd', 'IT', 1500.0, 90.0,
+            2.2, 'Intraday_MultiSession', 1505.0, 1490.0, 1530.0, 0.4, 'WATCHING', 'BUY', '2026-10-29 09:16:00'
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+    # 1. Simulate OPENING_DISCOVERY (09:20 IST) -> Must reject all entries
+    trades_opening = trader.scan_and_execute_intraday_opportunities(
+        trade_date_str="2026-10-29",
+        simulated_time=dt_time(9, 20)
+    )
+    assert len(trades_opening) == 0
+
+    # 2. Simulate MIDDAY_EUROPEAN (12:30 IST) with price overextended at High of Day (1520 vs VWAP 1500)
+    # Midday mean-reversion rule forbids chasing overextended spikes at peak
+    monkeypatch.setattr(
+        trader,
+        "get_intraday_orb_and_vwap",
+        lambda sym, current_price=None: {
+            "symbol": sym, "curr_price": 1520.0, "orb_high": 1522.0, "orb_low": 1490.0, "vwap": 1500.0
+        }
+    )
+    trades_midday_spike = trader.scan_and_execute_intraday_opportunities(
+        trade_date_str="2026-10-29",
+        simulated_time=dt_time(12, 30)
+    )
+    assert len(trades_midday_spike) == 0  # Vetoed: overextended >0.7% from VWAP
+
+    # 3. Simulate MIDDAY_EUROPEAN (12:30 IST) with healthy pullback to VWAP (1505 vs VWAP 1502, below HOD 1522)
+    # Healthy pullback bounce -> APPROVED!
+    monkeypatch.setattr(
+        trader,
+        "get_intraday_orb_and_vwap",
+        lambda sym, current_price=None: {
+            "symbol": sym, "curr_price": 1505.0, "orb_high": 1522.0, "orb_low": 1490.0, "vwap": 1502.0
+        }
+    )
+    trades_midday_pullback = trader.scan_and_execute_intraday_opportunities(
+        trade_date_str="2026-10-29",
+        simulated_time=dt_time(12, 30)
+    )
+    assert len(trades_midday_pullback) == 1
+    t = trades_midday_pullback[0]
+    assert t["symbol"] == "INFY"
+    assert t["strategy_applied"] == "VWAP_PULLBACK_REVERSION"
+    assert t["market_session"] == "MIDDAY_EUROPEAN"
+    assert t["initial_sl"] < 1505.0  # Tight risk below entry
+    assert t["target_price"] > 1505.0
+
+    # 4. Verify get_automation_status includes market session telemetry
+    status = trader.get_automation_status(trade_date_str="2026-10-29")
+    assert "market_session" in status
+    assert "active_strategy" in status["portfolio_metrics"]
+    assert "market_session" in status["portfolio_metrics"]
+
 
 
 

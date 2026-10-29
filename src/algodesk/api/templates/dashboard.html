@@ -276,6 +276,26 @@
     </div>
   </div>
 
+  <!-- Real-Time Market Hour Multi-Session Strategy Ribbon -->
+  <div id="session-strategy-banner" style="background: linear-gradient(90deg, #0f172a, #1e1b4b); color: #ffffff; padding: 7px 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 11px; border-bottom: 2px solid #3b82f6;">
+    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+      <span style="font-weight: 800; color: #93c5fd; text-transform: uppercase; letter-spacing: 0.5px;">🕒 Market Session:</span>
+      <span id="market-session-badge" style="background: #3b82f6; color: #ffffff; font-weight: 800; padding: 2px 10px; border-radius: 4px; font-size: 11px; letter-spacing: 0.3px;">
+        Loading Session...
+      </span>
+      <span id="market-session-time" style="color: #cbd5e1; font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;">--</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+      <span style="font-weight: 800; color: #fbbf24;">⚡ Tailored Strategy:</span>
+      <span id="market-strategy-name" style="background: rgba(251,191,36,0.15); border: 1px solid #f59e0b; color: #fde68a; font-weight: 800; padding: 2px 9px; border-radius: 4px; font-size: 11px;">
+        Initializing Strategy...
+      </span>
+      <span id="market-trading-permission" style="font-weight: 800; font-size: 10.5px; padding: 2px 8px; border-radius: 4px;">
+        --
+      </span>
+    </div>
+  </div>
+
   <!-- Section 1: Screened Picks Table -->
   <div style="padding: 10px 14px 6px;">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
@@ -608,6 +628,52 @@
 
       const kpiMode = document.getElementById('kpi-execution-mode');
       if (kpiMode && pm.execution_mode) kpiMode.innerText = pm.execution_mode;
+
+      // -----------------------------------------------------------------------
+      // Real-Time Market Hour Session & Active Strategy Ribbon Updates
+      // -----------------------------------------------------------------------
+      const ms = data.market_session || {};
+      const sessBadge = document.getElementById('market-session-badge');
+      const sessTime = document.getElementById('market-session-time');
+      const stratName = document.getElementById('market-strategy-name');
+      const tradePerm = document.getElementById('market-trading-permission');
+
+      if (sessBadge && ms.session_name) {
+        sessBadge.innerText = ms.session_name;
+        if (ms.session_id === 'MORNING_EXPANSION') {
+          sessBadge.style.background = '#059669'; // Emerald
+        } else if (ms.session_id === 'MIDDAY_EUROPEAN') {
+          sessBadge.style.background = '#0284c7'; // European Sky Blue
+        } else if (ms.session_id === 'AFTERNOON_POWER') {
+          sessBadge.style.background = '#7c3aed'; // Afternoon Purple
+        } else if (ms.session_id === 'OPENING_DISCOVERY') {
+          sessBadge.style.background = '#d97706'; // Amber Discovery
+        } else if (ms.session_id === 'EOD_SQUAREOFF') {
+          sessBadge.style.background = '#dc2626'; // Red Squareoff Lock
+        } else {
+          sessBadge.style.background = '#475569'; // Market Closed
+        }
+      }
+      if (sessTime && ms.time_range) {
+        sessTime.innerText = `(${ms.time_range})`;
+      }
+      if (stratName && ms.strategy_name) {
+        stratName.innerText = ms.strategy_name;
+        stratName.title = ms.description || '';
+      }
+      if (tradePerm) {
+        if (ms.trading_allowed) {
+          tradePerm.innerText = '✅ ENTRIES OPEN';
+          tradePerm.style.background = 'rgba(16, 185, 129, 0.2)';
+          tradePerm.style.color = '#34d399';
+          tradePerm.style.border = '1px solid #059669';
+        } else {
+          tradePerm.innerText = '🔒 ENTRIES LOCKED';
+          tradePerm.style.background = 'rgba(239, 68, 68, 0.2)';
+          tradePerm.style.color = '#f87171';
+          tradePerm.style.border = '1px solid #dc2626';
+        }
+      }
 
       const thQty = document.getElementById('th-active-qty');
       if (thQty) thQty.innerText = `Qty (${levStr})`;

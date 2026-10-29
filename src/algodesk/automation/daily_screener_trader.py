@@ -1028,7 +1028,10 @@ class DailyIntradayAutoTrader:
                     "orb_low": round(orb_low, 2),
                     "vwap": round(vwap, 2),
                     "above_vwap": curr_p > vwap,
-                    "below_vwap": curr_p < vwap
+                    "below_vwap": curr_p < vwap,
+                    "day_high": round(float(df["high"].max()), 2),
+                    "day_low": round(float(df["low"].min()), 2),
+                    "vwap_dist_pct": round(((curr_p - vwap) / vwap) * 100.0, 3)
                 }
         except Exception as e:
             logger.debug(f"ORB/VWAP fetch error for {symbol}: {e}")
@@ -1036,7 +1039,123 @@ class DailyIntradayAutoTrader:
         return None
 
     # -------------------------------------------------------------------------
-    # 2b. Continuous Whole-Day Opportunity Scanner & Dynamic Trader
+    # 2b. Market Hour Regime & Multi-Session Intraday Strategy Engine
+    # -------------------------------------------------------------------------
+    def get_market_hour_session(self, check_time: Optional[Any] = None) -> Dict[str, Any]:
+        """
+        Determines the current NSE intraday market hour session and its tailored algorithmic strategy.
+        Sessions (IST):
+        1. 09:15 - 09:30: OPENING_DISCOVERY (Strategy: RANGE_BUILDER - strictly establish 15m ORB, no entries)
+        2. 09:30 - 11:30: MORNING_EXPANSION (Strategy: ORB_MOMENTUM_BREAKOUT - high-volume 15m ORB & VWAP breakout)
+        3. 11:30 - 13:30: MIDDAY_EUROPEAN (Strategy: VWAP_PULLBACK_REVERSION - mean-reversion & dip buying at VWAP support)
+        4. 13:30 - 14:45: AFTERNOON_POWER (Strategy: POWER_HOUR_MOMENTUM_RUNNER - midday consolidation breakout & trend continuation)
+        5. 14:45 - 15:30: EOD_SQUAREOFF (Strategy: RISK_SHIELD - no new entries, aggressive trailing exit & mandatory square-off)
+        """
+        if check_time is None:
+            t = datetime.now(IST).time()
+        elif isinstance(check_time, dt_time):
+            t = check_time
+        elif isinstance(check_time, str):
+            parts = check_time.strip().split(":")
+            t = dt_time(int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 0)
+        else:
+            t = datetime.now(IST).time()
+
+        if dt_time(9, 15) <= t < dt_time(9, 30):
+            return {
+                "session_id": "OPENING_DISCOVERY",
+                "session_name": "Opening Range Discovery",
+                "time_range": "09:15 - 09:30 IST",
+                "strategy_id": "RANGE_BUILDER",
+                "strategy_name": "Opening Range Discovery (No Entries)",
+                "trading_allowed": False,
+                "description": "Forming the 15-minute Opening Range (HOD/LOD) and initial VWAP. Entries are locked to prevent morning fakeout traps.",
+                "entry_rules": "No new entries allowed. Establishes the 15-minute benchmark range.",
+                "target_pct": 1.5,
+                "sl_pct": 0.8
+            }
+        elif dt_time(9, 30) <= t < dt_time(11, 30):
+            return {
+                "session_id": "MORNING_EXPANSION",
+                "session_name": "Morning Expansion Session",
+                "time_range": "09:30 - 11:30 IST",
+                "strategy_id": "ORB_MOMENTUM_BREAKOUT",
+                "strategy_name": "15m Opening Range Breakout (ORB + VWAP Confluence)",
+                "trading_allowed": True,
+                "description": "Prime institutional momentum expansion window. Trades confirmed breakouts above 15m high (CMP > VWAP) or breakdowns below 15m low (CMP < VWAP).",
+                "entry_rules": "Long: CMP >= 15m High * 1.001 AND CMP > VWAP. Short: CMP <= 15m Low * 0.999 AND CMP < VWAP.",
+                "target_pct": 1.5,
+                "sl_pct": 0.8
+            }
+        elif dt_time(11, 30) <= t < dt_time(13, 30):
+            return {
+                "session_id": "MIDDAY_EUROPEAN",
+                "session_name": "Midday & European Open Session",
+                "time_range": "11:30 - 13:30 IST",
+                "strategy_id": "VWAP_PULLBACK_REVERSION",
+                "strategy_name": "VWAP Pullback & Support Reversion",
+                "trading_allowed": True,
+                "description": "Midday volume slump and European open. Avoids chasing high breakout traps; buys pullbacks to rising VWAP support or sells rallies to declining VWAP resistance.",
+                "entry_rules": "Long: Pullback within 0.7% of VWAP (CMP >= VWAP) with bounce confirmation, avoiding spike highs. Short: Rally within 0.7% below VWAP (CMP <= VWAP).",
+                "target_pct": 1.0,
+                "sl_pct": 0.5
+            }
+        elif dt_time(13, 30) <= t < dt_time(14, 45):
+            return {
+                "session_id": "AFTERNOON_POWER",
+                "session_name": "Afternoon Power-Hour Session",
+                "time_range": "13:30 - 14:45 IST",
+                "strategy_id": "POWER_HOUR_MOMENTUM_RUNNER",
+                "strategy_name": "Power-Hour Midday Box Breakout & Trend Runner",
+                "trading_allowed": True,
+                "description": "Afternoon institutional positioning and trend acceleration. Trades breakouts from midday consolidation with volume and VWAP alignment.",
+                "entry_rules": "Long: CMP > VWAP AND breakout above midday consolidation high. Short: CMP < VWAP AND breakdown below midday consolidation low.",
+                "target_pct": 1.2,
+                "sl_pct": 0.65
+            }
+        elif dt_time(14, 45) <= t < dt_time(15, 30):
+            return {
+                "session_id": "EOD_SQUAREOFF",
+                "session_name": "EOD Square-Off & Capital Shield",
+                "time_range": "14:45 - 15:30 IST",
+                "strategy_id": "RISK_SHIELD",
+                "strategy_name": "Capital Shield & Trailing Exit Lock",
+                "trading_allowed": False,
+                "description": "Strict square-off window. No new positions entered. System actively monitors trailing stops and enforces complete square-off before 15:00/15:15 IST.",
+                "entry_rules": "No new entries allowed. Trailing stop lock and auto-squareoff active.",
+                "target_pct": 0.0,
+                "sl_pct": 0.0
+            }
+        else:
+            return {
+                "session_id": "MARKET_CLOSED",
+                "session_name": "Market Closed",
+                "time_range": "15:30 - 09:15 IST",
+                "strategy_id": "PRE_POST_ANALYSIS",
+                "strategy_name": "Pre/Post-Market Quant Screener",
+                "trading_allowed": False,
+                "description": "Market is closed. Engine performs historical data sync, universe rebalancing, and next-day candidate ranking.",
+                "entry_rules": "Market is closed. No live trading.",
+                "target_pct": 0.0,
+                "sl_pct": 0.0
+            }
+
+    def get_session_by_id(self, session_id: str) -> Dict[str, Any]:
+        """Helper to retrieve session metadata by session ID."""
+        s_id = str(session_id).upper().strip()
+        time_map = {
+            "OPENING_DISCOVERY": dt_time(9, 20),
+            "MORNING_EXPANSION": dt_time(10, 0),
+            "MIDDAY_EUROPEAN": dt_time(12, 0),
+            "AFTERNOON_POWER": dt_time(14, 0),
+            "EOD_SQUAREOFF": dt_time(14, 50),
+            "MARKET_CLOSED": dt_time(16, 0)
+        }
+        ref_time = time_map.get(s_id, dt_time(10, 0))
+        return self.get_market_hour_session(check_time=ref_time)
+
+    # -------------------------------------------------------------------------
+    # 2c. Continuous Whole-Day Opportunity Scanner & Dynamic Trader
     # -------------------------------------------------------------------------
     def scan_and_execute_intraday_opportunities(
         self,
@@ -1045,33 +1164,47 @@ class DailyIntradayAutoTrader:
         max_positions: int = 5,
         max_daily_trades: int = 10,
         min_trade_capital: float = 2000.0,
-        use_index_regime: Optional[bool] = None
+        use_index_regime: Optional[bool] = None,
+        simulated_time: Optional[Any] = None,
+        session_override: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
-        Continuously scans today's best intraday stocks throughout the market day (09:30 - 15:00 IST)
-        for true Opening Range Breakout (ORB) and VWAP confluence opportunities.
-        Enforces:
-        1. 09:15-09:30 opening range wait (never trades before 09:30 IST).
-        2. Long Breakout ONLY if price breaks above 15m High AND price is above VWAP.
-        3. Short Breakdown ONLY if price breaks below 15m Low AND price is below VWAP.
-        4. Strict ceiling of max 10 trades per day and 5 concurrent positions with Zerodha margin recycling.
+        Continuously scans today's best intraday stocks throughout market hours (09:15 - 15:30 IST)
+        and executes strategies tailored to each specific market hour session:
+        - 09:15 - 09:30 IST (OPENING_DISCOVERY): Rejects all new entries, establishes 15m ORB.
+        - 09:30 - 11:30 IST (MORNING_EXPANSION): Executes ORB_MOMENTUM_BREAKOUT with 15m High/Low and VWAP.
+        - 11:30 - 13:30 IST (MIDDAY_EUROPEAN): Executes VWAP_PULLBACK_REVERSION, avoiding breakout traps.
+        - 13:30 - 14:45 IST (AFTERNOON_POWER): Executes POWER_HOUR_MOMENTUM_RUNNER for afternoon continuation.
+        - 14:45 - 15:30 IST (EOD_SQUAREOFF): Rejects new entries, locks trailing stops for 15:00 square-off.
         """
         today_str = trade_date_str or get_ist_date()
         now_dt = datetime.now(IST)
         now_ts = get_ist_now_ts()
 
-        # Strict Market Hours Hard-Lock: Only allow trade execution between 09:30 and 15:00 IST
-        # 09:15 to 09:30 IST is strictly reserved to establish the 15-minute Opening Range (HOD/LOD)
-        if not trade_date_str:
-            if now_dt.time() < dt_time(9, 30):
-                logger.info(
-                    f"🚫 [OpportunityScanner] Opening Range forming (09:15-09:30 IST). Current: {now_dt.time().strftime('%H:%M:%S')} IST. "
-                    f"Waiting for 09:30 IST for true ORB high/low to be established."
-                )
-                return []
-            if now_dt.time() >= dt_time(15, 0):
-                logger.info("🚫 [OpportunityScanner] Past 15:00 IST intraday cutoff. No new trades entered.")
-                return []
+        # Resolve active market session and strategy
+        if simulated_time is not None:
+            session_info = self.get_market_hour_session(check_time=simulated_time)
+        elif session_override is not None:
+            session_info = self.get_session_by_id(session_override)
+        elif trade_date_str is not None or current_prices is not None:
+            # Explicit simulation/backtest or manual quote evaluation: default to MORNING_EXPANSION
+            session_info = self.get_market_hour_session(check_time=dt_time(10, 0))
+        else:
+            session_info = self.get_market_hour_session()
+
+        # Strict Session Entry Gate: Enforce session permissions
+        if not session_info.get("trading_allowed", False):
+            logger.info(
+                f"🚫 [MarketHourGate] Active session '{session_info['session_name']}' "
+                f"({session_info['strategy_name']}) does not permit new entries. {session_info['description']}"
+            )
+            return []
+
+        active_strategy = session_info["strategy_id"]
+        logger.info(
+            f"⚡ [MarketHourStrategy] Active Session: '{session_info['session_name']}' ({session_info['time_range']}) | "
+            f"Strategy: {session_info['strategy_name']} ({active_strategy})"
+        )
 
         with self._lock:
             conn = self._get_connection()
@@ -1204,7 +1337,7 @@ class DailyIntradayAutoTrader:
                 except Exception:
                     batch_prices[sym] = float(p["price"])
 
-        # 5. Check triggers and execute trades
+        # 5. Check triggers and execute trades tailored to active market session
         new_trades = []
         lev = float(getattr(self, "leverage", 5.0))
         apply_index = self.use_index_regime if use_index_regime is None else bool(use_index_regime)
@@ -1218,7 +1351,7 @@ class DailyIntradayAutoTrader:
                 if slots_available <= 0 or available_margin < min_trade_capital:
                     break
 
-                # 1. High-Conviction Quality Gate: Only trade elite setups
+                # High-Conviction Quality Gate: Only trade elite setups
                 conviction = float(pick.get("conviction_score") or 0.0)
                 if conviction < 70.0:
                     continue
@@ -1228,46 +1361,121 @@ class DailyIntradayAutoTrader:
                 curr_price = float(batch_prices.get(sym) or batch_prices.get(sym.replace(".NS", "")) or pick["price"])
                 base_price = float(pick["price"])
 
-                # 2. Strict Breakout/Breakdown Confirmation based on Side, 15m ORB, and VWAP:
+                # Fetch live intraday ORB and VWAP metrics
                 intraday_metrics = None
                 if current_prices is None:
                     intraday_metrics = self.get_intraday_orb_and_vwap(sym, current_price=curr_price)
                     if intraday_metrics and intraday_metrics.get("curr_price"):
                         curr_price = float(intraday_metrics["curr_price"])
 
-                if side == "SELL":
-                    trigger_price = float(pick.get("entry_trigger_price") or (base_price * 0.996))
-                    is_opportunity = (curr_price <= trigger_price) and (curr_price < base_price)
+                is_opportunity = False
+                side_desc = ""
+                initial_sl = 0.0
+                target_p = 0.0
 
-                    # If live intraday metrics are available, enforce true 15m ORB Low and VWAP breakdown
-                    if intraday_metrics:
-                        orb_low = intraday_metrics["orb_low"]
-                        vwap = intraday_metrics["vwap"]
-                        # Must break below 15m low AND trade below intraday VWAP
-                        is_opportunity = (curr_price <= orb_low * 0.999) and (curr_price < vwap)
-                        if not is_opportunity:
-                            logger.info(f"🚫 [BreakdownVeto] {sym} rejected: CMP ₹{curr_price:.2f} failed breakdown vs ORB Low ₹{orb_low:.2f} or VWAP ₹{vwap:.2f}")
+                # -----------------------------------------------------------------
+                # Strategy Branch 1: MORNING_EXPANSION (09:30 - 11:30 IST)
+                # Opening Range Breakout (ORB) with VWAP Confluence
+                # -----------------------------------------------------------------
+                if active_strategy == "ORB_MOMENTUM_BREAKOUT":
+                    if side == "SELL":
+                        trigger_price = float(pick.get("entry_trigger_price") or (base_price * 0.996))
+                        is_opportunity = (curr_price <= trigger_price) and (curr_price < base_price)
+                        if intraday_metrics:
+                            orb_low = intraday_metrics["orb_low"]
+                            vwap = intraday_metrics["vwap"]
+                            is_opportunity = (curr_price <= orb_low * 0.999) and (curr_price < vwap)
+                            if not is_opportunity:
+                                logger.info(f"🚫 [ORBBreakdownVeto] {sym} rejected: CMP ₹{curr_price:.2f} failed breakdown vs ORB Low ₹{orb_low:.2f} or VWAP ₹{vwap:.2f}")
 
-                    initial_sl = float(pick.get("initial_sl") or round(curr_price * 1.009, 2))     # +0.9% stop-loss (above entry)
-                    target_p = float(pick.get("target_price") or pick.get("target") or round(curr_price * 0.986, 2))       # -1.4% profit target (below entry)
-                    side_desc = "Short Breakdown (Below ORB Low & VWAP)"
-                else:
-                    trigger_price = float(pick.get("entry_trigger_price") or (base_price * 1.004))
-                    # Must cross above trigger price AND be above base price (green upward momentum)
-                    is_opportunity = (curr_price >= trigger_price) and (curr_price > base_price)
+                        initial_sl = float(pick.get("initial_sl") or round(curr_price * 1.008, 2))     # +0.8% stop-loss (above entry)
+                        target_p = float(pick.get("target_price") or pick.get("target") or round(curr_price * 0.985, 2))       # -1.5% profit target
+                        side_desc = "Morning ORB Breakdown (Below 15m Low & VWAP)"
+                    else:
+                        trigger_price = float(pick.get("entry_trigger_price") or (base_price * 1.004))
+                        is_opportunity = (curr_price >= trigger_price) and (curr_price > base_price)
+                        if intraday_metrics:
+                            orb_high = intraday_metrics["orb_high"]
+                            vwap = intraday_metrics["vwap"]
+                            is_opportunity = (curr_price >= orb_high * 1.001) and (curr_price > vwap)
+                            if not is_opportunity:
+                                logger.info(f"🚫 [ORBBreakoutVeto] {sym} rejected: CMP ₹{curr_price:.2f} failed breakout vs ORB High ₹{orb_high:.2f} or VWAP ₹{vwap:.2f}")
 
-                    # If live intraday metrics are available, enforce true 15m ORB High and VWAP breakout
-                    if intraday_metrics:
-                        orb_high = intraday_metrics["orb_high"]
-                        vwap = intraday_metrics["vwap"]
-                        # Must break above 15m high AND trade above intraday VWAP
-                        is_opportunity = (curr_price >= orb_high * 1.001) and (curr_price > vwap)
-                        if not is_opportunity:
-                            logger.info(f"🚫 [BreakoutVeto] {sym} rejected: CMP ₹{curr_price:.2f} failed breakout vs ORB High ₹{orb_high:.2f} or VWAP ₹{vwap:.2f}")
+                        initial_sl = float(pick.get("initial_sl") or round(curr_price * 0.992, 2))     # -0.8% stop-loss (below entry)
+                        target_p = float(pick.get("target_price") or pick.get("target") or round(curr_price * 1.015, 2))       # +1.5% profit target
+                        side_desc = "Morning ORB Breakout (Above 15m High & VWAP)"
 
-                    initial_sl = float(pick.get("initial_sl") or round(curr_price * 0.991, 2))     # -0.9% stop-loss (below entry)
-                    target_p = float(pick.get("target_price") or pick.get("target") or round(curr_price * 1.014, 2))       # +1.4% profit target (above entry)
-                    side_desc = "Long Breakout (Above ORB High & VWAP)"
+                # -----------------------------------------------------------------
+                # Strategy Branch 2: MIDDAY_EUROPEAN (11:30 - 13:30 IST)
+                # VWAP Pullback & Support Reversion (Anti-Breakout Trap)
+                # -----------------------------------------------------------------
+                elif active_strategy == "VWAP_PULLBACK_REVERSION":
+                    if side == "SELL":
+                        if intraday_metrics:
+                            orb_low = intraday_metrics["orb_low"]
+                            vwap = intraday_metrics["vwap"]
+                            # Rally within 0.7% below VWAP and rejected below VWAP (avoids chasing at day low)
+                            is_opportunity = (vwap * 0.993 <= curr_price <= vwap) and (curr_price > orb_low * 1.002)
+                            if not is_opportunity:
+                                if curr_price < vwap * 0.993:
+                                    logger.info(f"🚫 [MiddayTrapVeto] {sym} short rejected: CMP ₹{curr_price:.2f} is extended >0.7% below VWAP ₹{vwap:.2f}. Avoid chasing low.")
+                                elif curr_price > vwap:
+                                    logger.info(f"🚫 [MiddayVeto] {sym} short rejected: CMP ₹{curr_price:.2f} is above VWAP ₹{vwap:.2f}.")
+                        else:
+                            is_opportunity = (base_price * 0.994 <= curr_price <= base_price * 1.002)
+
+                        initial_sl = round(curr_price * 1.005, 2)    # Tight +0.5% stop-loss just above VWAP
+                        target_p = round(curr_price * 0.990, 2)      # -1.0% target back toward morning low
+                        side_desc = "Midday VWAP Resistance Rejection (Pullback Short)"
+                    else:
+                        if intraday_metrics:
+                            orb_high = intraday_metrics["orb_high"]
+                            vwap = intraday_metrics["vwap"]
+                            # Pullback within 0.7% above VWAP and holding above VWAP (avoids chasing at day high)
+                            is_opportunity = (vwap <= curr_price <= vwap * 1.007) and (curr_price < orb_high * 0.998)
+                            if not is_opportunity:
+                                if curr_price > vwap * 1.007:
+                                    logger.info(f"🚫 [MiddayTrapVeto] {sym} long rejected: CMP ₹{curr_price:.2f} is extended >0.7% above VWAP ₹{vwap:.2f}. Avoid chasing high.")
+                                elif curr_price < vwap:
+                                    logger.info(f"🚫 [MiddayVeto] {sym} long rejected: CMP ₹{curr_price:.2f} dipped below VWAP ₹{vwap:.2f}.")
+                        else:
+                            is_opportunity = (base_price * 0.998 <= curr_price <= base_price * 1.006)
+
+                        initial_sl = round(curr_price * 0.995, 2)    # Tight -0.5% stop-loss just below VWAP
+                        target_p = round(curr_price * 1.010, 2)      # +1.0% target back toward morning high
+                        side_desc = "Midday VWAP Support Reversion (Pullback Long)"
+
+                # -----------------------------------------------------------------
+                # Strategy Branch 3: AFTERNOON_POWER (13:30 - 14:45 IST)
+                # Power-Hour Midday Box Breakout & Trend Continuation Runner
+                # -----------------------------------------------------------------
+                elif active_strategy == "POWER_HOUR_MOMENTUM_RUNNER":
+                    if side == "SELL":
+                        trigger_price = float(pick.get("entry_trigger_price") or (base_price * 0.996))
+                        is_opportunity = (curr_price <= trigger_price) and (curr_price < base_price)
+                        if intraday_metrics:
+                            orb_low = intraday_metrics["orb_low"]
+                            vwap = intraday_metrics["vwap"]
+                            is_opportunity = (curr_price < vwap) and (curr_price <= orb_low * 1.000)
+                            if not is_opportunity:
+                                logger.info(f"🚫 [AfternoonBreakdownVeto] {sym} rejected: CMP ₹{curr_price:.2f} failed afternoon breakdown vs VWAP ₹{vwap:.2f} or Low ₹{orb_low:.2f}")
+
+                        initial_sl = round(curr_price * 1.0065, 2)   # +0.65% stop-loss
+                        target_p = round(curr_price * 0.988, 2)      # -1.2% profit target
+                        side_desc = "Power-Hour Afternoon Breakdown (Below Midday Low & VWAP)"
+                    else:
+                        trigger_price = float(pick.get("entry_trigger_price") or (base_price * 1.004))
+                        is_opportunity = (curr_price >= trigger_price) and (curr_price > base_price)
+                        if intraday_metrics:
+                            orb_high = intraday_metrics["orb_high"]
+                            vwap = intraday_metrics["vwap"]
+                            is_opportunity = (curr_price > vwap) and (curr_price >= orb_high * 1.000)
+                            if not is_opportunity:
+                                logger.info(f"🚫 [AfternoonBreakoutVeto] {sym} rejected: CMP ₹{curr_price:.2f} failed afternoon breakout vs VWAP ₹{vwap:.2f} or High ₹{orb_high:.2f}")
+
+                        initial_sl = round(curr_price * 0.9935, 2)   # -0.65% stop-loss
+                        target_p = round(curr_price * 1.012, 2)      # +1.2% profit target
+                        side_desc = "Power-Hour Afternoon Breakout (Above Midday High & VWAP)"
 
                 if is_opportunity:
                     # Allocate portion of available margin
@@ -1281,7 +1489,7 @@ class DailyIntradayAutoTrader:
                         "price": curr_price,
                         "side": side,
                         "sl": initial_sl,
-                        "note": f"🎯 Confirmed {side_desc} Opportunity Triggered ({lev:.0f}x MIS {side}): Margin ₹{actual_margin:,.2f} | 5x Exp ₹{exposure:,.2f} | Score: {conviction:.1f}"
+                        "note": f"🎯 [{session_info['session_name']}] Confirmed {side_desc} ({lev:.0f}x MIS {side}): Strategy={active_strategy} | Margin ₹{actual_margin:,.2f} | 5x Exp ₹{exposure:,.2f} | Score: {conviction:.1f}"
                     }])
 
                     # Prevent duplicate insertion
@@ -1337,10 +1545,16 @@ class DailyIntradayAutoTrader:
                         "initial_sl": initial_sl,
                         "target_price": target_p,
                         "status": "OPEN",
-                        "opportunity_note": f"Intraday {side_desc} Opportunity Triggered at ₹{curr_price:,.2f}"
+                        "market_session": session_info["session_id"],
+                        "strategy_applied": active_strategy,
+                        "opportunity_note": f"[{session_info['session_name']}] {side_desc} at ₹{curr_price:,.2f}"
                     })
 
-                    logger.info(f"🎯 [IntradayOpportunity] Trade ENTERED ({side}): {sym} at ₹{curr_price} | Qty: {qty} ({lev:.0f}x MIS) | Margin: ₹{actual_margin:,.2f} | Target: ₹{target_p} | SL: ₹{initial_sl}")
+                    logger.info(
+                        f"🎯 [IntradayOpportunity] Trade ENTERED ({side}) under '{session_info['session_name']}': "
+                        f"{sym} at ₹{curr_price} | Strategy: {active_strategy} | Qty: {qty} ({lev:.0f}x MIS) | "
+                        f"Margin: ₹{actual_margin:,.2f} | Target: ₹{target_p} | SL: ₹{initial_sl}"
+                    )
 
                     available_margin -= actual_margin
                     slots_available -= 1
@@ -1349,7 +1563,7 @@ class DailyIntradayAutoTrader:
             conn.close()
 
         if new_trades:
-            logger.info(f"🚀 [IntradayOpportunity] Successfully entered {len(new_trades)} opportunities during intraday session.")
+            logger.info(f"🚀 [IntradayOpportunity] Successfully entered {len(new_trades)} opportunities under strategy '{active_strategy}'.")
         return new_trades
 
     def refresh_intraday_opportunity_watchlist(self, top_n: int = 10) -> List[Dict[str, Any]]:
@@ -2038,6 +2252,7 @@ class DailyIntradayAutoTrader:
         effective_leverage = round(gross_exposure / portfolio_equity, 2) if portfolio_equity > 0 else 0.0
 
         lev_display = f"{int(lev)}x" if lev == int(lev) else f"{lev:.1f}x"
+        market_session = self.get_market_hour_session()
         portfolio_metrics = {
             "simulated_capital": base_simulated_capital,
             "intraday_leverage": lev,
@@ -2056,7 +2271,14 @@ class DailyIntradayAutoTrader:
             "daily_trades_remaining": max(0, 10 - len(today_trades)),
             "unrealized_pnl": round(unrealized_pnl, 2),
             "today_realized_net_pnl": today_realized_net_pnl,
-            "execution_mode": f"PAPER (AI ALGO • {lev_display} MIS LEVERAGE)"
+            "execution_mode": f"PAPER (AI ALGO • {lev_display} MIS LEVERAGE)",
+            "market_session": market_session["session_name"],
+            "market_session_id": market_session["session_id"],
+            "active_strategy": market_session["strategy_name"],
+            "active_strategy_id": market_session["strategy_id"],
+            "trading_allowed": market_session["trading_allowed"],
+            "session_time_range": market_session["time_range"],
+            "session_description": market_session["description"]
         }
 
         conn.close()
@@ -2074,6 +2296,7 @@ class DailyIntradayAutoTrader:
             "open_trades_count": len(open_trades),
             "open_trades": open_trades,
             "portfolio_metrics": portfolio_metrics,
+            "market_session": market_session,
             "today_trades_count": len(today_trades),
             "today_trades": today_trades,
             "today_summary": today_summary,
@@ -2092,7 +2315,12 @@ class DailyIntradayAutoTrader:
             }
         }
 
-    def close_single_position(self, identifier: Any, exit_reason: str = "MANUAL_SQUAREOFF") -> Optional[Dict[str, Any]]:
+    def close_single_position(
+        self,
+        identifier: Any,
+        exit_reason: str = "MANUAL_SQUAREOFF",
+        auto_recycle_margin: bool = True
+    ) -> Optional[Dict[str, Any]]:
         """Closes a specific open intraday trade by ID or symbol at current market/watermark price."""
         conn = self._get_connection()
         cur = conn.cursor()
@@ -2204,7 +2432,7 @@ class DailyIntradayAutoTrader:
         )
 
         now_t = datetime.now(IST).time()
-        if dt_time(9, 16) <= now_t < dt_time(15, 0):
+        if auto_recycle_margin and dt_time(9, 16) <= now_t < dt_time(15, 0):
             try:
                 new_opps = self.scan_and_execute_intraday_opportunities()
                 if new_opps:
