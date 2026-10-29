@@ -1061,29 +1061,29 @@ class DailyIntradayAutoTrader:
         else:
             t = datetime.now(IST).time()
 
-        if dt_time(9, 15) <= t < dt_time(9, 30):
+        if dt_time(9, 15) <= t <= dt_time(9, 20):
             return {
                 "session_id": "OPENING_DISCOVERY",
                 "session_name": "Opening Range Discovery",
-                "time_range": "09:15 - 09:30 IST",
+                "time_range": "09:15 - 09:20 IST",
                 "strategy_id": "RANGE_BUILDER",
                 "strategy_name": "Opening Range Discovery (No Entries)",
                 "trading_allowed": False,
-                "description": "Forming the 15-minute Opening Range (HOD/LOD) and initial VWAP. Entries are locked to prevent morning fakeout traps.",
-                "entry_rules": "No new entries allowed. Establishes the 15-minute benchmark range.",
-                "target_pct": 1.5,
+                "description": "Forming the initial 5-minute Opening Range and baseline VWAP. Entries are locked during the first 5 minutes to prevent opening bell whipsaws.",
+                "entry_rules": "No new entries allowed. Establishes the 5-minute opening benchmark.",
+                "target_pct": 1.2,
                 "sl_pct": 0.8
             }
-        elif dt_time(9, 30) <= t < dt_time(11, 30):
+        elif dt_time(9, 20) < t < dt_time(11, 30):
             return {
                 "session_id": "MORNING_EXPANSION",
                 "session_name": "Morning Expansion Session",
-                "time_range": "09:30 - 11:30 IST",
+                "time_range": "09:20 - 11:30 IST",
                 "strategy_id": "ORB_MOMENTUM_BREAKOUT",
-                "strategy_name": "15m Opening Range Breakout (ORB + VWAP Confluence)",
+                "strategy_name": "Opening Momentum Breakout (ORB + VWAP Confluence)",
                 "trading_allowed": True,
-                "description": "Prime institutional momentum expansion window. Trades confirmed breakouts above 15m high (CMP > VWAP) or breakdowns below 15m low (CMP < VWAP).",
-                "entry_rules": "Long: CMP >= 15m High * 1.001 AND CMP > VWAP. Short: CMP <= 15m Low * 0.999 AND CMP < VWAP.",
+                "description": "Prime institutional momentum expansion window. Trades confirmed breakouts above opening high (CMP > VWAP) or breakdowns below opening low (CMP < VWAP).",
+                "entry_rules": "Long: CMP >= Opening High * 1.001 AND CMP > VWAP. Short: CMP <= Opening Low * 0.999 AND CMP < VWAP.",
                 "target_pct": 1.5,
                 "sl_pct": 0.8
             }
@@ -1100,28 +1100,28 @@ class DailyIntradayAutoTrader:
                 "target_pct": 1.0,
                 "sl_pct": 0.5
             }
-        elif dt_time(13, 30) <= t < dt_time(14, 45):
+        elif dt_time(13, 30) <= t < dt_time(14, 15):
             return {
                 "session_id": "AFTERNOON_POWER",
                 "session_name": "Afternoon Power-Hour Session",
-                "time_range": "13:30 - 14:45 IST",
+                "time_range": "13:30 - 14:15 IST",
                 "strategy_id": "POWER_HOUR_MOMENTUM_RUNNER",
                 "strategy_name": "Power-Hour Midday Box Breakout & Trend Runner",
                 "trading_allowed": True,
-                "description": "Afternoon institutional positioning and trend acceleration. Trades breakouts from midday consolidation with volume and VWAP alignment.",
+                "description": "Afternoon institutional positioning and trend acceleration. New entries allowed strictly till 14:15 IST to guarantee sufficient runway before 15:00 square-off.",
                 "entry_rules": "Long: CMP > VWAP AND breakout above midday consolidation high. Short: CMP < VWAP AND breakdown below midday consolidation low.",
                 "target_pct": 1.2,
                 "sl_pct": 0.65
             }
-        elif dt_time(14, 45) <= t < dt_time(15, 30):
+        elif dt_time(14, 15) <= t < dt_time(15, 30):
             return {
                 "session_id": "EOD_SQUAREOFF",
                 "session_name": "EOD Square-Off & Capital Shield",
-                "time_range": "14:45 - 15:30 IST",
+                "time_range": "14:15 - 15:30 IST",
                 "strategy_id": "RISK_SHIELD",
                 "strategy_name": "Capital Shield & Trailing Exit Lock",
                 "trading_allowed": False,
-                "description": "Strict square-off window. No new positions entered. System actively monitors trailing stops and enforces complete square-off before 15:00/15:15 IST.",
+                "description": "Strict square-off window. No new positions entered after 14:15 IST. System actively monitors trailing stops and enforces complete square-off before 15:00/15:15 IST.",
                 "entry_rules": "No new entries allowed. Trailing stop lock and auto-squareoff active.",
                 "target_pct": 0.0,
                 "sl_pct": 0.0
@@ -1147,8 +1147,8 @@ class DailyIntradayAutoTrader:
             "OPENING_DISCOVERY": dt_time(9, 20),
             "MORNING_EXPANSION": dt_time(10, 0),
             "MIDDAY_EUROPEAN": dt_time(12, 0),
-            "AFTERNOON_POWER": dt_time(14, 0),
-            "EOD_SQUAREOFF": dt_time(14, 50),
+            "AFTERNOON_POWER": dt_time(13, 50),
+            "EOD_SQUAREOFF": dt_time(14, 25),
             "MARKET_CLOSED": dt_time(16, 0)
         }
         ref_time = time_map.get(s_id, dt_time(10, 0))
@@ -1360,6 +1360,12 @@ class DailyIntradayAutoTrader:
                 side = str(pick.get("side") or "BUY").upper()
                 curr_price = float(batch_prices.get(sym) or batch_prices.get(sym.replace(".NS", "")) or pick["price"])
                 base_price = float(pick["price"])
+
+                # Overextension Filter: Reject breakouts on stocks that already ran > 2.0% without consolidation
+                ret_pct = pick.get("ret_pct")
+                if ret_pct is not None and abs(float(ret_pct)) > 2.0:
+                    logger.info(f"🚫 [ExhaustionVeto] {sym} rejected: Pre-entry move is already {float(ret_pct):+.2f}% (> 2.0%). High mean-reversion risk.")
+                    continue
 
                 # Fetch live intraday ORB and VWAP metrics
                 intraday_metrics = None
