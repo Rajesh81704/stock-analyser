@@ -715,7 +715,7 @@ class DailyIntradayAutoTrader:
             return []
 
         # 1. Verify actual available capital in account
-        cap_summary = self.get_account_capital_summary()
+        cap_summary = self.get_account_capital_summary(trade_date_str=trade_date_str)
         current_avail = cap_summary["available_capital"]
 
         pool_capital = float(total_capital if total_capital is not None and total_capital > 0 else min(self.initial_capital, current_avail))
