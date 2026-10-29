@@ -911,6 +911,61 @@ def test_zerodha_margin_release_and_opportunity_recycling(tmp_path):
     assert after_status["available_margin"] > 16000.0 # Freed margin was recycled into TCS with surplus remaining
 
 
+def test_orb_and_vwap_confluence_gate(tmp_path, monkeypatch):
+    """
+    Verifies that scan_and_execute_intraday_opportunities strictly enforces:
+    1. Rejection of BUY if price is below 15m ORB High or below VWAP.
+    2. Execution of BUY only when price is above ORB High AND above VWAP.
+    """
+    db_file = tmp_path / "test_orb_vwap.db"
+    trader = DailyIntradayAutoTrader(db_path=db_file, initial_capital=50000.0, leverage=5.0)
+
+    conn = sqlite3.connect(str(db_file))
+    cur = conn.cursor()
+    # Insert candidate into daily_intraday_picks
+    cur.execute("""
+        INSERT INTO daily_intraday_picks (
+            date, rank, symbol, company_name, sector, price, conviction_score,
+            rvol, strategy_name, entry_trigger_price, initial_sl, target_price,
+            trailing_step_pct, status, side, created_at
+        ) VALUES (
+            '2026-10-28', 1, 'RELIANCE', 'Reliance Industries', 'Energy', 1160.0, 95.0,
+            2.0, 'ORB_Momentum_Breakout_V4', 1165.0, 1150.0, 1180.0, 0.5, 'WATCHING', 'BUY', '2026-10-28 09:16:00'
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+    # Case A: Price is 1168 (above trigger 1165), but below ORB High 1175 and below VWAP 1170 -> VETOED
+    monkeypatch.setattr(
+        trader,
+        "get_intraday_orb_and_vwap",
+        lambda sym, current_price=None: {
+            "symbol": sym, "curr_price": 1168.0, "orb_high": 1175.0, "orb_low": 1155.0, "vwap": 1170.0
+        }
+    )
+    trades_vetoed = trader.scan_and_execute_intraday_opportunities(
+        trade_date_str="2026-10-28"
+    )
+    assert len(trades_vetoed) == 0
+
+    # Case B: Price is 1178 (above trigger 1165, above ORB High 1175, and above VWAP 1170) -> APPROVED
+    monkeypatch.setattr(
+        trader,
+        "get_intraday_orb_and_vwap",
+        lambda sym, current_price=None: {
+            "symbol": sym, "curr_price": 1178.0, "orb_high": 1175.0, "orb_low": 1155.0, "vwap": 1170.0
+        }
+    )
+    trades_approved = trader.scan_and_execute_intraday_opportunities(
+        trade_date_str="2026-10-28"
+    )
+    assert len(trades_approved) == 1
+    assert trades_approved[0]["symbol"] == "RELIANCE"
+    assert trades_approved[0]["side"] == "BUY"
+
+
+
 
 
 

@@ -545,20 +545,8 @@ class DailyIntradayAutoTrader:
                 except Exception:
                     pass
 
-        # Priority liquid leaders + full NIFTY 500 universe
-        priority_stocks = [
-            "RELIANCE", "HDFCBANK", "ICICIBANK", "INFY", "TCS", "SBIN", "BHARTIARTL",
-            "AXISBANK", "TATAMOTORS", "BAJFINANCE", "LTIM", "SUNPHARMA", "MARUTI",
-            "ITC", "KOTAKBANK", "LT", "TITAN", "NTPC", "ONGC", "TATASTEEL",
-            "ADANIENT", "JSWSTEEL", "POWERGRID", "HINDUNILVR", "COALINDIA", "VEDL"
-        ]
-        universe = []
-        for s in priority_stocks:
-            if s not in universe:
-                universe.append(s)
-        for s in meta_dict.keys():
-            if s not in universe:
-                universe.append(s)
+        # Confine screening strictly to liquid NIFTY 100 institutional universe
+        universe = list(NIFTY_100_LIQUID_UNIVERSE)
 
         # Check broader market regime before scoring to align individual stock conviction
         apply_index = self.use_index_regime if use_index_regime is None else bool(use_index_regime)
@@ -676,11 +664,12 @@ class DailyIntradayAutoTrader:
         today_str = trade_date_str or get_ist_date()
         now_ts = get_ist_now_ts()
 
-        # Strict Market Hours Hard-Lock: Only allow trade execution between 09:16 and 15:00 IST
+        # Strict Market Hours Hard-Lock: Only allow trade execution between 09:30 and 15:00 IST
+        # 09:15-09:30 IST is strictly reserved to establish the 15-minute Opening Range
         now_time = datetime.now(IST).time()
         if not trade_date_str:
-            if now_time < dt_time(9, 16):
-                logger.warning(f"🚫 [PaperTrader] Market not open yet ({now_time.strftime('%H:%M:%S')} IST). Intraday trades can only be entered between 09:16 and 15:00 IST.")
+            if now_time < dt_time(9, 30):
+                logger.warning(f"🚫 [PaperTrader] 15m Opening Range forming (09:15-09:30 IST). Current: {now_time.strftime('%H:%M:%S')} IST. Intraday breakout trades can only be entered after 09:30 IST.")
                 return []
             if now_time >= dt_time(15, 0):
                 logger.warning("🚫 [PaperTrader] Cannot enter new intraday trades after 15:00 IST (3:00 PM square-off cutoff passed).")
@@ -977,6 +966,75 @@ class DailyIntradayAutoTrader:
 
         return top_ranked
 
+    def get_intraday_orb_and_vwap(self, symbol: str, current_price: Optional[float] = None) -> Optional[Dict[str, Any]]:
+        """
+        Calculates 15-minute Opening Range (09:15 - 09:30 High and Low) and Volume-Weighted Average Price (VWAP).
+        Checks Kite live quote first (average_price is NSE official VWAP), falling back to yfinance 5m bars.
+        """
+        sym_clean = symbol.replace(".NS", "").replace(".BO", "")
+        # 1. Try Kite live quote
+        try:
+            from src.data_loader import KITE_API_KEY, KITE_ACCESS_TOKEN
+            if KITE_API_KEY and KITE_ACCESS_TOKEN:
+                from kiteconnect import KiteConnect
+                kc = KiteConnect(api_key=KITE_API_KEY)
+                kc.set_access_token(KITE_ACCESS_TOKEN)
+                q = kc.quote([f"NSE:{sym_clean}"])
+                k_data = q.get(f"NSE:{sym_clean}")
+                if k_data:
+                    lp = float(k_data.get("last_price") or 0.0)
+                    vwap = float(k_data.get("average_price") or lp)
+                    ohlc = k_data.get("ohlc", {})
+                    high_p = float(ohlc.get("high") or lp)
+                    low_p = float(ohlc.get("low") or lp)
+                    if lp > 0 and vwap > 0:
+                        return {
+                            "symbol": symbol,
+                            "curr_price": lp,
+                            "orb_high": high_p,
+                            "orb_low": low_p,
+                            "vwap": vwap,
+                            "above_vwap": lp > vwap,
+                            "below_vwap": lp < vwap
+                        }
+        except Exception:
+            pass
+
+        # 2. Try yfinance 5m intraday bars
+        try:
+            import yfinance as yf
+            ticker = f"{sym_clean}.NS"
+            df = yf.download(ticker, period="1d", interval="5m", progress=False)
+            if df is not None and len(df) > 0:
+                if isinstance(df.columns, pd.MultiIndex):
+                    df.columns = df.columns.get_level_values(0)
+                df.columns = [str(c).lower() for c in df.columns]
+
+                # 15m range (first 3 bars: 09:15, 09:20, 09:25)
+                orb_slice = df.iloc[:min(3, len(df))]
+                orb_high = float(orb_slice["high"].max())
+                orb_low = float(orb_slice["low"].min())
+
+                typical_p = (df["high"] + df["low"] + df["close"]) / 3.0
+                cum_vol = df["volume"].cumsum()
+                cum_tp_vol = (typical_p * df["volume"]).cumsum()
+                vwap = float(cum_tp_vol.iloc[-1] / max(1.0, cum_vol.iloc[-1]))
+                curr_p = current_price or float(df["close"].iloc[-1])
+
+                return {
+                    "symbol": symbol,
+                    "curr_price": round(curr_p, 2),
+                    "orb_high": round(orb_high, 2),
+                    "orb_low": round(orb_low, 2),
+                    "vwap": round(vwap, 2),
+                    "above_vwap": curr_p > vwap,
+                    "below_vwap": curr_p < vwap
+                }
+        except Exception as e:
+            logger.debug(f"ORB/VWAP fetch error for {symbol}: {e}")
+
+        return None
+
     # -------------------------------------------------------------------------
     # 2b. Continuous Whole-Day Opportunity Scanner & Dynamic Trader
     # -------------------------------------------------------------------------
@@ -990,19 +1048,26 @@ class DailyIntradayAutoTrader:
         use_index_regime: Optional[bool] = None
     ) -> List[Dict[str, Any]]:
         """
-        Continuously scans today's best intraday stocks throughout the market day (09:15 - 15:00 IST)
-        for breakout and entry opportunities. Whenever an opportunity triggers and margin capital / position
-        slots are available, automatically enters a paper trade with 5x leverage and dynamic trailing SL.
-        Enforces a strict ceiling of max 10 trades per day.
+        Continuously scans today's best intraday stocks throughout the market day (09:30 - 15:00 IST)
+        for true Opening Range Breakout (ORB) and VWAP confluence opportunities.
+        Enforces:
+        1. 09:15-09:30 opening range wait (never trades before 09:30 IST).
+        2. Long Breakout ONLY if price breaks above 15m High AND price is above VWAP.
+        3. Short Breakdown ONLY if price breaks below 15m Low AND price is below VWAP.
+        4. Strict ceiling of max 10 trades per day and 5 concurrent positions with Zerodha margin recycling.
         """
         today_str = trade_date_str or get_ist_date()
         now_dt = datetime.now(IST)
         now_ts = get_ist_now_ts()
 
-        # Strict Market Hours Hard-Lock: Only allow trade execution between 09:16 and 15:00 IST
+        # Strict Market Hours Hard-Lock: Only allow trade execution between 09:30 and 15:00 IST
+        # 09:15 to 09:30 IST is strictly reserved to establish the 15-minute Opening Range (HOD/LOD)
         if not trade_date_str:
-            if now_dt.time() < dt_time(9, 16):
-                logger.info(f"🚫 [OpportunityScanner] Market not open yet ({now_dt.time().strftime('%H:%M:%S')} IST). Waiting for 09:16 IST.")
+            if now_dt.time() < dt_time(9, 30):
+                logger.info(
+                    f"🚫 [OpportunityScanner] Opening Range forming (09:15-09:30 IST). Current: {now_dt.time().strftime('%H:%M:%S')} IST. "
+                    f"Waiting for 09:30 IST for true ORB high/low to be established."
+                )
                 return []
             if now_dt.time() >= dt_time(15, 0):
                 logger.info("🚫 [OpportunityScanner] Past 15:00 IST intraday cutoff. No new trades entered.")
@@ -1163,35 +1228,46 @@ class DailyIntradayAutoTrader:
                 curr_price = float(batch_prices.get(sym) or batch_prices.get(sym.replace(".NS", "")) or pick["price"])
                 base_price = float(pick["price"])
 
-                # 2. Strict Breakout/Breakdown Confirmation based on Side & Market Regime:
+                # 2. Strict Breakout/Breakdown Confirmation based on Side, 15m ORB, and VWAP:
+                intraday_metrics = None
+                if current_prices is None:
+                    intraday_metrics = self.get_intraday_orb_and_vwap(sym, current_price=curr_price)
+                    if intraday_metrics and intraday_metrics.get("curr_price"):
+                        curr_price = float(intraday_metrics["curr_price"])
+
                 if side == "SELL":
                     trigger_price = float(pick.get("entry_trigger_price") or (base_price * 0.996))
-                    # Must break down below trigger price AND be below base price (red downward momentum)
                     is_opportunity = (curr_price <= trigger_price) and (curr_price < base_price)
-                    now_ist_time = datetime.now(IST).time()
-                    if dt_time(9, 15) <= now_ist_time < dt_time(9, 25):
-                        is_opportunity = is_opportunity and (curr_price <= trigger_price * 0.998)
-                    # If broad market is BULLISH, require deeper breakdown confirmation before shorting
-                    if not trade_date_str and nifty_regime == "BULLISH":
-                        is_opportunity = is_opportunity and (curr_price <= trigger_price * 0.997)
+
+                    # If live intraday metrics are available, enforce true 15m ORB Low and VWAP breakdown
+                    if intraday_metrics:
+                        orb_low = intraday_metrics["orb_low"]
+                        vwap = intraday_metrics["vwap"]
+                        # Must break below 15m low AND trade below intraday VWAP
+                        is_opportunity = (curr_price <= orb_low * 0.999) and (curr_price < vwap)
+                        if not is_opportunity:
+                            logger.info(f"🚫 [BreakdownVeto] {sym} rejected: CMP ₹{curr_price:.2f} failed breakdown vs ORB Low ₹{orb_low:.2f} or VWAP ₹{vwap:.2f}")
 
                     initial_sl = float(pick.get("initial_sl") or round(curr_price * 1.009, 2))     # +0.9% stop-loss (above entry)
                     target_p = float(pick.get("target_price") or pick.get("target") or round(curr_price * 0.986, 2))       # -1.4% profit target (below entry)
-                    side_desc = "Short Breakdown"
+                    side_desc = "Short Breakdown (Below ORB Low & VWAP)"
                 else:
                     trigger_price = float(pick.get("entry_trigger_price") or (base_price * 1.004))
                     # Must cross above trigger price AND be above base price (green upward momentum)
                     is_opportunity = (curr_price >= trigger_price) and (curr_price > base_price)
-                    now_ist_time = datetime.now(IST).time()
-                    if dt_time(9, 15) <= now_ist_time < dt_time(9, 25):
-                        is_opportunity = is_opportunity and (curr_price >= trigger_price * 1.002)
-                    # If broad market is BEARISH, require stronger breakout confirmation before buying
-                    if not trade_date_str and nifty_regime == "BEARISH":
-                        is_opportunity = is_opportunity and (curr_price >= trigger_price * 1.003)
+
+                    # If live intraday metrics are available, enforce true 15m ORB High and VWAP breakout
+                    if intraday_metrics:
+                        orb_high = intraday_metrics["orb_high"]
+                        vwap = intraday_metrics["vwap"]
+                        # Must break above 15m high AND trade above intraday VWAP
+                        is_opportunity = (curr_price >= orb_high * 1.001) and (curr_price > vwap)
+                        if not is_opportunity:
+                            logger.info(f"🚫 [BreakoutVeto] {sym} rejected: CMP ₹{curr_price:.2f} failed breakout vs ORB High ₹{orb_high:.2f} or VWAP ₹{vwap:.2f}")
 
                     initial_sl = float(pick.get("initial_sl") or round(curr_price * 0.991, 2))     # -0.9% stop-loss (below entry)
                     target_p = float(pick.get("target_price") or pick.get("target") or round(curr_price * 1.014, 2))       # +1.4% profit target (above entry)
-                    side_desc = "Long Breakout"
+                    side_desc = "Long Breakout (Above ORB High & VWAP)"
 
                 if is_opportunity:
                     # Allocate portion of available margin
@@ -1413,6 +1489,12 @@ class DailyIntradayAutoTrader:
                 candidate_sl = curr_sl
                 candidate_target = target_p
 
+                # 0. Adverse Reversion Guard: If short rises >= +0.5% against entry without profit, cap loss
+                current_pnl_pct = ((entry_p - curr_p) / entry_p) * 100.0
+                if current_pnl_pct <= -0.50 and new_extreme >= entry_p * 0.998:
+                    tight_sl = round(entry_p * 1.005, 2)
+                    candidate_sl = min(candidate_sl, tight_sl)
+
                 # 1. Multi-tier Trailing Stop Loss (Breakeven cushion at +0.90%, runner lock at +1.20%)
                 if gain_from_entry_pct >= 1.20:
                     dynamic_trail = min(round(entry_p * 0.991, 2), round(new_extreme * 1.006, 2))
@@ -1485,6 +1567,12 @@ class DailyIntradayAutoTrader:
 
                 candidate_sl = curr_sl
                 candidate_target = target_p
+
+                # 0. Adverse Reversion Guard: If long falls >= -0.5% below entry without profit, cap loss
+                current_pnl_pct = ((curr_p - entry_p) / entry_p) * 100.0
+                if current_pnl_pct <= -0.50 and new_extreme <= entry_p * 1.002:
+                    tight_sl = round(entry_p * 0.995, 2)
+                    candidate_sl = max(candidate_sl, tight_sl)
 
                 # 1. Multi-tier Trailing Stop Loss (Breakeven cushion at +0.90%, runner lock at +1.20%)
                 if gain_from_entry_pct >= 1.20:
