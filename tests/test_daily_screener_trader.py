@@ -828,6 +828,89 @@ def test_use_index_regime_parameter(tmp_path):
     assert trader_reloaded.use_index_regime is True
 
 
+def test_zerodha_margin_release_and_opportunity_recycling(tmp_path):
+    """
+    Verifies that when a trade is closed:
+    1. 100% of the blocked margin is unblocked plus net profit/loss (per Zerodha MIS intraday rules).
+    2. Available margin increases immediately.
+    3. The trader immediately scans and deploys freed margin into a pending high-conviction breakout opportunity.
+    """
+    db_file = tmp_path / "test_zerodha_recycling.db"
+    trader = DailyIntradayAutoTrader(db_path=db_file, initial_capital=20000.0, leverage=5.0, use_index_regime=False)
+
+    conn = sqlite3.connect(str(db_file))
+    cur = conn.cursor()
+
+    # 1. Insert an existing OPEN trade: INFY (allocated_capital=4000.0)
+    cur.execute("""
+        INSERT INTO daily_intraday_trades (
+            trade_date, symbol, side, qty, allocated_capital, entry_time,
+            entry_price, initial_sl, highest_price, current_sl, target_price,
+            gross_pnl, brokerage_and_taxes, net_pnl, return_pct, status, price_history, updated_at
+        ) VALUES (
+            '2026-10-28', 'INFY', 'BUY', 13, 4000.0, '2026-10-28 09:30:00',
+            1500.0, 1485.0, 1500.0, 1485.0, 1525.0,
+            0.0, 0.0, 0.0, 0.0, 'OPEN', '[]', '2026-10-28 09:30:00'
+        )
+    """)
+
+    # 2. Insert a WATCHING opportunity: TCS in daily_intraday_picks
+    cur.execute("""
+        INSERT INTO daily_intraday_picks (
+            date, rank, symbol, company_name, sector, price, conviction_score,
+            rvol, strategy_name, entry_trigger_price, initial_sl, target_price,
+            trailing_step_pct, status, side, created_at
+        ) VALUES (
+            '2026-10-28', 1, 'TCS', 'Tata Consultancy Services', 'IT', 3500.0, 92.0,
+            2.5, 'ORB_Breakout', 3505.0, 3465.0, 3550.0, 0.5, 'WATCHING', 'BUY', '2026-10-28 09:16:00'
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+    # Verify margin before close: Available = 20000 - 4000 = 16000
+    before_status = trader.get_account_capital_summary(trade_date_str="2026-10-28")
+    assert before_status["open_positions_count"] == 1
+    assert before_status["open_margin_utilized"] == 4000.0
+    assert before_status["available_margin"] == 16000.0
+
+    # 3. Simulate prices: INFY hits target at 1535 (>1533 extended target) -> closes INFY
+    # TCS is at 3510 (> entry_trigger 3505) -> triggers immediately via margin recycling!
+    updates = trader.monitor_and_update_trailing_sl(
+        current_prices={"INFY": 1535.0, "TCS": 3510.0},
+        trade_date_str="2026-10-28"
+    )
+
+    # 4. Assert INFY closed via TARGET_HIT
+    infy_update = next((u for u in updates if u["symbol"] == "INFY"), None)
+    assert infy_update is not None
+    assert infy_update["action"] == "CLOSED"
+    assert infy_update["exit_reason"] == "TARGET_HIT"
+    assert infy_update["net_pnl"] > 0
+
+    # 5. Assert TCS was immediately entered into daily_intraday_trades using the freed margin!
+    conn = sqlite3.connect(str(db_file))
+    cur = conn.cursor()
+    trades = cur.execute("SELECT symbol, side, status, allocated_capital FROM daily_intraday_trades ORDER BY id ASC").fetchall()
+    conn.close()
+
+    assert len(trades) == 2
+    # First trade: INFY CLOSED
+    assert trades[0][0] == "INFY"
+    assert trades[0][2] == "CLOSED"
+    # Second trade: TCS OPEN
+    assert trades[1][0] == "TCS"
+    assert trades[1][1] == "BUY"
+    assert trades[1][2] == "OPEN"
+    assert trades[1][3] > 0.0
+
+    # 6. Verify account capital summary reflects Zerodha margin release + net P&L credit
+    after_status = trader.get_account_capital_summary(trade_date_str="2026-10-28")
+    assert after_status["open_positions_count"] == 1  # Only TCS is open now
+    assert after_status["today_realized_pnl"] > 0.0   # Realized net profit from INFY credited to margin
+    assert after_status["available_margin"] > 16000.0 # Freed margin was recycled into TCS with surplus remaining
+
+
 
 
 

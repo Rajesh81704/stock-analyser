@@ -238,12 +238,12 @@ class DailyIntradayAutoTrader:
             "buying_power": round(getattr(self, "initial_capital", 100000.0) * getattr(self, "leverage", 5.0), 2)
         }
 
-    def get_account_capital_summary(self) -> Dict[str, Any]:
+    def get_account_capital_summary(self, trade_date_str: Optional[str] = None) -> Dict[str, Any]:
         """
         Calculates real-time capital availability, margin utilized,
         buying power, and checks if sufficient capital is available in the account.
         """
-        today_str = get_ist_date()
+        today_str = trade_date_str or get_ist_date()
         with self._lock:
             conn = self._get_connection()
             cur = conn.cursor()
@@ -1303,7 +1303,9 @@ class DailyIntradayAutoTrader:
     def monitor_and_update_trailing_sl(
         self,
         current_prices: Optional[Dict[str, float]] = None,
-        force_eod_squareoff: bool = False
+        force_eod_squareoff: bool = False,
+        auto_recycle_margin: bool = True,
+        trade_date_str: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Monitors all OPEN trades:
@@ -1651,6 +1653,47 @@ class DailyIntradayAutoTrader:
 
             conn.commit()
             conn.close()
+
+        # Zerodha Margin Recycling & Immediate Opportunity Deployment
+        closed_trades = [u for u in updates if u.get("action") == "CLOSED"]
+        if closed_trades:
+            cap_summary = self.get_account_capital_summary(trade_date_str=trade_date_str)
+            for ct in closed_trades:
+                sym = ct.get("symbol")
+                tid = ct.get("trade_id")
+                reason = ct.get("exit_reason")
+                npnl = float(ct.get("net_pnl") or 0.0)
+                matched_row = next((r for r in open_trades if r["id"] == tid), None)
+                alloc_cap = float(matched_row.get("allocated_capital") or 0.0) if matched_row else 0.0
+                margin_credit = round(alloc_cap + npnl, 2)
+                logger.info(
+                    f"💰 [ZerodhaMarginRelease] Position #{tid} ({sym}) CLOSED via {reason}. "
+                    f"Unblocked Margin: ₹{alloc_cap:,.2f} | Net P&L: ₹{npnl:+,.2f} | "
+                    f"Total Credited to Margin: ₹{margin_credit:,.2f}. Account Available Margin: ₹{cap_summary['available_margin']:,.2f}."
+                )
+
+            # If within market hours or test simulation with current_prices, immediately use freed margin
+            if auto_recycle_margin and not force_eod_squareoff:
+                now_t = datetime.now(IST).time()
+                is_mkt_open = (dt_time(9, 16) <= now_t < dt_time(15, 0)) or (current_prices is not None)
+                if is_mkt_open:
+                    logger.info(
+                        f"🔄 [CapitalRecycling] {len(closed_trades)} trade(s) closed. Margin released per Zerodha terms. "
+                        f"Immediately scanning for new breakout/breakdown opportunities..."
+                    )
+                    try:
+                        target_date = trade_date_str or (open_trades[0]["trade_date"] if open_trades else get_ist_date())
+                        new_opps = self.scan_and_execute_intraday_opportunities(
+                            current_prices=current_prices,
+                            trade_date_str=target_date
+                        )
+                        if new_opps:
+                            logger.info(
+                                f"🚀 [OpportunityDeployed] Deployed newly released margin into {len(new_opps)} new trade(s): "
+                                f"{[t['symbol'] for t in new_opps]}"
+                            )
+                    except Exception as opp_err:
+                        logger.debug(f"Notice during opportunity scan on trade close: {opp_err}")
 
         return updates
 
@@ -2012,16 +2055,24 @@ class DailyIntradayAutoTrader:
             pass
 
         exit_price = round(curr_p, 2)
-        gross_pnl = round(qty * (exit_price - entry_p), 2)
+        side = str(trade.get("side") or "BUY").upper()
+        if side == "SELL":
+            gross_pnl = round(qty * (entry_p - exit_price), 2)
+            calc_side = "SHORT"
+        else:
+            gross_pnl = round(qty * (exit_price - entry_p), 2)
+            calc_side = "LONG"
+
         cost_breakdown = self.cost_calculator.calculate_roundtrip(
-            side="LONG",
+            side=calc_side,
             qty=qty,
             raw_entry_price=entry_p,
             raw_exit_price=exit_price
         )
         brokerage_taxes = round(cost_breakdown.total_costs, 2)
         net_pnl = round(gross_pnl - brokerage_taxes, 2)
-        ret_pct = round((net_pnl / trade["allocated_capital"]) * 100.0, 2) if trade["allocated_capital"] > 0 else 0.0
+        alloc_cap = float(trade.get("allocated_capital") or (qty * entry_p / 5.0))
+        ret_pct = round((net_pnl / alloc_cap) * 100.0, 2) if alloc_cap > 0 else 0.0
 
         now_ts = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
         history = json.loads(trade["price_history"] or "[]")
@@ -2054,6 +2105,24 @@ class DailyIntradayAutoTrader:
             ))
             conn.commit()
             conn.close()
+
+        # Zerodha Margin Release & Immediate Opportunity Scanning
+        margin_credit = round(alloc_cap + net_pnl, 2)
+        cap_summary = self.get_account_capital_summary()
+        logger.info(
+            f"💰 [ZerodhaMarginRelease] Trade #{trade['id']} ({sym} {side}) CLOSED manually via {exit_reason}. "
+            f"Unblocked Margin: ₹{alloc_cap:,.2f} | Net P&L: ₹{net_pnl:+,.2f} | "
+            f"Total Credited to Margin: ₹{margin_credit:,.2f}. Account Available Margin: ₹{cap_summary['available_margin']:,.2f}."
+        )
+
+        now_t = datetime.now(IST).time()
+        if dt_time(9, 16) <= now_t < dt_time(15, 0):
+            try:
+                new_opps = self.scan_and_execute_intraday_opportunities()
+                if new_opps:
+                    logger.info(f"🎯 [OpportunityTrigger] Deployed freed margin into {len(new_opps)} new trade(s): {[t['symbol'] for t in new_opps]}")
+            except Exception as opp_err:
+                logger.debug(f"Notice during opportunity scan on manual close: {opp_err}")
 
         res = {
             "trade_id": trade["id"],
