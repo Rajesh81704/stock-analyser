@@ -465,6 +465,7 @@ class DailyIntradayAutoTrader:
                 "trailing_step_pct": 0.5,
                 "market_regime": regime,
                 "nifty_change_pct": nifty_chg,
+                "_df": df,  # carry OHLCV dataframe for downstream signal verification
             }
         except Exception as scan_err:
             logger.debug(f"Scan error on {symbol}: {scan_err}")
@@ -1486,18 +1487,84 @@ class DailyIntradayAutoTrader:
                         side_desc = "Power-Hour Afternoon Breakout (Above Midday High & VWAP)"
 
                 if is_opportunity:
-                    # Allocate portion of available margin
-                    alloc_margin = round(min(available_margin, available_margin / max(1, slots_available)), 2)
+                    # ─── Multi-Strategy Signal Credibility Verification ───
+                    credibility_score = 60.0  # default neutral pass if verifier unavailable
+                    credibility_grade = "MODERATE"
+                    credibility_rec   = "PROCEED"
+                    credibility_detail = {}
+                    size_multiplier   = 1.0   # full size by default
+
+                    try:
+                        from src.algodesk.signal_verifier import verify_signal_credibility
+                        # Use the carried _df if available, else fetch fresh data
+                        stock_df = pick.get("_df")
+                        if stock_df is None:
+                            try:
+                                resolved_ticker = resolve_ticker(sym)
+                                stock_df = fetch_stock_data(resolved_ticker, period="3mo")
+                            except Exception:
+                                stock_df = None
+
+                        if stock_df is not None and len(stock_df) >= 30:
+                            vwap_for_verify = intraday_metrics.get("vwap") if intraday_metrics else None
+                            verif = verify_signal_credibility(
+                                symbol=sym,
+                                side=side,
+                                curr_price=curr_price,
+                                df=stock_df,
+                                rvol=float(pick.get("rvol") or 1.0),
+                                rsi=float(pick.get("rsi") or 50.0),
+                                vwap=vwap_for_verify,
+                                verbose=True,
+                            )
+                            credibility_score = verif["credibility_score"]
+                            credibility_grade = verif["credibility_grade"]
+                            credibility_rec   = verif["trade_recommendation"]
+                            credibility_detail = verif
+
+                            # Gate: Reject low-credibility signals
+                            if credibility_rec == "REJECT":
+                                logger.warning(
+                                    f"\u26d4 [CredibilityGate] {sym} REJECTED: Multi-strategy credibility "
+                                    f"{credibility_score:.1f}/100 [{credibility_grade}] below minimum 40. "
+                                    f"Skipping signal to protect capital."
+                                )
+                                is_opportunity = False
+                            elif credibility_rec == "SKIP":
+                                logger.info(
+                                    f"\u26a0\ufe0f [CredibilityGate] {sym} WEAK signal "
+                                    f"{credibility_score:.1f}/100 [{credibility_grade}] - skipping per risk policy."
+                                )
+                                is_opportunity = False
+                            elif credibility_rec == "PROCEED_HALF_SIZE":
+                                size_multiplier = 0.5
+                                logger.info(
+                                    f"\u26a1 [CredibilityGate] {sym} MODERATE credibility "
+                                    f"{credibility_score:.1f}/100 - entering at HALF-SIZE position."
+                                )
+                            else:
+                                logger.info(
+                                    f"\u2705 [CredibilityGate] {sym} STRONG credibility "
+                                    f"{credibility_score:.1f}/100 - proceeding with full position."
+                                )
+                    except Exception as verif_err:
+                        logger.debug(f"[CredibilityGate] Verifier error for {sym} (proceeding): {verif_err}")
+
+                if is_opportunity:
+                    # Allocate portion of available margin (apply credibility size multiplier)
+                    base_alloc = min(available_margin, available_margin / max(1, slots_available))
+                    alloc_margin = round(base_alloc * size_multiplier, 2)
                     qty = max(1, int((alloc_margin * lev) / curr_price))
                     actual_margin = round((qty * curr_price) / lev, 2)
                     exposure = round(qty * curr_price, 2)
 
+                    credibility_note = f" | Credibility: {credibility_score:.1f}/100 [{credibility_grade}] x{size_multiplier:.1f}"
                     initial_log = json.dumps([{
                         "ts": now_ts,
                         "price": curr_price,
                         "side": side,
                         "sl": initial_sl,
-                        "note": f"🎯 [{session_info['session_name']}] Confirmed {side_desc} ({lev:.0f}x MIS {side}): Strategy={active_strategy} | Margin ₹{actual_margin:,.2f} | 5x Exp ₹{exposure:,.2f} | Score: {conviction:.1f}"
+                        "note": f"[{session_info['session_name']}] Confirmed {side_desc} ({lev:.0f}x MIS {side}): Strategy={active_strategy} | Margin Rs{actual_margin:,.2f} | 5x Exp Rs{exposure:,.2f} | Score: {conviction:.1f}{credibility_note}"
                     }])
 
                     # Prevent duplicate insertion
