@@ -1394,8 +1394,9 @@ class DailyIntradayAutoTrader:
                             if not is_opportunity:
                                 logger.info(f"🚫 [ORBBreakdownVeto] {sym} rejected: CMP ₹{curr_price:.2f} failed breakdown vs ORB Low ₹{orb_low:.2f} or VWAP ₹{vwap:.2f}")
 
-                        initial_sl = float(pick.get("initial_sl") or round(curr_price * 1.008, 2))     # +0.8% stop-loss (above entry)
-                        target_p = float(pick.get("target_price") or pick.get("target") or round(curr_price * 0.985, 2))       # -1.5% profit target
+                        # Calculate dynamic SL and Target strictly from actual execution price curr_price
+                        initial_sl = round(curr_price * 1.008, 2)     # +0.8% stop-loss (above short entry)
+                        target_p = round(curr_price * 0.985, 2)       # -1.5% profit target (below short entry)
                         side_desc = "Morning ORB Breakdown (Below 15m Low & VWAP)"
                     else:
                         trigger_price = float(pick.get("entry_trigger_price") or (base_price * 1.004))
@@ -1407,8 +1408,9 @@ class DailyIntradayAutoTrader:
                             if not is_opportunity:
                                 logger.info(f"🚫 [ORBBreakoutVeto] {sym} rejected: CMP ₹{curr_price:.2f} failed breakout vs ORB High ₹{orb_high:.2f} or VWAP ₹{vwap:.2f}")
 
-                        initial_sl = float(pick.get("initial_sl") or round(curr_price * 0.992, 2))     # -0.8% stop-loss (below entry)
-                        target_p = float(pick.get("target_price") or pick.get("target") or round(curr_price * 1.015, 2))       # +1.5% profit target
+                        # Calculate dynamic SL and Target strictly from actual execution price curr_price
+                        initial_sl = round(curr_price * 0.992, 2)     # -0.8% stop-loss (below long entry)
+                        target_p = round(curr_price * 1.015, 2)       # +1.5% profit target (above long entry)
                         side_desc = "Morning ORB Breakout (Above 15m High & VWAP)"
 
                 # -----------------------------------------------------------------
