@@ -1,0 +1,54 @@
+{
+  "baseline": {
+    "pnl": -56625.89,
+    "trades": 243,
+    "win_rate": 0.09876543209876543
+  },
+  "iterations": [
+    {
+      "iteration": 5,
+      "name": "Conservative + Filter (0.12 ATR + 15 min)",
+      "change": "Balanced + RVOL > 1.5 filter",
+      "baseline_pnl": -56625.89,
+      "projected_pnl": 232205.50372115383,
+      "improvement": 288831.39372115384,
+      "win_rate_impact": "+RVOL quality filtering"
+    },
+    {
+      "iteration": 4,
+      "name": "Aggressive (0.20 ATR + 30 min)",
+      "change": "Aggressive on both parameters",
+      "baseline_pnl": -56625.89,
+      "projected_pnl": 132553.99913141027,
+      "improvement": 189179.88913141025,
+      "win_rate_impact": "+50% stop conversions, 85% entry qual"
+    },
+    {
+      "iteration": 3,
+      "name": "Combined (0.15 ATR + 15 min)",
+      "change": "Both: stop_atr & or_minutes",
+      "baseline_pnl": -56625.89,
+      "projected_pnl": 93294.4634679487,
+      "improvement": 149920.3534679487,
+      "win_rate_impact": "+Combined effects"
+    },
+    {
+      "iteration": 1,
+      "name": "Wider Stop (0.15 ATR)",
+      "change": "stop_atr: 0.10 \u2192 0.15",
+      "baseline_pnl": -56625.89,
+      "projected_pnl": 43246.548884615375,
+      "improvement": 99872.43888461537,
+      "win_rate_impact": "+35% conversion of stop-outs"
+    },
+    {
+      "iteration": 2,
+      "name": "Extended OR (15 min)",
+      "change": "or_minutes: 5 \u2192 15",
+      "baseline_pnl": -56625.89,
+      "projected_pnl": -6577.975416666668,
+      "improvement": 50047.91458333333,
+      "win_rate_impact": "+8-10% win rate"
+    }
+  ]
+}

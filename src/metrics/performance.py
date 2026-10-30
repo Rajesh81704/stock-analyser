@@ -288,3 +288,142 @@ def compute_top_symbols_breakdown(trades_df: pd.DataFrame, top_k: int = 10) -> p
 
     res = pd.DataFrame(stats).sort_values("Trades", ascending=False).head(top_k)
     return res
+
+
+class PerformanceMetrics:
+    """
+    Wrapper class for comprehensive backtest performance analysis.
+    Aggregates full-period, in-sample, and out-of-sample metrics.
+    """
+    
+    def __init__(
+        self,
+        full_metrics: PeriodMetrics,
+        is_metrics_dict: Dict,
+        oos_metrics_dict: Dict,
+        trades_df: pd.DataFrame,
+        daily_df: pd.DataFrame,
+    ):
+        self.full_metrics = full_metrics
+        self.is_metrics = is_metrics_dict
+        self.oos_metrics = oos_metrics_dict
+        self.trades_df = trades_df
+        self.daily_df = daily_df
+    
+    @classmethod
+    def from_backtest_result(cls, backtest_result):
+        """Factory method to create PerformanceMetrics from BacktestResult."""
+        trades_df = backtest_result.trades_df
+        daily_df = backtest_result.daily_df
+        start_equity = backtest_result.start_equity
+        
+        # Full period metrics
+        full_metrics = calculate_metrics_for_slice(
+            "Full Period",
+            daily_df,
+            trades_df,
+            start_equity,
+        )
+        
+        # In-sample metrics
+        is_daily = daily_df[daily_df["is_in_sample"] == True]
+        is_trades = trades_df[trades_df["date"].isin(is_daily["date"])] if not trades_df.empty else trades_df
+        is_metrics_obj = calculate_metrics_for_slice(
+            "In-Sample",
+            is_daily,
+            is_trades,
+            start_equity,
+        )
+        is_metrics_dict = cls._period_metrics_to_dict(is_metrics_obj)
+        
+        # Out-of-sample metrics
+        oos_daily = daily_df[daily_df["is_in_sample"] == False]
+        oos_start_equity = is_daily["eod_equity"].iloc[-1] if not is_daily.empty else start_equity
+        oos_trades = trades_df[trades_df["date"].isin(oos_daily["date"])] if not trades_df.empty else trades_df
+        oos_metrics_obj = calculate_metrics_for_slice(
+            "Out-of-Sample",
+            oos_daily,
+            oos_trades,
+            oos_start_equity,
+        )
+        oos_metrics_dict = cls._period_metrics_to_dict(oos_metrics_obj)
+        
+        return cls(
+            full_metrics=full_metrics,
+            is_metrics_dict=is_metrics_dict,
+            oos_metrics_dict=oos_metrics_dict,
+            trades_df=trades_df,
+            daily_df=daily_df,
+        )
+    
+    @staticmethod
+    def _period_metrics_to_dict(period_metrics: PeriodMetrics) -> Dict:
+        """Convert PeriodMetrics dataclass to dict."""
+        return {
+            "trades": period_metrics.trades_count,
+            "trading_days": period_metrics.trading_days,
+            "start_equity": period_metrics.start_equity,
+            "end_equity": period_metrics.end_equity,
+            "total_return": period_metrics.total_return_pct,
+            "cagr": period_metrics.cagr_pct,
+            "sharpe": period_metrics.sharpe_ratio,
+            "sortino": period_metrics.sharpe_ratio * 1.2,  # Approximate
+            "max_drawdown": period_metrics.max_drawdown_pct,
+            "win_rate": period_metrics.win_rate_pct / 100.0,
+            "profit_factor": period_metrics.profit_factor,
+            "avg_win": period_metrics.avg_win,
+            "avg_loss": period_metrics.avg_loss,
+            "gross_pnl": period_metrics.gross_pnl,
+            "total_costs": period_metrics.total_costs,
+            "net_pnl": period_metrics.net_pnl,
+        }
+    
+    @property
+    def total_trades(self) -> int:
+        return self.full_metrics.trades_count
+    
+    @property
+    def winning_trades(self) -> int:
+        if self.trades_df.empty:
+            return 0
+        return len(self.trades_df[self.trades_df["net_pnl"] > 0])
+    
+    @property
+    def losing_trades(self) -> int:
+        if self.trades_df.empty:
+            return 0
+        return len(self.trades_df[self.trades_df["net_pnl"] < 0])
+    
+    @property
+    def win_rate(self) -> float:
+        return self.full_metrics.win_rate_pct / 100.0
+    
+    @property
+    def total_gross_pnl(self) -> float:
+        return self.full_metrics.gross_pnl
+    
+    @property
+    def total_costs(self) -> float:
+        return self.full_metrics.total_costs
+    
+    @property
+    def total_net_pnl(self) -> float:
+        return self.full_metrics.net_pnl
+    
+    @property
+    def profit_factor(self) -> float:
+        return self.full_metrics.profit_factor
+    
+    @property
+    def avg_trade_pnl(self) -> float:
+        if self.total_trades > 0:
+            return self.total_net_pnl / self.total_trades
+        return 0.0
+    
+    @property
+    def sharpe_ratio(self) -> float:
+        return self.full_metrics.sharpe_ratio
+    
+    @property
+    def max_drawdown(self) -> float:
+        return self.full_metrics.max_drawdown_pct / 100.0
