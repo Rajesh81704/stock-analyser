@@ -49,8 +49,8 @@ DEFAULT_USER = os.environ.get("VPS_USER", "stock")
 DEFAULT_PASS = os.environ.get("VPS_PASS", "stock")
 DEFAULT_PORT = int(os.environ.get("VPS_PORT", "22"))
 DEFAULT_REMOTE_DIR = os.environ.get("VPS_DIR", "/home/stock/stock-analyser")
-DEFAULT_APP_NAME = os.environ.get("PM2_APP", "api-server")
-HEALTH_CHECK_URL = "http://127.0.0.1:8500/api/automation/status"
+DEFAULT_APP_NAME = os.environ.get("PM2_APP", "stock-analyser")
+HEALTH_CHECK_URL = "http://127.0.0.1:8500/api/automation/capital/verify"
 
 BANNER = r"""
 ========================================================================
