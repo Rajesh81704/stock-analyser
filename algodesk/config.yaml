@@ -1,0 +1,84 @@
+# Swing Trading Algo Config - EMA Pullback + ADX Strategy
+# NSE/Nifty 500, Daily Timeframe, Long-Only, CNC Delivery
+
+# INDICATOR PARAMETERS
+indicators:
+  ema_fast: 20
+  ema_slow: 50
+  adx_len: 14
+  adx_min: 20
+  atr_len: 14
+  vol_mult: 1.5  # vs 30-day avg volume
+
+# RISK MANAGEMENT
+risk:
+  risk_pct: 0.01  # 1% per trade
+  max_position_pct: 0.20  # 20% of equity
+  max_positions: 5
+  max_per_sector: 2
+  max_open_risk: 0.05  # 5% of equity
+  min_rr: 1.5  # minimum reward/risk
+  max_stop_atr: 2.5
+
+# SETUP VALIDATION
+setup:
+  valid_days: 2
+  gap_max_atr: 0.5
+  time_stop_days: 20
+  month_dd_halt: -0.06  # -6% monthly drawdown halt
+
+# FILTERS
+filters:
+  min_traded_value_20d: 1000000  # ₹10 lakhs 20-day avg
+  skip_asm_gsm: true
+  skip_circuit_limit: 0.95  # skip if within 5% of circuit limit
+  skip_results_window_days: 3
+
+# COSTS
+costs:
+  delivery_stt: 0.001  # 0.1% on sell
+  exchange_stamp: 0.00003  # ≈3 paise per trade
+  dp_charges: 13.5  # per sell transaction
+  slippage_pct: 0.002  # 0.2% assumed
+
+# BACKTEST
+backtest:
+  universe: nifty500
+  data_source: kite
+  start_date: "2021-01-01"
+  end_date: "2024-10-30"
+  initial_capital: 100000
+  rebalance_daily: true
+  walk_forward_train: 1095  # 3 years
+  walk_forward_test: 365   # 1 year
+
+# SCHEDULE (IST)
+schedule:
+  auth_refresh: "08:45"
+  place_entries: "09:00"
+  cancel_stale: "09:00"
+  order_watch_interval_sec: 30
+  eod_ingest: "15:45"
+  eod_scan: "16:00"
+  eod_manage: "16:15"
+  eod_report: "16:30"
+  morning_reconcile: "08:30"
+
+# DATABASE
+database:
+  path: "./algodesk.db"
+  journal_mode: "WAL"
+
+# GEMINI AI (reports only, never signals)
+gemini:
+  enabled: true
+  model: "gemini-2.5-flash"
+  use_case: "daily_report"  # Only reports, events, PnL analysis
+
+# EXECUTION
+execution:
+  live_mode: false  # CRITICAL: Set to true ONLY after backtest validation
+  paper_mode: true
+  min_live_risk_pct: 0.0025  # Start at 0.25% if going live
+  max_live_risk_pct: 0.01
+  scale_live_on_match: 0.95  # Scale up if live matches backtest within 5%
