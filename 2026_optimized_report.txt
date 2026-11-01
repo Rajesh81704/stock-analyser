@@ -1,0 +1,59 @@
+
+====================================================================================================
+2026 OPTIMIZED BACKTEST REPORT (Loss Management Strategy)
+2026-11-01 23:33:54
+====================================================================================================
+
+COMPARISON
+----------------------------------------------------------------------------------------------------
+Metric                  Original 2026          Optimized 2026         Improvement
+Initial Capital         ₹1,000,000             ₹1,000,000             -
+Final Equity            ₹     771,116             ₹     750,439             ₹     -20,678
+Return                  -24.27%                -24.96%                 -0.69%
+Total Trades            381                    184                -197
+Win Rate                36.7%                  34.2%                 -2.5%
+
+SUMMARY
+----------------------------------------------------------------------------------------------------
+Initial Capital:        ₹      1,000,000
+Final Equity:           ₹        750,439
+Total PnL:              ₹       -228,884
+Return:                          -24.96%
+Max Drawdown:                     24.96%
+
+TRADES
+----------------------------------------------------------------------------------------------------
+Total Trades:                       184
+Winners:                             63 (34.2%)
+Losers:                             121
+Profit Factor:                     0.57
+Avg Trade:              ₹         -1,244
+Best:                   ₹          6,980
+Worst:                  ₹         -5,532
+
+KEY OPTIMIZATIONS APPLIED
+----------------------------------------------------------------------------------------------------
+✅ WIDER STOPS:      1.0 ATR instead of 0.5 ATR (let winners run, lose less on stops)
+✅ STRICTER ADX:     Require ADX > 25 (not 15) to avoid choppy/mean-reversion markets
+✅ PRICE ACTION:     Only enter on close > open (strong candles)
+✅ VOLUME BOOST:     Require 1.2x volume minimum
+✅ SETUP A ONLY:     Disabled Setup B (too noisy in 2026)
+✅ REDUCED RISK:     0.5% per trade (not 1%) - slower bleed
+✅ EARLIER EXIT:     15-day time stop (not 20) - exit faster
+✅ MONTHLY HALT:     -8% monthly drawdown triggers full stop
+
+EXPECTED IMPROVEMENTS
+----------------------------------------------------------------------------------------------------
+• Fewer stop hits: Wider stops = fewer false breakdowns
+• Fewer entries: Higher ADX filter = higher quality setups
+• Smaller losses: Reduced risk per trade = controlled downside
+• Earlier exits: 15-day stop = exit faster on losers
+• More targets: Better entry points = higher hit rate
+
+EXIT BREAKDOWN
+----------------------------------------------------------------------------------------------------
+STOP       | Trades: 105 | PnL: ₹    -499,853
+TARGET     | Trades:  37 | PnL: ₹     229,738
+TIME       | Trades:  42 | PnL: ₹      41,232
+
+====================================================================================================
