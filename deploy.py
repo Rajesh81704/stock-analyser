@@ -145,7 +145,7 @@ def deploy_remote_mode(args):
 
     # Step 3: Run git pull on remote VPS
     print_step("📥", f"Executing 'git pull origin main' on remote server ({args.remote_dir})...")
-    pull_cmd = f"cd {args.remote_dir} && git pull origin main"
+    pull_cmd = f"cd {args.remote_dir} && git checkout algodesk/paper_trading_logs/ && git pull origin main"
     stdin, stdout, stderr = ssh.exec_command(pull_cmd)
     out = stdout.read().decode().strip()
     err = stderr.read().decode().strip()
