@@ -1777,3 +1777,177 @@ body {
   text-shadow: 0 0 8px rgba(242, 54, 69, 0.6);
   transition: all 0.15s ease;
 }
+
+
+/* ==================== SWING PAPER TRADING STYLES ==================== */
+
+.swing-paper-metrics-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.swing-metric-box {
+  background: var(--bg-white);
+  border: 1px solid var(--border-light);
+  padding: 12px;
+  border-radius: 3px;
+  text-align: center;
+}
+
+.swing-metric-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.swing-metric-value {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  margin-bottom: 2px;
+}
+
+.swing-metric-sub {
+  font-size: 10px;
+  color: var(--accent-green);
+  font-weight: 600;
+}
+
+.swing-metric-box.negative .swing-metric-sub {
+  color: var(--accent-red);
+}
+
+.swing-section-card {
+  background: var(--bg-white);
+  border: 1px solid var(--border-light);
+  margin: 12px 0;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.swing-section-header {
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border-light);
+  padding: 10px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.swing-section-header h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.swing-count-badge {
+  background: var(--accent-green-bg);
+  color: var(--accent-green);
+  padding: 2px 8px;
+  border-radius: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid var(--accent-green);
+}
+
+.swing-positions-table tbody tr:hover,
+.swing-trades-table tbody tr:hover {
+  background: var(--accent-green-bg);
+}
+
+.swing-activity-log {
+  max-height: 250px;
+  overflow-y: auto;
+  background: var(--bg-white);
+  padding: 8px;
+}
+
+.swing-activity-item {
+  padding: 8px;
+  border-left: 3px solid var(--link-blue);
+  margin: 4px 0;
+  background: #f9f9f9;
+  font-size: 11px;
+  line-height: 1.3;
+  border-radius: 2px;
+}
+
+.swing-activity-item.success {
+  border-left-color: var(--accent-green);
+  background: var(--accent-green-bg);
+}
+
+.swing-activity-item.error {
+  border-left-color: var(--accent-red);
+  background: var(--accent-red-bg);
+}
+
+.swing-activity-time {
+  font-weight: 700;
+  color: var(--text-secondary);
+  font-size: 10px;
+  margin-right: 4px;
+}
+
+.swing-activity-msg {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.swing-control-panel {
+  display: flex;
+  gap: 8px;
+  margin: 16px 0;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.swing-control-panel .term-btn,
+.swing-control-panel .term-btn-green {
+  padding: 8px 16px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+#swing-start-btn:disabled,
+#swing-pause-btn:disabled,
+#swing-refresh-btn:disabled,
+#swing-export-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Mobile responsive for swing metrics */
+@media (max-width: 768px) {
+  .swing-paper-metrics-row {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .swing-paper-metrics-row {
+    grid-template-columns: 1fr;
+  }
+  
+  .swing-section-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  
+  .swing-control-panel {
+    flex-direction: column;
+  }
+  
+  .swing-control-panel button {
+    width: 100%;
+  }
+}

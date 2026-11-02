@@ -168,14 +168,14 @@ class EMAPullbackADXStrategy(Strategy):
         trigger = curr['high'] * 1.001
         swing_low = identify_swing_low(df, 20)
         stop = swing_low * 0.999
-        
-        # Target
-        target1 = identify_swing_high(df, 20)
-        
         # Risk/reward
         risk = trigger - stop
         if risk <= 0 or risk > self.max_stop_atr * atr:
             return None
+
+        # Target: use prior swing high or ensure minimum 1.5 R:R
+        prior_high = identify_swing_high(df.iloc[:-1], 40)
+        target1 = max(prior_high, trigger + self.min_rr * risk)
         
         rr = (target1 - trigger) / risk
         if rr < self.min_rr:
@@ -241,18 +241,18 @@ class EMAPullbackADXStrategy(Strategy):
         if curr['volume'] < self.vol_mult * avg_vol_30:
             return None
         
-        # Resistance check (use swing high)
-        resistance = identify_swing_high(df, 20)
+        # Resistance check (prior swing high excluding today's bar)
+        resistance = identify_swing_high(df.iloc[:-1], 20)
         if curr['close'] <= resistance:
             return None
         
         # Trigger and stop
         trigger = curr['high'] * 1.001
-        breakout_base = df.tail(10)['low'].min()  # Last 10 bars low
+        breakout_base = df.iloc[:-1].tail(10)['low'].min()  # Base low prior to breakout
         stop = breakout_base * 0.999
         
         # Target
-        target1 = identify_swing_high(df, 40)  # Longer term high
+        target1 = max(identify_swing_high(df.iloc[:-1], 40), trigger + self.min_rr * (trigger - stop))
         
         # Risk/reward
         risk = trigger - stop
@@ -352,7 +352,8 @@ class EMAPullbackADXStrategy(Strategy):
                     )
         
         # Time stop
-        days_held = (datetime.now().date() - pd.to_datetime(pos['entry_date']).date()).days
+        ref_date = pd.to_datetime(ctx.get('current_date', datetime.now())).date()
+        days_held = (ref_date - pd.to_datetime(pos['entry_date']).date()).days
         if days_held > ctx.get('config', {}).get('setup', {}).get('time_stop_days', 20):
             return ExitAction(
                 symbol=pos['symbol'],

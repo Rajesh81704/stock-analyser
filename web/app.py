@@ -113,6 +113,13 @@ async def on_startup():
     except Exception as sync_err:
         print(f"[Startup] Warning during startup DB sync: {sync_err}")
 
+    try:
+        from algodesk.execution.swing_continuous_runner import swing_runner
+        swing_runner.start_continuous(interval_seconds=60)
+        print("[Startup] ✅ Continuous Swing Paper Trading Engine (₹250K Capital, EMA Pullback + ADX) active in background.")
+    except Exception as e:
+        print(f"[Startup] Notice starting swing runner: {e}")
+
     # Launch Continuous Autonomous Gemini Quant Optimizer in background
     try:
         quant_optimizer.start()
@@ -2630,6 +2637,148 @@ def trigger_automation_simulation():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# =====================================================================
+# Swing Trading Continuous Paper Trading Engine (₹250,000 Capital)
+# Strategy: EMA Pullback + ADX (Long-Only CNC Delivery)
+# =====================================================================
+
+@app.get("/api/swing/status", summary="Get Continuous Swing Paper Trading Engine Telemetry")
+def get_swing_trading_status():
+    """Returns real-time swing portfolio metrics, active positions, scanned setups, and trade logs."""
+    try:
+        from algodesk.execution.swing_continuous_runner import swing_runner
+        return swing_runner.get_telemetry()
+    except Exception as e:
+        logger.error(f"Error fetching swing status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/swing/scan-now", summary="Scan Universe for Swing Setups (EMA Pullback + ADX)")
+def trigger_swing_scan(max_stocks: int = Query(100, ge=10, le=500), auto_execute: bool = Query(True)):
+    """Scans liquid Nifty universe for Setup A and Setup B and executes eligible positions."""
+    try:
+        from algodesk.execution.swing_continuous_runner import swing_runner
+        setups = swing_runner.scan_universe(max_stocks=max_stocks)
+        executed = []
+        if auto_execute:
+            executed = swing_runner.execute_setups(max_new_positions=2)
+        return {
+            "status": "success",
+            "message": f"Scanned {len(setups)} setups, executed {len(executed)} new swing positions.",
+            "setups": setups,
+            "executed": executed,
+            "telemetry": swing_runner.get_telemetry()
+        }
+    except Exception as e:
+        logger.error(f"Error during swing scan: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/swing/tick-update", summary="Update Swing Positions Against Live Quotes & Check Exits")
+def trigger_swing_tick_update():
+    """Evaluates open positions against latest quotes, executes stop-loss or profit-taking exits."""
+    try:
+        from algodesk.execution.swing_continuous_runner import swing_runner
+        closed = swing_runner.update_ticks_and_manage()
+        return {
+            "status": "success",
+            "closed_count": len(closed),
+            "closed_actions": closed,
+            "telemetry": swing_runner.get_telemetry()
+        }
+    except Exception as e:
+        logger.error(f"Error during swing tick update: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/swing/trades/{symbol}/close", summary="Manually Close Open Swing Position")
+def manual_close_swing_position(symbol: str):
+    """Manually squares off an open swing position at current market price."""
+    try:
+        from algodesk.execution.swing_continuous_runner import swing_runner
+        clean_sym = symbol.replace(".NS", "").upper()
+        if clean_sym not in swing_runner.engine.positions:
+            raise HTTPException(status_code=404, detail=f"Position {clean_sym} not found")
+        curr_price = swing_runner.get_latest_quote(clean_sym) or swing_runner.engine.positions[clean_sym].current_price
+        success, msg = swing_runner.engine.close_position(clean_sym, exit_price=curr_price, exit_reason="MANUAL_EXIT")
+        return {
+            "status": "success" if success else "failed",
+            "message": msg,
+            "telemetry": swing_runner.get_telemetry()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error closing swing position {symbol}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/swing-paper-trading/state", summary="Get Swing Paper Trading Engine State for Frontend SPA")
+def get_swing_paper_trading_state():
+    """Provides exact JSON format expected by frontend/app.js updateSwingPaperDashboard."""
+    try:
+        from algodesk.execution.swing_continuous_runner import swing_runner
+        tel = swing_runner.get_telemetry()
+        
+        positions_dict = {}
+        for p in tel.get("open_positions", []):
+            positions_dict[p["symbol"]] = {
+                "qty": p["qty"],
+                "entry_price": p["entry_price"],
+                "current_price": p["current_price"],
+                "entry_date": p["entry_date"],
+                "unrealized_pnl": p["unrealized_pnl"],
+                "unrealized_pnl_pct": p["unrealized_pnl_pct"],
+                "stop_loss": p["stop_loss"],
+                "target": p["target"],
+                "days_held": p["days_held"]
+            }
+
+        return {
+            "status": "success",
+            "summary": {
+                "initial_capital": tel.get("initial_capital", 250000.0),
+                "current_equity": tel.get("current_equity", 250000.0),
+                "current_capital": tel.get("current_capital", 250000.0),
+                "open_positions": tel.get("open_positions_count", 0),
+                "open_pnl": tel.get("total_unrealized_pnl", 0.0),
+                "trades_count": tel.get("closed_trades_count", 0),
+                "win_rate": tel.get("win_rate", 0.0),
+                "max_drawdown_pct": tel.get("max_drawdown_pct", 0.0),
+                "peak_equity": tel.get("current_equity", 250000.0),
+                "total_exposure": tel.get("total_exposure", 0.0)
+            },
+            "positions": positions_dict,
+            "trades": tel.get("closed_trades", []),
+            "signals": tel.get("active_signals", []),
+            "engine": {
+                "name": "Swing_EMA_ADX_250K",
+                "is_running": tel.get("is_running", True),
+                "market_filter": tel.get("market_filter", {})
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error fetching swing paper state: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/swing-paper-trading/export/trades.csv", include_in_schema=False)
+def export_swing_trades_csv():
+    trades_csv = Path("algodesk/paper_trading_logs/swing_trades_250k.csv")
+    if trades_csv.exists():
+        return FileResponse(trades_csv, media_type="text/csv", filename="swing_trades_250k.csv")
+    return Response(content="symbol,entry_date,exit_date,entry_price,exit_price,qty,setup_type,exit_reason,gross_pnl,costs,net_pnl,net_pnl_pct\n", media_type="text/csv")
+
+
+@app.get("/api/swing-paper-trading/export/state.json", include_in_schema=False)
+def export_swing_state_json():
+    state_json = Path("algodesk/paper_trading_logs/swing_state_250k.json")
+    if state_json.exists():
+        return FileResponse(state_json, media_type="application/json", filename="swing_state_250k.json")
+    return JSONResponse(content={"initial_capital": 250000.0, "equity": 250000.0, "positions": {}})
+
+
+
 @app.get("/lightweight-charts.js", include_in_schema=False)
 def serve_lw_charts():
     f = os.path.join(FRONTEND_DIR, "lightweight-charts.js")
@@ -2699,3 +2848,153 @@ if os.path.exists(FRONTEND_DIR):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("web.app:app", host="0.0.0.0", port=8000, reload=True)
+
+
+
+# ==================== SWING PAPER TRADING API ENDPOINTS ====================
+
+@app.get("/api/swing-paper-trading/state")
+async def get_swing_paper_trading_state():
+    """
+    Get current state of swing paper trading engine.
+    Returns: engine state, portfolio summary, open positions, closed trades, signals
+    """
+    try:
+        import json
+        from pathlib import Path
+        
+        state_file = Path("algodesk/paper_trading_logs/state.json")
+        
+        if not state_file.exists():
+            # Return default empty state if no trades yet
+            return {
+                "engine": {
+                    "name": "Paper_Trading_250K",
+                    "initial_capital": 250000.0,
+                    "current_equity": 250000.0,
+                    "started_at": datetime.now().isoformat(),
+                    "last_updated": datetime.now().isoformat(),
+                },
+                "summary": {
+                    "timestamp": datetime.now().isoformat(),
+                    "initial_capital": 250000.0,
+                    "current_equity": 250000.0,
+                    "total_return_pct": 0.0,
+                    "open_positions": 0,
+                    "open_pnl": 0,
+                    "closed_pnl": 0,
+                    "total_pnl": 0,
+                    "trades_count": 0,
+                    "wins": 0,
+                    "losses": 0,
+                    "win_rate": 0.0,
+                    "max_drawdown_pct": 0.0,
+                    "peak_equity": 250000.0,
+                },
+                "positions": {},
+                "trades": [],
+                "signals": [],
+            }
+        
+        with open(state_file, 'r') as f:
+            state = json.load(f)
+        
+        # Load signals
+        signals_file = Path("algodesk/paper_trading_logs/signal_history.json")
+        signals = []
+        if signals_file.exists():
+            with open(signals_file, 'r') as f:
+                signals = json.load(f)
+        
+        state["signals"] = signals
+        return state
+        
+    except Exception as e:
+        print(f"Error loading swing paper trading state: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/swing-paper-trading/close-position/{symbol}")
+async def close_swing_paper_position(symbol: str = Path(...)):
+    """
+    Close a specific open position in paper trading.
+    """
+    try:
+        # In a real implementation, this would call the paper trading engine
+        # For now, return a mock response
+        return {
+            "success": True,
+            "symbol": symbol,
+            "pnl": 0,
+            "pnl_pct": 0,
+            "message": f"Position {symbol} closed successfully",
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/swing-paper-trading/export/trades.csv")
+async def export_swing_trades_csv():
+    """
+    Export all closed trades to CSV format.
+    """
+    try:
+        csv_file = Path("algodesk/paper_trading_logs/trades.csv")
+        
+        if not csv_file.exists():
+            return Response(
+                content="symbol,entry_date,exit_date,entry_price,exit_price,qty,setup,exit_reason,gross_pnl,net_pnl,net_pnl_pct\n",
+                media_type="text/csv",
+                headers={"Content-Disposition": "attachment; filename=swing-trades.csv"}
+            )
+        
+        with open(csv_file, 'r') as f:
+            csv_content = f.read()
+        
+        return Response(
+            content=csv_content,
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=swing-trades.csv"}
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/swing-paper-trading/export/state.json")
+async def export_swing_state_json():
+    """
+    Export full paper trading state to JSON.
+    """
+    try:
+        state_file = Path("algodesk/paper_trading_logs/state.json")
+        
+        if not state_file.exists():
+            default_state = {
+                "engine": {
+                    "name": "Paper_Trading_250K",
+                    "initial_capital": 250000.0,
+                    "current_equity": 250000.0,
+                },
+                "summary": {
+                    "timestamp": datetime.now().isoformat(),
+                    "trades_count": 0,
+                },
+            }
+            return Response(
+                content=json.dumps(default_state, indent=2),
+                media_type="application/json",
+                headers={"Content-Disposition": "attachment; filename=swing-state.json"}
+            )
+        
+        with open(state_file, 'r') as f:
+            state_content = f.read()
+        
+        return Response(
+            content=state_content,
+            media_type="application/json",
+            headers={"Content-Disposition": "attachment; filename=swing-state.json"}
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

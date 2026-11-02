@@ -2377,3 +2377,339 @@ function switchChartPeriod(period) {
 
   loadLiveMainChart(currentChartSymbol, currentChartInterval, currentChartPeriod);
 }
+
+
+// ==================== SWING PAPER TRADING FUNCTIONS ====================
+
+let swingPaperTradingActive = false;
+let swingPaperRefreshInterval = null;
+
+/**
+ * Switch to Swing Paper Trading view
+ */
+function switchToView(viewName) {
+  if (viewName === 'swing-paper-trading') {
+    showView('swing-paper-trading-view');
+    
+    // Update nav highlight
+    document.querySelectorAll('.top-link').forEach(link => link.classList.remove('active'));
+    document.getElementById('nav-swing-paper').classList.add('active');
+    
+    // Load initial data
+    loadSwingPaperData();
+  }
+}
+
+/**
+ * Load swing paper trading data from server
+ */
+async function loadSwingPaperData() {
+  try {
+    const response = await fetch('/api/swing-paper-trading/state');
+    if (!response.ok) throw new Error('Failed to load paper trading state');
+    
+    const data = await response.json();
+    updateSwingPaperDashboard(data);
+  } catch (error) {
+    console.error('Error loading swing paper data:', error);
+    showSwingActivityLog('Error', `Failed to load data: ${error.message}`, 'error');
+  }
+}
+
+/**
+ * Update dashboard with paper trading data
+ */
+function updateSwingPaperDashboard(data) {
+  const state = data.engine || {};
+  const summary = data.summary || {};
+  
+  // Update metrics
+  const equity = summary.current_equity || 250000;
+  const initialCapital = summary.initial_capital || 250000;
+  const returnPct = ((equity - initialCapital) / initialCapital * 100).toFixed(2);
+  
+  document.getElementById('swing-equity').textContent = `₹${(equity || 0).toLocaleString('en-IN', {maximumFractionDigits: 0})}`;
+  document.getElementById('swing-equity-pct').textContent = `${returnPct > 0 ? '+' : ''}${returnPct}%`;
+  if (returnPct < 0) {
+    document.getElementById('swing-equity-pct').parentElement.classList.add('negative');
+  } else {
+    document.getElementById('swing-equity-pct').parentElement.classList.remove('negative');
+  }
+  
+  document.getElementById('swing-open-pos').textContent = summary.open_positions || 0;
+  document.getElementById('swing-open-risk').textContent = `${(summary.open_pnl || 0).toLocaleString('en-IN', {maximumFractionDigits: 0})} Open PnL`;
+  
+  document.getElementById('swing-trades').textContent = summary.trades_count || 0;
+  document.getElementById('swing-win-rate').textContent = `${(summary.win_rate || 0).toFixed(1)}% WR`;
+  
+  document.getElementById('swing-drawdown').textContent = `${(summary.max_drawdown_pct || 0).toFixed(2)}%`;
+  document.getElementById('swing-peak-equity').textContent = `Peak: ₹${(summary.peak_equity || initialCapital).toLocaleString('en-IN', {maximumFractionDigits: 0})}`;
+  
+  // Update positions table
+  updateSwingPositionsTable(data.positions || {});
+  
+  // Update trades table
+  updateSwingTradesTable(data.trades || []);
+  
+  // Update activity log
+  if (data.signals) {
+    updateSwingActivityLog(data.signals);
+  }
+}
+
+/**
+ * Update open positions table
+ */
+function updateSwingPositionsTable(positions) {
+  const tbody = document.getElementById('swing-positions-tbody');
+  
+  if (!positions || Object.keys(positions).length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="9" style="text-align: center; padding: 16px; color: #666;">
+          No open positions. Paper trading is ready to receive signals.
+        </td>
+      </tr>
+    `;
+    document.getElementById('swing-open-count').textContent = '0';
+    return;
+  }
+  
+  let html = '';
+  let count = 0;
+  
+  for (const [symbol, pos] of Object.entries(positions)) {
+    count++;
+    const unrealizedPnL = (pos.unrealized_pnl || 0).toLocaleString('en-IN', {maximumFractionDigits: 0});
+    const unrealizedPct = (pos.unrealized_pnl_pct || 0).toFixed(2);
+    const pnlColor = unrealizedPnL < 0 ? '#cc0000' : '#008000';
+    
+    html += `
+      <tr>
+        <td><strong>${symbol}</strong></td>
+        <td>${pos.qty}</td>
+        <td>₹${(pos.entry_price || 0).toFixed(2)}</td>
+        <td>₹${(pos.current_price || pos.entry_price || 0).toFixed(2)}</td>
+        <td>${pos.entry_date}</td>
+        <td style="color: ${pnlColor}; font-weight: 700;">₹${unrealizedPnL} (${unrealizedPct > 0 ? '+' : ''}${unrealizedPct}%)</td>
+        <td>₹${(pos.stop_loss || 0).toFixed(2)}</td>
+        <td>₹${(pos.target || 0).toFixed(2)}</td>
+        <td>
+          <button class="term-btn" onclick="closeSwingPosition('${symbol}')" style="padding: 3px 6px; font-size: 10px;">Close</button>
+        </td>
+      </tr>
+    `;
+  }
+  
+  tbody.innerHTML = html;
+  document.getElementById('swing-open-count').textContent = count;
+}
+
+/**
+ * Update closed trades table
+ */
+function updateSwingTradesTable(trades) {
+  const tbody = document.getElementById('swing-trades-tbody');
+  
+  if (!trades || trades.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="11" style="text-align: center; padding: 16px; color: #666;">
+          No trades yet. Paper trading awaits first signal.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+  
+  // Show last 20 trades
+  const recentTrades = trades.slice(-20).reverse();
+  let html = '';
+  
+  recentTrades.forEach((trade, idx) => {
+    const pnlColor = trade.net_pnl < 0 ? '#cc0000' : '#008000';
+    
+    html += `
+      <tr>
+        <td>${idx + 1}</td>
+        <td><strong>${trade.symbol}</strong></td>
+        <td>${trade.entry_date}</td>
+        <td>${trade.exit_date}</td>
+        <td>₹${(trade.entry_price || 0).toFixed(2)}</td>
+        <td>₹${(trade.exit_price || 0).toFixed(2)}</td>
+        <td>${trade.qty}</td>
+        <td>${trade.exit_reason}</td>
+        <td>₹${(trade.gross_pnl || 0).toLocaleString('en-IN', {maximumFractionDigits: 0})}</td>
+        <td style="color: ${pnlColor}; font-weight: 700;">₹${(trade.net_pnl || 0).toLocaleString('en-IN', {maximumFractionDigits: 0})}</td>
+        <td style="color: ${pnlColor}; font-weight: 700;">${(trade.net_pnl_pct || 0).toFixed(2)}%</td>
+      </tr>
+    `;
+  });
+  
+  tbody.innerHTML = html;
+}
+
+/**
+ * Update activity log
+ */
+function updateSwingActivityLog(signals) {
+  const activityList = document.getElementById('swing-activity-list');
+  
+  if (!signals || signals.length === 0) {
+    activityList.innerHTML = `
+      <div style="padding: 16px; text-align: center; color: #999;">
+        No recent signals. Connect to live strategy to begin trading.
+      </div>
+    `;
+    return;
+  }
+  
+  let html = '';
+  const recentSignals = signals.slice(-10).reverse();
+  
+  recentSignals.forEach(signal => {
+    const timeStr = new Date(signal.received_at).toLocaleTimeString('en-IN');
+    const isSuccess = signal.status === 'EXECUTED' || signal.status === 'success';
+    const className = isSuccess ? 'success' : 'error';
+    
+    html += `
+      <div class="swing-activity-item ${className}">
+        <span class="swing-activity-time">${timeStr}</span>
+        <span class="swing-activity-msg">
+          ${signal.symbol} - ${signal.status} @ ₹${signal.entry_price.toFixed(2)} | 
+          SL: ₹${signal.stop_loss.toFixed(2)} | TGT: ₹${signal.target.toFixed(2)}
+        </span>
+      </div>
+    `;
+  });
+  
+  activityList.innerHTML = html;
+}
+
+/**
+ * Show activity log message
+ */
+function showSwingActivityLog(type, message, className = 'success') {
+  const activityList = document.getElementById('swing-activity-list');
+  const timeStr = new Date().toLocaleTimeString('en-IN');
+  
+  const item = document.createElement('div');
+  item.className = `swing-activity-item ${className}`;
+  item.innerHTML = `
+    <span class="swing-activity-time">${timeStr}</span>
+    <span class="swing-activity-msg">${type}: ${message}</span>
+  `;
+  
+  activityList.insertBefore(item, activityList.firstChild);
+  
+  // Keep only last 20 items
+  while (activityList.children.length > 20) {
+    activityList.removeChild(activityList.lastChild);
+  }
+}
+
+/**
+ * Start live paper trading feed
+ */
+async function startSwingPaperTrading() {
+  swingPaperTradingActive = true;
+  document.getElementById('swing-start-btn').disabled = true;
+  document.getElementById('swing-pause-btn').disabled = false;
+  
+  showSwingActivityLog('System', 'Live signal feed started', 'success');
+  
+  // Refresh data every 5 seconds
+  swingPaperRefreshInterval = setInterval(() => {
+    loadSwingPaperData();
+  }, 5000);
+  
+  // Initial load
+  await loadSwingPaperData();
+}
+
+/**
+ * Pause paper trading
+ */
+function pauseSwingPaperTrading() {
+  swingPaperTradingActive = false;
+  document.getElementById('swing-start-btn').disabled = false;
+  document.getElementById('swing-pause-btn').disabled = true;
+  
+  if (swingPaperRefreshInterval) {
+    clearInterval(swingPaperRefreshInterval);
+    swingPaperRefreshInterval = null;
+  }
+  
+  showSwingActivityLog('System', 'Live signal feed paused', 'error');
+}
+
+/**
+ * Close a swing position
+ */
+async function closeSwingPosition(symbol) {
+  if (!confirm(`Close position in ${symbol}?`)) return;
+  
+  try {
+    const response = await fetch(`/api/swing-paper-trading/close-position/${symbol}`, {
+      method: 'POST'
+    });
+    
+    if (!response.ok) throw new Error('Failed to close position');
+    
+    const result = await response.json();
+    showSwingActivityLog('Position Closed', `${symbol}: ₹${result.pnl} (${result.pnl_pct}%)`, 'success');
+    
+    await loadSwingPaperData();
+  } catch (error) {
+    console.error('Error closing position:', error);
+    showSwingActivityLog('Error', `Failed to close ${symbol}`, 'error');
+  }
+}
+
+/**
+ * Export trades to CSV
+ */
+function exportSwingTradesCSV() {
+  fetch('/api/swing-paper-trading/export/trades.csv')
+    .then(response => response.blob())
+    .then(blob => {
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `swing-trades-${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      showSwingActivityLog('Export', 'Trades CSV exported successfully', 'success');
+    })
+    .catch(error => {
+      console.error('Export error:', error);
+      showSwingActivityLog('Error', 'Failed to export trades', 'error');
+    });
+}
+
+/**
+ * Export state to JSON
+ */
+function exportSwingStateJSON() {
+  fetch('/api/swing-paper-trading/export/state.json')
+    .then(response => response.blob())
+    .then(blob => {
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `swing-state-${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      showSwingActivityLog('Export', 'State JSON exported successfully', 'success');
+    })
+    .catch(error => {
+      console.error('Export error:', error);
+      showSwingActivityLog('Error', 'Failed to export state', 'error');
+    });
+}

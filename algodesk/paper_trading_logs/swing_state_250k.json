@@ -1,0 +1,17 @@
+{
+  "initial_capital": 250000.0,
+  "current_capital": 250000.0,
+  "equity": 250000.0,
+  "peak_equity": 250000.0,
+  "max_drawdown": 0.0,
+  "max_drawdown_pct": 0.0,
+  "positions": {},
+  "market_filter": {
+    "passed": true,
+    "nifty_close": 23295.0,
+    "nifty_ema50": 23164.5,
+    "checked_at": "2026-11-02 11:53:08"
+  },
+  "active_signals": [],
+  "last_updated": "2026-11-02 11:53:11"
+}

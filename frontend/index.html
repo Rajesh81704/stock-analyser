@@ -25,6 +25,7 @@
       <nav class="top-nav-links">
         <a onclick="goHome()" class="top-link active" id="nav-screener">📊 Screener</a>
         <a href="/dashboard" class="top-link" id="nav-algodesk" title="Open Algo Trading Desk (Paper)">⚡ Algo Desk</a>
+        <a onclick="switchToView('swing-paper-trading')" class="top-link" id="nav-swing-paper" title="Swing Trading Paper Dashboard (₹250K)">💹 Swing Paper</a>
         <a href="/live" class="top-link" id="nav-live" style="color: #cc0000; font-weight: 700;" title="Real Brokerage Live Trading Desk">🔴 Real Trading</a>
         <a href="/backtests" class="top-link" id="nav-backtests" title="Quant Backtester">🧪 Backtests</a>
         <a href="/strategies" class="top-link" id="nav-strategies" title="Intraday Strategies">📋 Strategies</a>
@@ -261,6 +262,127 @@
           <div id="mainStockChartContainer">
             <canvas id="mainStockChartCanvas"></canvas>
           </div>
+        </div>
+      </div>
+
+      <!-- SWING PAPER TRADING VIEW -->
+      <div id="swing-paper-trading-view" class="hidden">
+        <div class="panel-header-banner">
+          <h2>💹 Swing Paper Trading Dashboard</h2>
+          <p>EMA Pullback + ADX Strategy (NIFTY 100, Daily) | Capital: ₹250,000</p>
+        </div>
+
+        <!-- Status & Metrics Row -->
+        <div class="swing-paper-metrics-row">
+          <div class="swing-metric-box">
+            <div class="swing-metric-label">Current Equity</div>
+            <div class="swing-metric-value" id="swing-equity">₹250,000</div>
+            <div class="swing-metric-sub" id="swing-equity-pct">+0.00%</div>
+          </div>
+          <div class="swing-metric-box">
+            <div class="swing-metric-label">Open Positions</div>
+            <div class="swing-metric-value" id="swing-open-pos">0</div>
+            <div class="swing-metric-sub" id="swing-open-risk">0% Risk</div>
+          </div>
+          <div class="swing-metric-box">
+            <div class="swing-metric-label">Closed Trades</div>
+            <div class="swing-metric-value" id="swing-trades">0</div>
+            <div class="swing-metric-sub" id="swing-win-rate">0.0% WR</div>
+          </div>
+          <div class="swing-metric-box">
+            <div class="swing-metric-label">Max Drawdown</div>
+            <div class="swing-metric-value" id="swing-drawdown">0.00%</div>
+            <div class="swing-metric-sub" id="swing-peak-equity">Peak: ₹250K</div>
+          </div>
+        </div>
+
+        <!-- Active Positions Table -->
+        <div class="swing-section-card">
+          <div class="swing-section-header">
+            <h3>📊 Open Positions</h3>
+            <span class="swing-count-badge" id="swing-open-count">0</span>
+          </div>
+          <div class="table-container-box">
+            <table class="terminal-table swing-positions-table">
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Qty</th>
+                  <th>Entry Price</th>
+                  <th>Current Price</th>
+                  <th>Entry Date</th>
+                  <th>Unrealized PnL</th>
+                  <th>Stop Loss</th>
+                  <th>Target</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="swing-positions-tbody">
+                <tr>
+                  <td colspan="9" style="text-align: center; padding: 16px; color: #666;">
+                    No open positions. Paper trading is ready to receive signals.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Closed Trades History -->
+        <div class="swing-section-card">
+          <div class="swing-section-header">
+            <h3>📈 Trade History (Recent 20)</h3>
+            <button class="term-btn" onclick="exportSwingTradesCSV()" title="Export all trades to CSV">📥 Export CSV</button>
+          </div>
+          <div class="table-container-box">
+            <table class="terminal-table swing-trades-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Symbol</th>
+                  <th>Entry Date</th>
+                  <th>Exit Date</th>
+                  <th>Entry Price</th>
+                  <th>Exit Price</th>
+                  <th>Qty</th>
+                  <th>Exit Reason</th>
+                  <th>Gross PnL</th>
+                  <th>Net PnL</th>
+                  <th>Return %</th>
+                </tr>
+              </thead>
+              <tbody id="swing-trades-tbody">
+                <tr>
+                  <td colspan="11" style="text-align: center; padding: 16px; color: #666;">
+                    Loading trade history...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Signal Queue & Activity Log -->
+        <div class="swing-section-card">
+          <div class="swing-section-header">
+            <h3>📋 Recent Signals & Execution Log</h3>
+            <button class="term-btn" onclick="loadSwingPaperData()" title="Refresh from server">🔄 Refresh</button>
+          </div>
+          <div class="swing-activity-log">
+            <div id="swing-activity-list">
+              <div style="padding: 16px; text-align: center; color: #999;">
+                No recent signals. Connect to live strategy to begin trading.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Control Panel -->
+        <div class="swing-control-panel">
+          <button class="term-btn-green" onclick="startSwingPaperTrading()" id="swing-start-btn">▶ Start Live Feed</button>
+          <button class="term-btn" onclick="pauseSwingPaperTrading()" id="swing-pause-btn" disabled>⏸ Pause</button>
+          <button class="term-btn" onclick="loadSwingPaperData()" id="swing-refresh-btn">🔄 Refresh Data</button>
+          <button class="term-btn" onclick="exportSwingStateJSON()" id="swing-export-btn">📊 Export State</button>
         </div>
       </div>
     </main>

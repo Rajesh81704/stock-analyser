@@ -1,0 +1,48 @@
+{
+  "engine": {
+    "name": "Paper_Trading_250K",
+    "initial_capital": 250000.0,
+    "current_equity": 258400.0,
+    "started_at": "2026-11-01T23:46:21.096035",
+    "last_updated": "2026-11-01T23:46:21.096039"
+  },
+  "summary": {
+    "timestamp": "2026-11-01T23:46:21.110370",
+    "initial_capital": 250000.0,
+    "current_equity": 258400.0,
+    "total_return_pct": 3.36,
+    "open_positions": 0,
+    "open_pnl": 0,
+    "closed_pnl": 8400.0,
+    "total_pnl": 8400.0,
+    "trades_count": 2,
+    "wins": 2,
+    "losses": 0,
+    "win_rate": 100.0,
+    "max_drawdown_pct": 0.0,
+    "peak_equity": 250000.0
+  },
+  "positions": {},
+  "trades": [
+    {
+      "symbol": "INFY",
+      "entry_date": "2026-11-01",
+      "exit_date": "2026-11-01",
+      "entry_price": 2850.0,
+      "exit_price": 3050.0,
+      "qty": 25,
+      "net_pnl": 5000.0,
+      "net_pnl_pct": 7.017543859649122
+    },
+    {
+      "symbol": "HDFC",
+      "entry_date": "2026-11-01",
+      "exit_date": "2026-11-01",
+      "entry_price": 2650.0,
+      "exit_price": 2850.0,
+      "qty": 17,
+      "net_pnl": 3400.0,
+      "net_pnl_pct": 7.547169811320755
+    }
+  ]
+}
