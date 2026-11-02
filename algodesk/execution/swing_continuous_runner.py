@@ -297,6 +297,9 @@ class SwingContinuousRunner:
                             "trigger": round(float(setup.trigger), 2),
                             "stop": round(float(setup.stop), 2),
                             "target1": round(float(setup.target1), 2),
+                            "entry_price": round(float(setup.trigger), 2),
+                            "stop_loss": round(float(setup.stop), 2),
+                            "target": round(float(setup.target1), 2),
                             "risk": round(float(setup.risk), 2),
                             "rr": round(float(setup.rr), 2),
                             "ema20": round(float(setup.ema20), 2),
@@ -306,6 +309,7 @@ class SwingContinuousRunner:
                             "volume_ratio": round(float(setup.volume_ratio or 1.0), 2),
                             "pattern": setup.meta.get("pattern", "setup"),
                             "valid_until": (datetime.now(IST).date() + timedelta(days=2)).isoformat(),
+                            "received_at": datetime.now(IST).isoformat(),
                             "status": "OPEN"
                         }
             except Exception as e:
@@ -359,13 +363,17 @@ class SwingContinuousRunner:
                 if risk_per_share <= 0:
                     continue
 
+                # Position sizing based on total portfolio equity
+                available_cash = self.engine.equity
+                total_exposure = sum(p.qty * (p.current_price or p.entry_price) for p in self.engine.positions.values())
+                total_equity = available_cash + total_exposure
+
                 # 1% risk rule
-                equity = self.engine.equity
-                risk_amount = equity * self.strategy_config['risk']['risk_pct']
+                risk_amount = total_equity * self.strategy_config['risk']['risk_pct']
                 qty = int(risk_amount / risk_per_share)
 
-                # Cap single position at 20% of equity
-                max_position_cost = equity * self.strategy_config['risk']['max_position_pct']
+                # Cap single position at 20% of total equity
+                max_position_cost = total_equity * self.strategy_config['risk']['max_position_pct']
                 max_qty = int(max_position_cost / entry_price)
                 qty = min(qty, max_qty)
 
@@ -373,9 +381,9 @@ class SwingContinuousRunner:
                     continue
 
                 trade_cost = qty * entry_price
-                if trade_cost > self.engine.current_capital:
-                    # Scale down if capital insufficient
-                    qty = int(self.engine.current_capital / entry_price)
+                if trade_cost > available_cash:
+                    # Scale down if cash insufficient
+                    qty = int(available_cash / entry_price)
                     if qty <= 0:
                         continue
 
@@ -391,18 +399,24 @@ class SwingContinuousRunner:
                 )
 
                 if success:
-                    slots_to_fill -= 1
-                    sig["status"] = "FILLED"
-                    executed_trades.append({
-                        "symbol": sym,
-                        "qty": qty,
-                        "entry_price": entry_price,
-                        "stop_loss": stop_loss,
-                        "target": target,
-                        "setup": sig["kind"],
-                        "cost": qty * entry_price
-                    })
-                    logger.info(f"✅ EXECUTED SWING TRADE: {sym} x {qty} @ ₹{entry_price:.2f} ({sig['kind']})")
+                    order_id = list(self.engine.orders.keys())[-1]
+                    fill_success, fill_msg = self.engine.fill_order(order_id, fill_price=entry_price, fill_qty=qty)
+                    if fill_success:
+                        slots_to_fill -= 1
+                        sig["status"] = "EXECUTED"
+                        self.engine.current_capital = self.engine.equity
+                        if sym in self.engine.positions:
+                            self.engine.positions[sym].setup_type = sig["kind"]
+                        executed_trades.append({
+                            "symbol": sym,
+                            "qty": qty,
+                            "entry_price": entry_price,
+                            "stop_loss": stop_loss,
+                            "target": target,
+                            "setup": sig["kind"],
+                            "cost": qty * entry_price
+                        })
+                        logger.info(f"✅ EXECUTED & FILLED SWING TRADE: {sym} x {qty} @ ₹{entry_price:.2f} ({sig['kind']})")
 
         self._save_state()
         return executed_trades
@@ -456,13 +470,13 @@ class SwingContinuousRunner:
                     exit_price = curr_price
 
                 if exit_reason:
-                    success, msg = self.engine.close_position(
+                    success, trade = self.engine.close_position(
                         symbol=sym,
                         exit_price=exit_price,
                         exit_reason=exit_reason
                     )
-                    if success:
-                        trade = self.engine.trades[-1]
+                    if success and trade:
+                        self.engine.current_capital = self.engine.equity
                         closed_actions.append({
                             "symbol": sym,
                             "exit_reason": exit_reason,
@@ -530,14 +544,25 @@ class SwingContinuousRunner:
 
             total_closed = len(self.engine.trades)
             win_rate = (winners / total_closed * 100.0) if total_closed > 0 else 0.0
-            current_equity = self.engine.current_capital + total_exposure + total_unrealized
+            available_cash = self.engine.equity
+            self.engine.current_capital = available_cash
+            current_equity = available_cash + total_exposure
+
+            if current_equity > self.engine.peak_equity:
+                self.engine.peak_equity = current_equity
+            dd = max(0.0, self.engine.peak_equity - current_equity)
+            dd_pct = (dd / self.engine.peak_equity) * 100.0 if self.engine.peak_equity > 0 else 0.0
+            if dd_pct > self.engine.max_drawdown_pct:
+                self.engine.max_drawdown_pct = dd_pct
+                self.engine.max_drawdown = dd
+
             net_return_pct = ((current_equity - self.initial_capital) / self.initial_capital) * 100.0
 
             return {
                 "status": "success",
                 "strategy_name": "EMA Pullback + ADX (Long-Only CNC Delivery)",
                 "initial_capital": self.initial_capital,
-                "current_capital": round(self.engine.current_capital, 2),
+                "current_capital": round(available_cash, 2),
                 "current_equity": round(current_equity, 2),
                 "total_exposure": round(total_exposure, 2),
                 "total_unrealized_pnl": round(total_unrealized, 2),

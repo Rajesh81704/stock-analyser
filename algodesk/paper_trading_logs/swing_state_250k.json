@@ -1,17 +1,81 @@
 {
   "initial_capital": 250000.0,
-  "current_capital": 250000.0,
-  "equity": 250000.0,
+  "current_capital": 190941.0,
+  "equity": 190941.0,
   "peak_equity": 250000.0,
   "max_drawdown": 0.0,
   "max_drawdown_pct": 0.0,
-  "positions": {},
+  "positions": {
+    "CHENNPETRO": {
+      "symbol": "CHENNPETRO",
+      "qty": 15,
+      "entry_price": 1481.48,
+      "entry_date": "2026-11-02",
+      "stop_loss": 1323.77,
+      "target": 1718.04,
+      "current_price": 0.0,
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "setup_type": "A_pullback",
+      "days_held": 0
+    },
+    "CRISIL": {
+      "symbol": "CRISIL",
+      "qty": 8,
+      "entry_price": 4604.6,
+      "entry_date": "2026-11-02",
+      "stop_loss": 4340.65,
+      "target": 5000.52,
+      "current_price": 0.0,
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "setup_type": "A_pullback",
+      "days_held": 0
+    }
+  },
   "market_filter": {
     "passed": true,
-    "nifty_close": 23295.0,
-    "nifty_ema50": 23164.5,
-    "checked_at": "2026-11-02 11:53:08"
+    "nifty_close": 23303.2,
+    "nifty_ema50": 23164.82,
+    "checked_at": "2026-11-02 11:59:08"
   },
-  "active_signals": [],
-  "last_updated": "2026-11-02 11:53:11"
+  "active_signals": [
+    {
+      "symbol": "CHENNPETRO",
+      "date": "2026-10-22",
+      "kind": "A_pullback",
+      "trigger": 1481.48,
+      "stop": 1323.77,
+      "target1": 1718.04,
+      "risk": 157.71,
+      "rr": 1.5,
+      "ema20": 1448.59,
+      "ema50": 1402.11,
+      "adx": 23.31,
+      "atr": 90.66,
+      "volume_ratio": 1.55,
+      "pattern": "pullback_rejection",
+      "valid_until": "2026-11-04",
+      "status": "FILLED"
+    },
+    {
+      "symbol": "CRISIL",
+      "date": "2026-10-21",
+      "kind": "A_pullback",
+      "trigger": 4604.6,
+      "stop": 4340.65,
+      "target1": 5000.52,
+      "risk": 263.94,
+      "rr": 1.5,
+      "ema20": 4518.87,
+      "ema50": 4506.24,
+      "adx": 8.87,
+      "atr": 113.73,
+      "volume_ratio": 0.86,
+      "pattern": "pullback_rejection",
+      "valid_until": "2026-11-04",
+      "status": "FILLED"
+    }
+  ],
+  "last_updated": "2026-11-02 12:09:47"
 }

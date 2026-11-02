@@ -62,8 +62,10 @@ function attachCalculatedChangePct(items) {
 function showView(viewId) {
   const dirEl = document.getElementById('directory-view');
   const scanEl = document.getElementById('scanner-view');
+  const swingEl = document.getElementById('swing-paper-trading-view');
   if (dirEl) dirEl.classList.add('hidden');
   if (scanEl) scanEl.classList.add('hidden');
+  if (swingEl) swingEl.classList.add('hidden');
 
   const targetEl = document.getElementById(viewId);
   if (targetEl) {
@@ -107,6 +109,9 @@ function showView(viewId) {
 
 function goHome() {
   showView('directory-view');
+  document.querySelectorAll('.top-link').forEach(link => link.classList.remove('active'));
+  const screenerNav = document.getElementById('nav-screener');
+  if (screenerNav) screenerNav.classList.add('active');
   if (window.innerWidth <= 768) {
     switchMobileTab('home');
   }
