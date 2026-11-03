@@ -10,9 +10,19 @@ Endpoints:
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
+import logging
 import os
+import sys
+from pathlib import Path
 from typing import Any, Dict, List, Optional
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Path, Query, Request, WebSocket, WebSocketDisconnect, status
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+logger = logging.getLogger("web.app")
+
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Path as FastPath, Query, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response, RedirectResponse
 from fastapi.staticfiles import StaticFiles
