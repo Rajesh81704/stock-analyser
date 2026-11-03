@@ -12,17 +12,17 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import logging
 import os
+import pathlib
 import sys
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 logger = logging.getLogger("web.app")
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Path as FastPath, Query, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Path, Query, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -2104,11 +2104,11 @@ def get_stock_chart_with_trades(ticker: str, mode: str = "nifty500"):
     full_t = f"{clean_t}.NS"
 
     # Select cache directory based on mode
-    cache_file = Path("data/nifty500_10y_cache") / f"{full_t}.parquet"
+    cache_file = pathlib.Path("data/nifty500_10y_cache") / f"{full_t}.parquet"
     if not cache_file.exists():
-        cache_file = Path("data/top100_cache") / f"{full_t}.parquet"
+        cache_file = pathlib.Path("data/top100_cache") / f"{full_t}.parquet"
     if not cache_file.exists():
-        cache_file = Path(f"data/{clean_t}.parquet")
+        cache_file = pathlib.Path(f"data/{clean_t}.parquet")
 
     if not cache_file.exists():
         return {"status": "error", "message": f"Historical bar data not found for {ticker}"}
@@ -2803,7 +2803,7 @@ def get_swing_paper_trading_state():
 
 @app.get("/api/swing-paper-trading/export/trades.csv", include_in_schema=False)
 def export_swing_trades_csv():
-    trades_csv = Path("algodesk/paper_trading_logs/swing_trades_250k.csv")
+    trades_csv = pathlib.Path("algodesk/paper_trading_logs/swing_trades_250k.csv")
     if trades_csv.exists():
         return FileResponse(trades_csv, media_type="text/csv", filename="swing_trades_250k.csv")
     return Response(content="symbol,entry_date,exit_date,entry_price,exit_price,qty,setup_type,exit_reason,gross_pnl,costs,net_pnl,net_pnl_pct\n", media_type="text/csv")
@@ -2811,7 +2811,7 @@ def export_swing_trades_csv():
 
 @app.get("/api/swing-paper-trading/export/state.json", include_in_schema=False)
 def export_swing_state_json():
-    state_json = Path("algodesk/paper_trading_logs/swing_state_250k.json")
+    state_json = pathlib.Path("algodesk/paper_trading_logs/swing_state_250k.json")
     if state_json.exists():
         return FileResponse(state_json, media_type="application/json", filename="swing_state_250k.json")
     return JSONResponse(content={"initial_capital": 250000.0, "equity": 250000.0, "positions": {}})
