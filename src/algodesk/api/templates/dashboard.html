@@ -541,32 +541,53 @@
         </div>
       </div>
 
+      <!-- Search & Filter Bar -->
+      <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; padding: 8px 12px; margin-bottom: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+        <input 
+          type="text" 
+          id="intraday-search-input" 
+          placeholder="🔍 Search: Symbol, Side, Status... (type to filter)" 
+          class="nav-select" 
+          style="flex: 1; min-width: 200px; padding: 6px 10px; font-size: 11px; border: 1px solid #cbd5e1; border-radius: 3px; font-family: var(--font-mono);"
+          onkeyup="filterIntradayTrades(this.value)"
+        >
+        <button onclick="clearIntradaySearch()" class="term-btn" style="background:#f1f5f9; color:#1e293b; border-color:#cbd5e1; padding: 4px 10px; font-size: 10.5px; font-weight: 700;">
+          ✕ Clear
+        </button>
+        <button onclick="toggleIntradayFilter('all')" class="time-tab active" style="padding: 4px 10px; font-size: 10px;">All Trades</button>
+        <button onclick="toggleIntradayFilter('open')" class="time-tab" style="padding: 4px 10px; font-size: 10px;">Open Only</button>
+        <button onclick="toggleIntradayFilter('closed')" class="time-tab" style="padding: 4px 10px; font-size: 10px;">Closed Only</button>
+        <button onclick="toggleIntradayFilter('profitable')" class="time-tab" style="padding: 4px 10px; font-size: 10px;">Profits Only</button>
+        <button onclick="toggleIntradayFilter('losses')" class="time-tab" style="padding: 4px 10px; font-size: 10px;">Losses Only</button>
+      </div>
+
       <!-- Today's Trades Table (Open on Screen) -->
       <div class="table-container-box" style="margin: 0; max-height: 400px; min-height: 140px; overflow-y: auto;">
         <table class="terminal-table" style="font-size: 10.5px;">
           <thead style="position: sticky; top: 0; background: #f8fafc; z-index: 1;">
             <tr>
               <th style="width: 35px;">#</th>
-              <th>Time</th>
-              <th>Symbol</th>
+              <th style="min-width: 50px;">Time</th>
+              <th style="min-width: 70px; cursor: pointer;" onclick="sortIntradayTrades('symbol')">Symbol 🔤</th>
               <th>Side</th>
               <th>Qty</th>
               <th>Capital</th>
-              <th>Entry</th>
+              <th style="min-width: 70px; cursor: pointer;" onclick="sortIntradayTrades('entry')">Entry 📊</th>
               <th>Extreme (H/L)</th>
               <th>Trailed SL</th>
-              <th>Target</th>
+              <th style="min-width: 70px; cursor: pointer;" onclick="sortIntradayTrades('target')">Target 🎯</th>
               <th>Exit / Live CMP</th>
               <th>Exit Reason</th>
-              <th>Gross PnL</th>
+              <th style="cursor: pointer;" onclick="sortIntradayTrades('pnl')">Gross PnL 📈</th>
               <th>Brokerage & Tax</th>
-              <th>Net P&L (Live MTM)</th>
+              <th style="cursor: pointer;" onclick="sortIntradayTrades('net_pnl')">Net P&L 💰</th>
               <th>Status</th>
+              <th style="width: 50px;">Action</th>
             </tr>
           </thead>
           <tbody id="auto-trades-tbody">
             <tr>
-              <td colspan="16" style="text-align: center; padding: 14px; color: #64748b;">Loading today's trades...</td>
+              <td colspan="17" style="text-align: center; padding: 14px; color: #64748b;">Loading today's trades...</td>
             </tr>
           </tbody>
         </table>

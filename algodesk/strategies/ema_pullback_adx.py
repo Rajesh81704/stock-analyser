@@ -74,7 +74,7 @@ class EMAPullbackADXStrategy(Strategy):
         
         risk_cfg = config.get('risk', {})
         self.min_rr = risk_cfg.get('min_rr', 1.5)
-        self.max_stop_atr = risk_cfg.get('max_stop_atr', 2.5)
+        self.max_stop_atr = risk_cfg.get('max_stop_atr', 1.5)  # TIGHTER: was 2.5, now 1.5
         
         setup_cfg = config.get('setup', {})
         self.gap_max_atr = setup_cfg.get('gap_max_atr', 0.5)

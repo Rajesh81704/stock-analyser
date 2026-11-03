@@ -1,0 +1,54 @@
+{
+  "deployment_time": "2026-11-03T17:08:13.261910",
+  "total_capital": 250000,
+  "engine_1": {
+    "name": "EMA_Pullback_TightSL_125K",
+    "capital": 125000,
+    "strategy": "EMA Pullback + ADX",
+    "stops": "1.5 * ATR (TIGHT)",
+    "config": {
+      "indicators": {
+        "ema_fast": 20,
+        "ema_slow": 50,
+        "adx_len": 14,
+        "adx_min": 20,
+        "atr_len": 14,
+        "vol_mult": 1.5
+      },
+      "risk": {
+        "min_rr": 1.5,
+        "max_stop_atr": 1.5
+      },
+      "setup": {
+        "gap_max_atr": 0.5
+      },
+      "filters": {
+        "min_traded_value_20d": 1000000,
+        "skip_circuit_limit": 0.95
+      }
+    }
+  },
+  "engine_2": {
+    "name": "Breakout52WH_125K",
+    "capital": 125000,
+    "strategy": "52-Week High Breakout",
+    "stops": "2.0 * ATR",
+    "config": {
+      "near_high_pct": 0.04,
+      "vol_mult": 1.5
+    }
+  },
+  "validation": {
+    "target_return": "+12%",
+    "target_period": "4-8 weeks",
+    "go_live_gate": "+12% cumulative"
+  },
+  "guard_rules": {
+    "risk_per_trade": "1%",
+    "max_position": "15% equity",
+    "max_positions": 5,
+    "max_risk_total": "5% equity",
+    "max_per_sector": 2,
+    "monthly_halt": "-6%"
+  }
+}

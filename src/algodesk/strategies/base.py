@@ -13,6 +13,39 @@ from pydantic import BaseModel
 
 
 @dataclass
+class Setup:
+    """Represents a trading setup identified by a scan (Swing/Positional)."""
+    symbol: str
+    date: str
+    kind: str
+    trigger: float
+    stop: float
+    target1: float
+    risk: float
+    rr: float
+    ema20: float
+    ema50: float
+    adx: Optional[float] = None
+    atr: float = 0.0
+    volume_ratio: float = 1.0
+    meta: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def is_valid(self) -> bool:
+        return self.rr >= 1.5 and self.risk > 0
+
+
+@dataclass
+class ExitAction:
+    """Represents an exit decision from position management."""
+    symbol: str
+    action: str
+    reason: str
+    exit_price: Optional[float] = None
+    new_stop: Optional[float] = None
+
+
+@dataclass
 class OrderIntent:
     """Represents a trading intent emitted by a strategy."""
     symbol: str
