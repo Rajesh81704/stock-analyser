@@ -123,8 +123,25 @@ async def on_startup():
     except Exception as sync_err:
         print(f"[Startup] Warning during startup DB sync: {sync_err}")
 
+def _get_swing_runner():
+    """Safely retrieves the swing continuous runner instance."""
     try:
         from algodesk.execution.swing_continuous_runner import swing_runner
+        return swing_runner
+    except (ImportError, ModuleNotFoundError):
+        try:
+            from src.algodesk.execution.swing_continuous_runner import swing_runner
+            return swing_runner
+        except (ImportError, ModuleNotFoundError):
+            import importlib.util
+            runner_file = PROJECT_ROOT / "algodesk" / "execution" / "swing_continuous_runner.py"
+            spec = importlib.util.spec_from_file_location("swing_continuous_runner_safe", runner_file)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return mod.swing_runner
+
+    try:
+        swing_runner = _get_swing_runner()
         swing_runner.start_continuous(interval_seconds=60)
         print("[Startup] ✅ Continuous Swing Paper Trading Engine (₹250K Capital, EMA Pullback + ADX) active in background.")
     except Exception as e:
@@ -2656,7 +2673,7 @@ def trigger_automation_simulation():
 def get_swing_trading_status():
     """Returns real-time swing portfolio metrics, active positions, scanned setups, and trade logs."""
     try:
-        from algodesk.execution.swing_continuous_runner import swing_runner
+        swing_runner = _get_swing_runner()
         return swing_runner.get_telemetry()
     except Exception as e:
         logger.error(f"Error fetching swing status: {e}")
@@ -2667,7 +2684,7 @@ def get_swing_trading_status():
 def trigger_swing_scan(max_stocks: int = Query(100, ge=10, le=500), auto_execute: bool = Query(True)):
     """Scans liquid Nifty universe for Setup A and Setup B and executes eligible positions."""
     try:
-        from algodesk.execution.swing_continuous_runner import swing_runner
+        swing_runner = _get_swing_runner()
         setups = swing_runner.scan_universe(max_stocks=max_stocks)
         executed = []
         if auto_execute:
@@ -2688,7 +2705,7 @@ def trigger_swing_scan(max_stocks: int = Query(100, ge=10, le=500), auto_execute
 def trigger_swing_tick_update():
     """Evaluates open positions against latest quotes, executes stop-loss or profit-taking exits."""
     try:
-        from algodesk.execution.swing_continuous_runner import swing_runner
+        swing_runner = _get_swing_runner()
         closed = swing_runner.update_ticks_and_manage()
         return {
             "status": "success",
@@ -2705,7 +2722,7 @@ def trigger_swing_tick_update():
 def manual_close_swing_position(symbol: str):
     """Manually squares off an open swing position at current market price."""
     try:
-        from algodesk.execution.swing_continuous_runner import swing_runner
+        swing_runner = _get_swing_runner()
         clean_sym = symbol.replace(".NS", "").upper()
         if clean_sym not in swing_runner.engine.positions:
             raise HTTPException(status_code=404, detail=f"Position {clean_sym} not found")
@@ -2730,7 +2747,7 @@ def manual_close_swing_position(symbol: str):
 def close_swing_paper_position_spa(symbol: str):
     """Squares off a swing position and returns format expected by frontend SPA."""
     try:
-        from algodesk.execution.swing_continuous_runner import swing_runner
+        swing_runner = _get_swing_runner()
         clean_sym = symbol.replace(".NS", "").upper()
         if clean_sym not in swing_runner.engine.positions:
             raise HTTPException(status_code=404, detail=f"Position {clean_sym} not found")
@@ -2756,7 +2773,7 @@ def close_swing_paper_position_spa(symbol: str):
 def get_swing_paper_trading_state():
     """Provides exact JSON format expected by frontend/app.js updateSwingPaperDashboard."""
     try:
-        from algodesk.execution.swing_continuous_runner import swing_runner
+        swing_runner = _get_swing_runner()
         tel = swing_runner.get_telemetry()
         
         positions_dict = {}
