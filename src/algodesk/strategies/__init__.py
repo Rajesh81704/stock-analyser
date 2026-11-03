@@ -1,3 +1,11 @@
+import os
+from pathlib import Path
+
+_root = Path(__file__).resolve().parent.parent.parent.parent
+_top_strat = str(_root / "algodesk" / "strategies")
+if os.path.isdir(_top_strat) and _top_strat not in __path__:
+    __path__.append(_top_strat)
+
 from src.algodesk.strategies.base import BaseStrategy, OrderIntent
 from src.algodesk.strategies.context import StrategyContext, LookaheadViolationError
 from src.algodesk.strategies.registry import StrategyRegistry
