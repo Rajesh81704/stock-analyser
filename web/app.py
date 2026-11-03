@@ -83,6 +83,20 @@ templates_dir = pathlib.Path("src/algodesk/api/templates")
 templates = Jinja2Templates(directory=str(templates_dir))
 
 
+def _get_swing_runner():
+    """Safely retrieves the swing continuous runner instance."""
+    try:
+        from algodesk.execution.swing_continuous_runner import swing_runner
+        return swing_runner
+    except Exception:
+        import importlib.util
+        runner_file = PROJECT_ROOT / "algodesk" / "execution" / "swing_continuous_runner.py"
+        spec = importlib.util.spec_from_file_location("swing_continuous_runner_safe", runner_file)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.swing_runner
+
+
 @app.on_event("startup")
 async def on_startup():
     """
@@ -122,23 +136,6 @@ async def on_startup():
             ).start()
     except Exception as sync_err:
         print(f"[Startup] Warning during startup DB sync: {sync_err}")
-
-def _get_swing_runner():
-    """Safely retrieves the swing continuous runner instance."""
-    try:
-        from algodesk.execution.swing_continuous_runner import swing_runner
-        return swing_runner
-    except (ImportError, ModuleNotFoundError):
-        try:
-            from src.algodesk.execution.swing_continuous_runner import swing_runner
-            return swing_runner
-        except (ImportError, ModuleNotFoundError):
-            import importlib.util
-            runner_file = PROJECT_ROOT / "algodesk" / "execution" / "swing_continuous_runner.py"
-            spec = importlib.util.spec_from_file_location("swing_continuous_runner_safe", runner_file)
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            return mod.swing_runner
 
     try:
         swing_runner = _get_swing_runner()

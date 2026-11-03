@@ -104,3 +104,19 @@ class BaseStrategy(ABC):
     def on_session_end(self, ctx):
         """Called at end of session (15:30 IST) or EOD."""
         pass
+
+
+class Strategy(ABC):
+    """Abstract base for swing trading strategies."""
+    def __init__(self, name: str, config: dict):
+        self.name = name
+        self.config = config
+
+    @abstractmethod
+    def scan(self, df, ctx: dict) -> Optional[Setup]:
+        pass
+
+    @abstractmethod
+    def manage(self, pos, df, ctx: dict) -> Optional[ExitAction]:
+        pass
+
